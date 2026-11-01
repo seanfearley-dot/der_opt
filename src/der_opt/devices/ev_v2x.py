@@ -15,18 +15,24 @@ if TYPE_CHECKING:
 class V2XVehicle(Device):
     """Same SOC recursion, round-trip efficiency, and linear degradation cost as
     BatteryStorage, but bounded by a known plug-in schedule (`connected[t]`, a
-    parameter -- not a decision variable) and an optional departure SOC requirement.
-    MVP supports a single connect/disconnect window per horizon; multi-session support
-    is a documented future extension.
+    parameter -- not a decision variable) and departure SOC requirements.
+
+    `departure_period` / `soc_departure_min_frac` each accept either a single value
+    (the original single-cycle MVP shape) or a list, for a horizon spanning multiple
+    connect/disconnect cycles (e.g. a multi-day run with one departure per morning).
+    When `soc_departure_min_frac` is a single float with a list of departure_period
+    values, that same requirement applies to every departure. Without this, only the
+    first cycle's departure would be checked and every later one would silently have
+    no SOC requirement at all -- a real gap, not a hypothetical: feeding a 3-day
+    horizon a single departure_period checked only day 1's morning.
 
     `soc_final_min_frac`: same purpose as BatteryStorage's -- without it, nothing stops
     the optimizer discharging the vehicle right down to soc_min by the end of the
-    horizon for export revenue, even *after* its departure_period requirement is
+    horizon for export revenue, even *after* its last departure_period requirement is
     already satisfied earlier in the same horizon (a real finding, not hypothetical:
-    on a single-day horizon the only enforced departure is that morning's, so a later
-    V2X discharge for an evening price spike has nothing requiring it be recharged
-    afterward -- set this to require the vehicle end the horizon ready for its next
-    trip too).
+    a V2X discharge for an evening price spike, after that day's departure requirement
+    is already met, has nothing requiring it be recharged afterward -- set this to
+    require the vehicle end the horizon ready for its next trip too).
 
     `charge_sources`: optional list of SolarPV devices this vehicle may charge from --
     same instantaneous-cap mechanism and caveats as BatteryStorage's."""
@@ -44,8 +50,8 @@ class V2XVehicle(Device):
         soc_min_frac: float = 0.0,
         soc_max_frac: float = 1.0,
         soc_init_frac: float = 0.5,
-        departure_period: int | None = None,
-        soc_departure_min_frac: float | None = None,
+        departure_period: int | list[int] | None = None,
+        soc_departure_min_frac: float | list[float] | None = None,
         soc_final_min_frac: float | None = None,
         degradation_cost_per_kwh: float = 0.0,
         charge_sources: list[SolarPV] | None = None,
@@ -63,10 +69,26 @@ class V2XVehicle(Device):
         self.soc_min = soc_min_frac * capacity_kwh
         self.soc_max = soc_max_frac * capacity_kwh
         self.soc_init = soc_init_frac * capacity_kwh
-        self.departure_period = departure_period
-        self.soc_departure_min = (
-            soc_departure_min_frac * capacity_kwh if soc_departure_min_frac is not None else None
+
+        departure_periods = (
+            [] if departure_period is None
+            else list(departure_period) if isinstance(departure_period, (list, tuple))
+            else [departure_period]
         )
+        if soc_departure_min_frac is None:
+            departure_mins = [None] * len(departure_periods)
+        elif isinstance(soc_departure_min_frac, (list, tuple)):
+            if len(soc_departure_min_frac) != len(departure_periods):
+                raise ValueError(
+                    "soc_departure_min_frac list must be the same length as "
+                    f"departure_period ({len(departure_periods)}), got {len(soc_departure_min_frac)}"
+                )
+            departure_mins = [f * capacity_kwh if f is not None else None for f in soc_departure_min_frac]
+        else:
+            departure_mins = [soc_departure_min_frac * capacity_kwh] * len(departure_periods)
+        self.departure_periods = departure_periods
+        self.soc_departure_mins = departure_mins
+
         self.soc_final_min = (
             soc_final_min_frac * capacity_kwh if soc_final_min_frac is not None else None
         )
@@ -108,13 +130,27 @@ class V2XVehicle(Device):
             pyo.Constraint(self.time_grid.periods, rule=soc_dynamics_rule),
         )
 
-        if self.departure_period is not None and self.soc_departure_min is not None:
-            departure_t = self.departure_period
+        def _make_departure_rule(departure_t, soc_min):
+            # A factory, not an inline closure in the loop below: each call gets its
+            # own departure_t/soc_min cell, avoiding the classic Python late-binding
+            # bug where every rule would otherwise end up reading the *last*
+            # iteration's values. The inner rule takes a single arg (matching every
+            # other scalar-Constraint rule in this codebase) -- Pyomo's own calling
+            # convention for a scalar Constraint passes a second (None) positional
+            # arg, which collided with an earlier attempt to capture via a default
+            # keyword argument instead of this factory.
+            def rule(_m):
+                return self.soc[departure_t] >= soc_min
 
-            def departure_rule(_m):
-                return self.soc[departure_t] >= self.soc_departure_min
+            return rule
 
-            model.add_component(self._component_name("departure_soc"), pyo.Constraint(rule=departure_rule))
+        for idx, (departure_t, soc_min) in enumerate(zip(self.departure_periods, self.soc_departure_mins)):
+            if soc_min is None:
+                continue
+            model.add_component(
+                self._component_name(f"departure_soc_{idx}"),
+                pyo.Constraint(rule=_make_departure_rule(departure_t, soc_min)),
+            )
 
         if self.soc_final_min is not None:
             final_t = self.time_grid.horizon_steps

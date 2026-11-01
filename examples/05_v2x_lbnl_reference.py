@@ -1,4 +1,4 @@
-"""V2X EV, no solar: one day of real PG&E residential load (LBNL Phase 4, a cluster
+"""V2X EV, no solar: DAYS days of real PG&E residential load (LBNL Phase 4, a cluster
 with pv_penetration=0.0) against a vehicle sized and scheduled from the user's own
 ev-daily-charging-model project, exporting at real PG&E 2026 NBT rates. Compares
 optimal (price-aware, can discharge back to the grid) against a rule-based "charge at
@@ -9,9 +9,9 @@ Run: python examples/05_v2x_lbnl_reference.py
 Needs /Users/seanearley/Documents/LBNL_Phase_4 and
 /Users/seanearley/claude runs/ev-daily-charging-model (neither is part of this repo).
 
-Single-day horizon: V2XVehicle supports one connect/disconnect cycle per horizon (see
-its docstring), so a multi-day week would only get one enforced morning departure --
-one day keeps the departure-SOC requirement meaningful.
+Multi-day horizon: V2XVehicle's departure_period/soc_departure_min_frac both accept a
+list, one entry per morning -- without that, a multi-day horizon would only enforce the
+*first* morning's departure SOC requirement and silently have none for the rest.
 """
 
 from __future__ import annotations
@@ -44,11 +44,12 @@ EV_MODEL_DIR = "/Users/seanearley/claude runs/ev-daily-charging-model"
 NBT_EEC_CSV = Path(__file__).parent / "data" / "pge_nbt_eec_2026.csv"
 OUTPUT_DIR = Path(__file__).parent / "outputs"
 START_HOUR_ENDING = 24 * (31 + 28 + 31 + 30 + 31 + 30 + 14) + 1  # mid-July
+DAYS = 3
 
 
 def main() -> None:
     OUTPUT_DIR.mkdir(exist_ok=True)
-    time_grid = TimeGrid(resolution_minutes=60, horizon_steps=24, start=datetime(2025, 7, 15))
+    time_grid = TimeGrid(resolution_minutes=60, horizon_steps=24 * DAYS, start=datetime(2025, 7, 15))
 
     load_kw = premise_net_load_kw(LBNL_SCENARIO_DIR, CLUSTER_NAME, time_grid, start_hour_ending=START_HOUR_ENDING)
     print(f"Cluster: {CLUSTER_NAME} (no solar)")
@@ -60,8 +61,13 @@ def main() -> None:
         f"{EV_MODEL_DIR}/excel_build/raw_arrivals.csv", f"{EV_MODEL_DIR}/excel_build/raw_departures.csv"
     )
     connected = connected_schedule(time_grid, arrival_hour, departure_hour)
+    # connected_schedule is hour-of-day based, so it already repeats correctly across
+    # DAYS days. departure_period needs the explicit list of every morning's absolute
+    # period, though -- one entry per day, not just the first.
+    departure_periods = [24 * day + departure_hour for day in range(DAYS)]
     print(f"\nEV: capacity={device_params['capacity_kwh']:.1f} kWh, charger={device_params['p_max_charge_kw']:.1f} kW")
     print(f"Plug-in window (from real PSRC arrival/departure data): home {arrival_hour}:00-{departure_hour}:00")
+    print(f"Departures enforced at hours: {departure_periods}")
 
     # soc_final_min_frac matters here as much as departure_period does: without it,
     # nothing stops the optimizer draining the vehicle toward empty for export revenue
@@ -78,7 +84,7 @@ def main() -> None:
         "ev", time_grid, capacity_kwh=device_params["capacity_kwh"],
         p_max_charge_kw=device_params["p_max_charge_kw"], p_max_discharge_kw=device_params["p_max_charge_kw"],
         connected=connected, eta_charge=0.95, eta_discharge=0.95, soc_init_frac=0.5,
-        departure_period=departure_hour, soc_departure_min_frac=device_params["customer_target_soc_frac"],
+        departure_period=departure_periods, soc_departure_min_frac=device_params["customer_target_soc_frac"],
         soc_final_min_frac=device_params["customer_target_soc_frac"],
         degradation_cost_per_kwh=0.02,  # illustrative, not sourced from the EV model project
     )
@@ -101,8 +107,9 @@ def main() -> None:
     for label, value in value_breakdown(premise, dispatch).items():
         print(f"  {label}: ${value:.2f}")
     required_soc = device_params["customer_target_soc_frac"] * device_params["capacity_kwh"]
-    print(f"  departure SOC: {dispatch.device_dispatch['ev.soc'].iloc[departure_hour]:.1f} kWh "
-          f"(customer target >= {required_soc:.1f})")
+    for day, departure_t in enumerate(departure_periods):
+        print(f"  day {day + 1} departure (hour {departure_t}) SOC: {pyo.value(ev.soc[departure_t]):.1f} kWh "
+              f"(customer target >= {required_soc:.1f})")
     print(f"  end-of-horizon SOC: {pyo.value(ev.soc[time_grid.horizon_steps]):.1f} kWh "
           f"(customer target >= {required_soc:.1f})")
 
