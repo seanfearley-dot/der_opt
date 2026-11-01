@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "der-opt"
+version = "0.1.0"
+description = "Toolkit for modeling and optimizing distributed energy resources (DERs) under resource-specific constraints"
+requires-python = ">=3.9"
+dependencies = [
+    "pyomo>=6.7",
+    "highspy",
+    "pandas",
+    "numpy",
+    "pydantic>=2",
+    "pyyaml",
+    "typer",
+    "matplotlib",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "ruff",
+]
+lmp = [
+    "gridstatus",
+]
+validation = [
+    "NREL-PySAM",
+]
+
+[project.scripts]
+der-opt = "der_opt.cli.main:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/der_opt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
