@@ -62,10 +62,26 @@ def connected_schedule(time_grid: TimeGrid, arrival_hour: int, departure_hour: i
     )
 
 
-def charging_device_params(model_params: dict, family: str = "weibull") -> dict:
-    """capacity_kwh / p_max_charge_kw sized from this model's fitted output, plus the
-    p50 daily charging energy need -- a reasonable soc_departure_min_frac starting
-    point is daily_charge_kwh_p50 / capacity_kwh."""
+def charging_device_params(
+    model_params: dict, family: str = "weibull", customer_target_soc_frac: float = 0.8
+) -> dict:
+    """capacity_kwh / p_max_charge_kw sized from this model's fitted output.
+
+    Returns two different SOC fractions -- don't use them interchangeably:
+    - `technical_min_departure_frac` = daily_charge_kwh_p50 / capacity_kwh: the bare
+      feasibility floor, the least charge that covers a *typical* day's driving. This
+      is a statistical minimum, not what a real owner expects to see -- using it as a
+      V2X device's soc_departure_min_frac/soc_final_min_frac lets the optimizer run the
+      battery down toward it for export revenue, which is technically feasible but not
+      what a customer who expects their car charged would tolerate.
+    - `customer_target_soc_frac` (default 0.8, i.e. 80%): a stand-in for what an owner
+      actually expects by departure -- daily charging to ~80% (not 100%) is common
+      guidance for battery longevity, with 100% reserved for known long trips. This,
+      not the technical minimum, is the realistic value for soc_departure_min_frac/
+      soc_final_min_frac in a scenario meant to respect customer expectations. Override
+      the argument if a different target fits the scenario (e.g. a fleet vehicle with
+      no "customer" to satisfy might reasonably use technical_min_departure_frac
+      instead)."""
     charging = model_params["charging"][family]
     daily_kwh_p50 = model_params["simulated_summary"][family]["daily_charge_kwh_p50"]
     capacity_kwh = charging["battery_kwh"]
@@ -74,7 +90,8 @@ def charging_device_params(model_params: dict, family: str = "weibull") -> dict:
         "p_max_charge_kw": charging["charger_kw"],
         "p_max_discharge_kw": charging["charger_kw"],
         "daily_charge_kwh_p50": daily_kwh_p50,
-        "soc_departure_min_frac": min(daily_kwh_p50 / capacity_kwh, 1.0),
+        "technical_min_departure_frac": min(daily_kwh_p50 / capacity_kwh, 1.0),
+        "customer_target_soc_frac": customer_target_soc_frac,
     }
 
 

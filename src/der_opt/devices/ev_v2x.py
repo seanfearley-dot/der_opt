@@ -19,6 +19,15 @@ class V2XVehicle(Device):
     MVP supports a single connect/disconnect window per horizon; multi-session support
     is a documented future extension.
 
+    `soc_final_min_frac`: same purpose as BatteryStorage's -- without it, nothing stops
+    the optimizer discharging the vehicle right down to soc_min by the end of the
+    horizon for export revenue, even *after* its departure_period requirement is
+    already satisfied earlier in the same horizon (a real finding, not hypothetical:
+    on a single-day horizon the only enforced departure is that morning's, so a later
+    V2X discharge for an evening price spike has nothing requiring it be recharged
+    afterward -- set this to require the vehicle end the horizon ready for its next
+    trip too).
+
     `charge_sources`: optional list of SolarPV devices this vehicle may charge from --
     same instantaneous-cap mechanism and caveats as BatteryStorage's."""
 
@@ -37,6 +46,7 @@ class V2XVehicle(Device):
         soc_init_frac: float = 0.5,
         departure_period: int | None = None,
         soc_departure_min_frac: float | None = None,
+        soc_final_min_frac: float | None = None,
         degradation_cost_per_kwh: float = 0.0,
         charge_sources: list[SolarPV] | None = None,
     ):
@@ -56,6 +66,9 @@ class V2XVehicle(Device):
         self.departure_period = departure_period
         self.soc_departure_min = (
             soc_departure_min_frac * capacity_kwh if soc_departure_min_frac is not None else None
+        )
+        self.soc_final_min = (
+            soc_final_min_frac * capacity_kwh if soc_final_min_frac is not None else None
         )
         self.degradation_cost_per_kwh = degradation_cost_per_kwh
         self.charge_sources = list(charge_sources) if charge_sources else []
@@ -102,6 +115,14 @@ class V2XVehicle(Device):
                 return self.soc[departure_t] >= self.soc_departure_min
 
             model.add_component(self._component_name("departure_soc"), pyo.Constraint(rule=departure_rule))
+
+        if self.soc_final_min is not None:
+            final_t = self.time_grid.horizon_steps
+
+            def soc_final_rule(_m):
+                return self.soc[final_t] >= self.soc_final_min
+
+            model.add_component(self._component_name("soc_final"), pyo.Constraint(rule=soc_final_rule))
 
         if self.charge_sources:
             # See BatteryStorage.build_constraints for the full rationale and caveats

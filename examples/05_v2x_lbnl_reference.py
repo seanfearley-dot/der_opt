@@ -19,6 +19,8 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+import pyomo.environ as pyo
+
 from der_opt.devices import V2XVehicle
 from der_opt.integrations.ev_profile import (
     charging_device_params,
@@ -61,11 +63,23 @@ def main() -> None:
     print(f"\nEV: capacity={device_params['capacity_kwh']:.1f} kWh, charger={device_params['p_max_charge_kw']:.1f} kW")
     print(f"Plug-in window (from real PSRC arrival/departure data): home {arrival_hour}:00-{departure_hour}:00")
 
+    # soc_final_min_frac matters here as much as departure_period does: without it,
+    # nothing stops the optimizer draining the vehicle toward empty for export revenue
+    # *after* the one enforced morning departure is already satisfied -- a real finding
+    # from an earlier run of this script, not a hypothetical.
+    #
+    # Both use customer_target_soc_frac, NOT technical_min_departure_frac: the latter
+    # is a bare statistical feasibility floor (just enough for a *typical* day's
+    # driving), not what an EV owner actually expects to see at departure. Using the
+    # technical minimum as the constraint lets the optimizer run the battery down to
+    # ~10% for export revenue -- feasible, but not what a real customer would tolerate.
+    # customer_target_soc_frac (80% by default) is the realistic stand-in.
     ev = V2XVehicle(
         "ev", time_grid, capacity_kwh=device_params["capacity_kwh"],
         p_max_charge_kw=device_params["p_max_charge_kw"], p_max_discharge_kw=device_params["p_max_charge_kw"],
         connected=connected, eta_charge=0.95, eta_discharge=0.95, soc_init_frac=0.5,
-        departure_period=departure_hour, soc_departure_min_frac=device_params["soc_departure_min_frac"],
+        departure_period=departure_hour, soc_departure_min_frac=device_params["customer_target_soc_frac"],
+        soc_final_min_frac=device_params["customer_target_soc_frac"],
         degradation_cost_per_kwh=0.02,  # illustrative, not sourced from the EV model project
     )
 
@@ -86,8 +100,11 @@ def main() -> None:
     print(f"\nOptimal dispatch: status={dispatch.solver_status}, objective=${dispatch.objective_value:.2f}")
     for label, value in value_breakdown(premise, dispatch).items():
         print(f"  {label}: ${value:.2f}")
+    required_soc = device_params["customer_target_soc_frac"] * device_params["capacity_kwh"]
     print(f"  departure SOC: {dispatch.device_dispatch['ev.soc'].iloc[departure_hour]:.1f} kWh "
-          f"(required >= {device_params['soc_departure_min_frac'] * device_params['capacity_kwh']:.1f})")
+          f"(customer target >= {required_soc:.1f})")
+    print(f"  end-of-horizon SOC: {pyo.value(ev.soc[time_grid.horizon_steps]):.1f} kWh "
+          f"(customer target >= {required_soc:.1f})")
 
     counterfactual = CounterfactualSimulator(
         premise, policies={"ev": RuleBasedEVChargingPolicy(

@@ -42,7 +42,24 @@ def test_charging_device_params_from_model():
     device_params = charging_device_params(params, family="weibull")
     assert device_params["capacity_kwh"] == pytest.approx(75.0)
     assert device_params["p_max_charge_kw"] == pytest.approx(7.2)
-    assert device_params["soc_departure_min_frac"] == pytest.approx(7.5 / 75.0)
+    # the bare statistical feasibility floor (covers a typical day's driving) --
+    # distinct from what a customer actually expects to see, below
+    assert device_params["technical_min_departure_frac"] == pytest.approx(7.5 / 75.0)
+
+
+def test_charging_device_params_customer_target_defaults_to_80_percent():
+    params = load_model_params(FIXTURE_DIR / "model_params.json")
+    device_params = charging_device_params(params, family="weibull")
+    assert device_params["customer_target_soc_frac"] == pytest.approx(0.8)
+    # the realistic customer-expectation target should sit well above the bare
+    # technical minimum -- if it didn't, this distinction wouldn't matter in practice
+    assert device_params["customer_target_soc_frac"] > device_params["technical_min_departure_frac"]
+
+
+def test_charging_device_params_customer_target_is_overridable():
+    params = load_model_params(FIXTURE_DIR / "model_params.json")
+    device_params = charging_device_params(params, family="weibull", customer_target_soc_frac=1.0)
+    assert device_params["customer_target_soc_frac"] == pytest.approx(1.0)
 
 
 def test_reference_charging_profile_has_24_hours():
