@@ -83,6 +83,9 @@ class BatteryStorage(Device):
     def net_power_expr(self, model: pyo.ConcreteModel, t: int):
         return self.p_dis[t] - self.p_ch[t]
 
+    def initial_state(self) -> dict:
+        return {"soc": self.soc_init}
+
     def cost_expr(self, model: pyo.ConcreteModel, t: int):
         dt = self.time_grid.dt_hours
         return self.degradation_cost_per_kwh * (self.p_ch[t] + self.p_dis[t]) * dt

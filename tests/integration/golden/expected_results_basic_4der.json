@@ -10,6 +10,7 @@
     "ev_charger.n_blocks": 192.0,
     "ev_charger.net_power": 0.0,
     "ev_charger.p_served": 0.0,
+    "solar.net_power": 183.2810399216643,
     "solar.p_gen": 183.2810399216643
   },
   "duals_exact_flags": {

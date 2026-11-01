@@ -39,4 +39,5 @@ class SolarPV(Device):
         return {"p_gen": p_gen, "net_power": p_gen}
 
     def dispatch_series(self, model: pyo.ConcreteModel) -> dict[str, np.ndarray]:
-        return {"p_gen": np.array([pyo.value(self.p_gen[t]) for t in self.time_grid.periods])}
+        p_gen = np.array([pyo.value(self.p_gen[t]) for t in self.time_grid.periods])
+        return {"p_gen": p_gen, "net_power": p_gen}

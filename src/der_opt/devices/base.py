@@ -55,6 +55,11 @@ class Device(ABC):
         self.build_vars(model)
         self.build_constraints(model)
 
+    def initial_state(self) -> dict[str, Any]:
+        """Starting state for the numeric step() path (e.g. {"soc": ...} for a
+        battery). Default: no persistent state (solar, curtailable load)."""
+        return {}
+
     @abstractmethod
     def step(self, state: dict[str, Any], action: dict[str, Any]) -> dict[str, Any]:
         """Pure-numeric physics update for one period, evaluated as plain floats — the

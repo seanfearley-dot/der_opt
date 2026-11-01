@@ -88,6 +88,9 @@ class SmartThermostat(Device):
     def net_power_expr(self, model: pyo.ConcreteModel, t: int):
         return -self.p_hvac[t]
 
+    def initial_state(self) -> dict:
+        return {"temp": self.initial_temp_c}
+
     def step(self, state: dict, action: dict) -> dict:
         t = state["t"]
         dt = self.time_grid.dt_hours
