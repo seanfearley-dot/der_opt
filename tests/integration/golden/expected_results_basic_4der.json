@@ -1,0 +1,35 @@
+{
+  "device_column_sums": {
+    "ac.net_power": -32.70310483304132,
+    "ac.p_hvac": 32.70310483304132,
+    "ac.temp": 2187.203607315073,
+    "battery.net_power": -4.409999999999997,
+    "battery.p_ch": 56.25,
+    "battery.p_dis": 51.84,
+    "battery.soc": 541.7293372928182,
+    "ev_charger.n_blocks": 192.0,
+    "ev_charger.net_power": 0.0,
+    "ev_charger.p_served": 0.0,
+    "solar.p_gen": 183.2810399216643
+  },
+  "duals_exact_flags": {
+    "ac_comfort_band": false,
+    "ac_temp_dynamics": false,
+    "ac_temp_init": false,
+    "battery_soc_dynamics": false,
+    "battery_soc_final": false,
+    "battery_soc_init": false,
+    "ev_charger_served": false,
+    "golden_house_poi_balance": false
+  },
+  "grid_export_sum": 52.16248557796217,
+  "grid_import_sum": 49.994550489339176,
+  "objective_value": 6.713658942615469,
+  "poi_balance_dual_sample": {
+    "0": 0.12,
+    "40": 0.04,
+    "80": 0.22,
+    "95": 0.22
+  },
+  "solver_status": "TerminationCondition.optimal"
+}

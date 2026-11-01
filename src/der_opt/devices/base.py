@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
+import numpy as np
 import pyomo.environ as pyo
 
 from der_opt.time_grid import TimeGrid
@@ -64,3 +65,10 @@ class Device(ABC):
         quantities a caller needs (e.g. net power), under the same keys build_constraints'
         variables use, so results assembly doesn't need device-specific branching."""
         raise NotImplementedError
+
+    def dispatch_series(self, model: pyo.ConcreteModel) -> dict[str, np.ndarray]:
+        """Named arrays of this device's solved variables, for results/viz assembly.
+        Default exposes only net power; concrete devices override to add detail (e.g.
+        a battery adds p_ch/p_dis/soc)."""
+        values = np.array([pyo.value(self.net_power_expr(model, t)) for t in self.time_grid.periods])
+        return {"net_power": values}
