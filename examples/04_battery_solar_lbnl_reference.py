@@ -1,7 +1,11 @@
 """Battery + solar, on real reference data: a week of load and behind-the-meter PV from
 a real LBNL-LOAD Phase 4 PG&E residential cluster (see der_opt.integrations.lbnl_load),
-under a simple TOU tariff. Shows the optimizer's battery dispatch against the cluster's
-own real solar profile, and the value of optimizing vs. a self-consumption baseline.
+exporting at PG&E's real published 2026 Net Billing Tariff (NEM 3.0) export credit
+rates (see der_opt.integrations.pge_nbt_export) -- import price is still an
+illustrative flat/TOU placeholder, not a real PG&E import tariff (that's a separate
+piece of real data this example doesn't yet pull in). Shows the optimizer's battery
+dispatch against the cluster's own real solar profile, and the value of optimizing vs.
+a self-consumption baseline.
 
 Run: python examples/04_battery_solar_lbnl_reference.py
 Needs /Users/seanearley/Documents/LBNL_Phase_4 (not part of this repo).
@@ -13,7 +17,11 @@ from datetime import datetime
 from pathlib import Path
 
 from der_opt.devices import BatteryStorage, SolarPV
-from der_opt.integrations.lbnl_load import premise_gross_load_kw, premise_solar_available_kw
+from der_opt.integrations.lbnl_load import (
+    premise_gross_load_kw,
+    premise_solar_available_kw,
+)
+from der_opt.integrations.pge_nbt_export import NBTExportPriceSeries
 from der_opt.premise import EnergyArbitrage, Premise
 from der_opt.pricing import CSVPriceSeries, value_breakdown
 from der_opt.simulation import CounterfactualSimulator, SelfConsumptionBatteryPolicy
@@ -25,6 +33,7 @@ LBNL_SCENARIO_DIR = "/Users/seanearley/Documents/LBNL_Phase_4/anonymized-1in2-mi
 # -- see list_clusters(LBNL_SCENARIO_DIR, sector="res") for other segments.
 CLUSTER_NAME = "res-pge-res_unknown-allSize-hot_dry-nonCare-NoLCA-AllDay-0_50pct"
 
+NBT_EEC_CSV = Path(__file__).parent / "data" / "pge_nbt_eec_2026.csv"
 OUTPUT_DIR = Path(__file__).parent / "outputs"
 DAYS = 7
 START_HOUR_ENDING = 24 * (31 + 28 + 31 + 30 + 31 + 30 + 14) + 1  # mid-July, a hot_dry climate cluster
@@ -55,14 +64,23 @@ def main() -> None:
     )
     solar = SolarPV("solar", time_grid, available_kw=solar_kw)
 
-    # a simple illustrative TOU tariff: cheap overnight, expensive 4-9pm, mid otherwise
+    # Import price: still an illustrative flat/TOU placeholder (cheap overnight,
+    # expensive 4-9pm, mid otherwise) -- a real PG&E import tariff isn't wired in yet.
+    # Export price: PG&E's real 2026 NBT export credit rates. NBTExportPriceSeries
+    # looks up by month/hour/weekday only (no calendar year), so pairing this 2026
+    # vintage rate table with 2025-dated LBNL timestamps is fine for illustration.
     hours_of_day = [ts.hour for ts in time_grid.timestamps()]
     import_price = [0.45 if 16 <= h < 21 else (0.12 if h < 6 else 0.22) for h in hours_of_day]
-    stream = EnergyArbitrage(CSVPriceSeries(import_price), CSVPriceSeries([0.08] * len(hours_of_day)), time_grid)
+    export_price = NBTExportPriceSeries(NBT_EEC_CSV)
+    stream = EnergyArbitrage(CSVPriceSeries(import_price), export_price, time_grid)
 
+    # Real NBT export rates can spike above the illustrative import price for a few
+    # summer-evening hours (see pge_nbt_export's module docstring) -- exactly the case
+    # Premise's exclusive_import_export guards against (grid import=export at the same
+    # period for free arbitrage with no real energy flow; see test_premise_poi.py).
     premise = Premise(
         "lbnl_reference_house", time_grid, devices=[battery, solar], value_streams=[stream],
-        external_load=load_kw, poi_limit_kw=15.0,
+        external_load=load_kw, poi_limit_kw=15.0, exclusive_import_export=True,
     )
 
     dispatch, model, backend = premise.solve()
