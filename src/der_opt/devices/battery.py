@@ -115,9 +115,13 @@ class BatteryStorage(Device):
 
     def dispatch_series(self, model: pyo.ConcreteModel) -> dict[str, np.ndarray]:
         periods = self.time_grid.periods
+        p_ch = np.array([pyo.value(self.p_ch[t]) for t in periods])
+        p_dis = np.array([pyo.value(self.p_dis[t]) for t in periods])
+        dt = self.time_grid.dt_hours
         return {
-            "p_ch": np.array([pyo.value(self.p_ch[t]) for t in periods]),
-            "p_dis": np.array([pyo.value(self.p_dis[t]) for t in periods]),
+            "p_ch": p_ch,
+            "p_dis": p_dis,
             "soc": np.array([pyo.value(self.soc[t]) for t in periods]),
-            "net_power": np.array([pyo.value(self.p_dis[t] - self.p_ch[t]) for t in periods]),
+            "net_power": p_dis - p_ch,
+            "cost": self.degradation_cost_per_kwh * (p_ch + p_dis) * dt,
         }

@@ -231,6 +231,28 @@ class TariffEnergyCharge(ValueStream):
             return -tier_cost
         return tier_cost
 
+    def evaluate_numeric(self, grid_import, grid_export, time_grid: TimeGrid) -> float:
+        """Numeric counterpart to apply()/cost_expr: for each period, greedily fills
+        tiers cheapest-first from the realized energy (bus_power * dt) -- the same
+        allocation a cost-minimizing LP converges to, so this reproduces cost_expr's
+        value exactly for an optimized dispatch, and prices a non-optimal
+        (CounterfactualSimulator) dispatch consistently with the same tariff."""
+        dt = time_grid.dt_hours
+        bus = grid_import if self.direction == "import" else grid_export
+        total = 0.0
+        for t in time_grid.periods:
+            remaining_kwh = bus[t] * dt
+            prev_max = 0.0
+            for tier in self.tariff.energy_periods[self._period_index[t]]:
+                width = (tier.max_kwh - prev_max) if tier.max_kwh is not None else float("inf")
+                allocated = min(remaining_kwh, width)
+                total += tier.rate * allocated
+                remaining_kwh -= allocated
+                prev_max = tier.max_kwh if tier.max_kwh is not None else prev_max
+                if remaining_kwh <= 0:
+                    break
+        return float(-total if self.direction == "export" else total)
+
 
 class DemandCharge(ValueStream):
     """cost = rate_per_kw * peak_demand, where peak_demand >= grid_import[t] for every
@@ -258,6 +280,9 @@ class DemandCharge(ValueStream):
     def total_cost_expr(self, model: pyo.ConcreteModel, premise: Premise):
         return self.rate_per_kw * self.peak_demand
 
+    def evaluate_numeric(self, grid_import, grid_export, time_grid: TimeGrid) -> float:
+        return float(self.rate_per_kw * np.max(grid_import))
+
 
 class CapacityReliabilityPayment(ValueStream):
     """Revenue for committing to have at least `committed_kw` of reducible/dischargeable
@@ -273,3 +298,6 @@ class CapacityReliabilityPayment(ValueStream):
 
     def total_cost_expr(self, model: pyo.ConcreteModel, premise: Premise):
         return -self.payment_per_kw_event * self.committed_kw * len(self.event_periods)
+
+    def evaluate_numeric(self, grid_import, grid_export, time_grid: TimeGrid) -> float:
+        return float(-self.payment_per_kw_event * self.committed_kw * len(self.event_periods))

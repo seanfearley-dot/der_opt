@@ -62,11 +62,6 @@ class CounterfactualSimulator:
                 device_power_total += result.get("net_power", 0.0)
                 total_device_cost += result.get("cost", 0.0)
                 for key, value in result.items():
-                    # "cost" is aggregated into total_device_cost above, not exposed as
-                    # a per-period column -- matches the optimizer's dispatch_series(),
-                    # which likewise doesn't expose a per-period cost series.
-                    if key == "cost":
-                        continue
                     device_series[device.name].setdefault(key, []).append(value)
 
                 state.device_states[device.name] = result

@@ -3,6 +3,7 @@
     "ac.net_power": -32.70310483304132,
     "ac.p_hvac": 32.70310483304132,
     "ac.temp": 2187.203607315073,
+    "battery.cost": 0.4053375,
     "battery.net_power": -4.409999999999997,
     "battery.p_ch": 56.25,
     "battery.p_dis": 51.84,

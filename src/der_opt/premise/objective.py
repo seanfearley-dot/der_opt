@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import pyomo.environ as pyo
 
 from der_opt.pricing.sources import PriceSeries
@@ -34,6 +35,16 @@ class ValueStream(ABC):
     def total_cost_expr(self, model: pyo.ConcreteModel, premise: Premise) -> Any:
         return sum(self.cost_expr(model, premise, t) for t in model.T)
 
+    def evaluate_numeric(self, grid_import: np.ndarray, grid_export: np.ndarray, time_grid: TimeGrid) -> float:
+        """Numeric counterpart to total_cost_expr, evaluated against realized (plain
+        array, non-Pyomo) import/export rather than Pyomo variables. This is what lets
+        der_opt.pricing.evaluate.value_breakdown price *any* DispatchResult -- whether
+        from Premise.solve() or CounterfactualSimulator.run() -- using the same
+        economic logic as the optimization itself, instead of a second, divergence-
+        prone implementation in viz code. Default: not supported; override for a
+        stream whose cost depends only on the bus arrays (most do)."""
+        raise NotImplementedError(f"{type(self).__name__} does not support evaluate_numeric")
+
 
 class EnergyArbitrage(ValueStream):
     """Energy import/export cost against two independent, possibly time-varying price
@@ -48,3 +59,6 @@ class EnergyArbitrage(ValueStream):
             self._import_rates[t] * premise.grid_import[t]
             - self._export_rates[t] * premise.grid_export[t]
         )
+
+    def evaluate_numeric(self, grid_import: np.ndarray, grid_export: np.ndarray, time_grid: TimeGrid) -> float:
+        return float(np.sum(self._import_rates * grid_import - self._export_rates * grid_export))
