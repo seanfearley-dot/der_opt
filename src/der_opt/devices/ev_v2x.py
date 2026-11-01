@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 import pyomo.environ as pyo
 
 from der_opt.devices.base import Device
 from der_opt.time_grid import TimeGrid
+
+if TYPE_CHECKING:
+    from der_opt.devices.solar import SolarPV
 
 
 class V2XVehicle(Device):
@@ -12,7 +17,10 @@ class V2XVehicle(Device):
     BatteryStorage, but bounded by a known plug-in schedule (`connected[t]`, a
     parameter -- not a decision variable) and an optional departure SOC requirement.
     MVP supports a single connect/disconnect window per horizon; multi-session support
-    is a documented future extension."""
+    is a documented future extension.
+
+    `charge_sources`: optional list of SolarPV devices this vehicle may charge from --
+    same instantaneous-cap mechanism and caveats as BatteryStorage's."""
 
     def __init__(
         self,
@@ -30,6 +38,7 @@ class V2XVehicle(Device):
         departure_period: int | None = None,
         soc_departure_min_frac: float | None = None,
         degradation_cost_per_kwh: float = 0.0,
+        charge_sources: list[SolarPV] | None = None,
     ):
         super().__init__(name, time_grid)
         conn = np.asarray(connected, dtype=float)
@@ -49,6 +58,7 @@ class V2XVehicle(Device):
             soc_departure_min_frac * capacity_kwh if soc_departure_min_frac is not None else None
         )
         self.degradation_cost_per_kwh = degradation_cost_per_kwh
+        self.charge_sources = list(charge_sources) if charge_sources else []
 
     def build_vars(self, model: pyo.ConcreteModel) -> None:
         periods = self.time_grid.periods
@@ -92,6 +102,17 @@ class V2XVehicle(Device):
                 return self.soc[departure_t] >= self.soc_departure_min
 
             model.add_component(self._component_name("departure_soc"), pyo.Constraint(rule=departure_rule))
+
+        if self.charge_sources:
+            # See BatteryStorage.build_constraints for the full rationale and caveats
+            # (conservative instantaneous cap, not true per-kWh source accounting).
+            def solar_only_charge_rule(_m, t):
+                return self.p_ch[t] <= sum(src.p_gen[t] for src in self.charge_sources)
+
+            model.add_component(
+                self._component_name("charge_from_sources_only"),
+                pyo.Constraint(self.time_grid.periods, rule=solar_only_charge_rule),
+            )
 
     def net_power_expr(self, model: pyo.ConcreteModel, t: int):
         return self.p_dis[t] - self.p_ch[t]

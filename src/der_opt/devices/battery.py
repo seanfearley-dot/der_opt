@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 import pyomo.environ as pyo
 
 from der_opt.devices.base import Device
 from der_opt.time_grid import TimeGrid
+
+if TYPE_CHECKING:
+    from der_opt.devices.solar import SolarPV
 
 
 class BatteryStorage(Device):
@@ -13,6 +18,10 @@ class BatteryStorage(Device):
     duals on the surrounding problem stay LP-exact). No simultaneous charge/discharge
     binary is needed: with eta_charge, eta_discharge < 1, charging and discharging at
     once is pure loss, so a cost-minimizing LP never chooses both (see test_battery.py).
+
+    `charge_sources`: optional list of SolarPV devices this battery may charge from.
+    When given, charging is capped at those devices' concurrent generation each period
+    -- see build_constraints for what this does and doesn't guarantee.
     """
 
     def __init__(
@@ -29,6 +38,7 @@ class BatteryStorage(Device):
         soc_init_frac: float = 0.5,
         soc_final_min_frac: float | None = None,
         degradation_cost_per_kwh: float = 0.0,
+        charge_sources: list[SolarPV] | None = None,
     ):
         super().__init__(name, time_grid)
         self.capacity_kwh = capacity_kwh
@@ -43,6 +53,7 @@ class BatteryStorage(Device):
             soc_final_min_frac * capacity_kwh if soc_final_min_frac is not None else None
         )
         self.degradation_cost_per_kwh = degradation_cost_per_kwh
+        self.charge_sources = list(charge_sources) if charge_sources else []
 
     def build_vars(self, model: pyo.ConcreteModel) -> None:
         periods = self.time_grid.periods
@@ -79,6 +90,28 @@ class BatteryStorage(Device):
                 return self.soc[final_t] >= self.soc_final_min
 
             model.add_component(self._component_name("soc_final"), pyo.Constraint(rule=soc_final_rule))
+
+        if self.charge_sources:
+            # Caps charge power by concurrent generation from the named source(s), so
+            # the battery can never charge faster than they're producing at that
+            # instant -- the practical mechanism some BTM storage programs require
+            # (e.g. California's SGIP) to prevent a battery from importing grid power
+            # and reselling it at the export price. This is a conservative instantaneous
+            # proxy, not true per-kWh source accounting (power is fungible at a bus, so
+            # "this kWh came from solar" isn't really well-defined once load is also
+            # drawing on the same generation) -- it doesn't separately check whether
+            # load is also competing for that same solar output at that instant, only
+            # that the battery's charge rate itself never exceeds it. Each source
+            # device must already have build_vars() called (true automatically inside
+            # Premise.register(), which registers all devices' vars before any
+            # device's constraints) for `src.p_gen` to exist.
+            def solar_only_charge_rule(_m, t):
+                return self.p_ch[t] <= sum(src.p_gen[t] for src in self.charge_sources)
+
+            model.add_component(
+                self._component_name("charge_from_sources_only"),
+                pyo.Constraint(self.time_grid.periods, rule=solar_only_charge_rule),
+            )
 
     def net_power_expr(self, model: pyo.ConcreteModel, t: int):
         return self.p_dis[t] - self.p_ch[t]

@@ -16,7 +16,19 @@ class Premise:
     balance into a Pyomo model. register(model, prefix) is the real composition seam:
     it adds everything onto a model it's handed rather than building its own, which is
     what lets build_standalone_model() (used here) and a future multi-premise
-    NetworkDispatchModel (Phase 3) share this exact code unmodified."""
+    NetworkDispatchModel (Phase 3) share this exact code unmodified.
+
+    `exclusive_import_export`: by default, grid_import and grid_export are only linked
+    by their *difference* in the POI balance -- nothing stops both being positive at
+    the same period. That's harmless whenever the export price never exceeds the
+    import price (true of essentially every flat/TOU retail tariff, since a
+    cost-minimizing LP would never choose to pay import price to resell at a lower
+    export price), but if export can exceed import at some period (e.g. a wholesale-LMP
+    export price spike), the optimizer can "arbitrage" the POI itself for free money
+    with no real energy flow, bypassing any devices entirely. Set this True to forbid
+    that (adds one binary variable per period; makes the model a MILP, so unrelated
+    duals go through the fix-and-resolve path -- off by default so a premise with no
+    other integer variables keeps exact LP duals)."""
 
     def __init__(
         self,
@@ -26,6 +38,7 @@ class Premise:
         value_streams: list[ValueStream] | None = None,
         external_load=None,
         poi_limit_kw: float | None = None,
+        exclusive_import_export: bool = False,
     ):
         self.name = name
         self.time_grid = time_grid
@@ -42,6 +55,12 @@ class Premise:
                 )
             self.external_load = arr
         self.poi_limit_kw = poi_limit_kw
+        self.exclusive_import_export = exclusive_import_export
+        if exclusive_import_export and poi_limit_kw is None:
+            raise ValueError(
+                "exclusive_import_export=True needs poi_limit_kw set (it's used as the "
+                "big-M bound on the import/export exclusivity constraint)"
+            )
 
         # populated by register()
         self.grid_import = None
@@ -51,8 +70,14 @@ class Premise:
         if not hasattr(model, "T"):
             model.T = pyo.Set(initialize=self.time_grid.periods)
 
+        # Two passes (all build_vars, then all build_constraints) rather than one
+        # register() per device in sequence: lets a device's constraints reference
+        # another device's variables (e.g. BatteryStorage's charge_sources constraint
+        # reading a SolarPV's p_gen) regardless of which order they're listed in.
         for device in self.devices:
-            device.register(model)
+            device.build_vars(model)
+        for device in self.devices:
+            device.build_constraints(model)
 
         self._build_poi_constraints(model)
 
@@ -74,6 +99,24 @@ class Premise:
 
         self.poi_balance = pyo.Constraint(periods, rule=poi_rule)
         model.add_component(f"{self.name}_poi_balance", self.poi_balance)
+
+        if self.exclusive_import_export:
+            big_m = self.poi_limit_kw
+            self.import_active = pyo.Var(periods, domain=pyo.Binary)
+            model.add_component(f"{self.name}_import_active", self.import_active)
+
+            def import_exclusive_rule(_m, t):
+                return self.grid_import[t] <= big_m * self.import_active[t]
+
+            def export_exclusive_rule(_m, t):
+                return self.grid_export[t] <= big_m * (1 - self.import_active[t])
+
+            model.add_component(
+                f"{self.name}_import_exclusive", pyo.Constraint(periods, rule=import_exclusive_rule)
+            )
+            model.add_component(
+                f"{self.name}_export_exclusive", pyo.Constraint(periods, rule=export_exclusive_rule)
+            )
 
     def total_cost_expr(self, model: pyo.ConcreteModel):
         device_cost = sum(
