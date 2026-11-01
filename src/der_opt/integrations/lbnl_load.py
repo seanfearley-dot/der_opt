@@ -86,6 +86,21 @@ def premise_net_load_kw(
     return _slice_hours(net_kwh_per_customer, time_grid, start_hour_ending)
 
 
+def premise_gross_load_kw(
+    scenario_dir: str | Path, cluster_name: str, time_grid: TimeGrid, start_hour_ending: int = 1
+) -> np.ndarray:
+    """Per-customer gross load (kW) -- `total` / customer_count, PV NOT subtracted --
+    sliced the same way as premise_net_load_kw. Use this (not premise_net_load_kw) as a
+    Premise's external_load when solar is modeled as its own SolarPV device (e.g. via
+    premise_solar_available_kw below): subtracting PV from external_load AND also
+    dispatching a SolarPV device on the same premise would double-count it."""
+    scenario_dir = Path(scenario_dir)
+    customer_count = _customer_count(scenario_dir, cluster_name)
+    hourly = load_cluster_hourly(scenario_dir, cluster_name)
+    gross_kwh_per_customer = hourly["total"] / customer_count
+    return _slice_hours(gross_kwh_per_customer, time_grid, start_hour_ending)
+
+
 def premise_solar_available_kw(
     scenario_dir: str | Path, cluster_name: str, time_grid: TimeGrid, start_hour_ending: int = 1
 ) -> np.ndarray:

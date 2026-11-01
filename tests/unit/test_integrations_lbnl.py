@@ -5,6 +5,7 @@ import pytest
 
 from der_opt.integrations.lbnl_load import (
     list_clusters,
+    premise_gross_load_kw,
     premise_net_load_kw,
     premise_solar_available_kw,
 )
@@ -22,6 +23,12 @@ def test_premise_net_load_kw_matches_hand_calc():
     tg = TimeGrid(resolution_minutes=60, horizon_steps=6, start=datetime(2026, 1, 1))
     load = premise_net_load_kw(FIXTURE_DIR, "res-test-sin_fam-small", tg, start_hour_ending=1)
     assert load == pytest.approx([10.0, 10.0, 12.0, 7.0, 3.0, 3.0])
+
+
+def test_premise_gross_load_kw_does_not_subtract_pv():
+    tg = TimeGrid(resolution_minutes=60, horizon_steps=6, start=datetime(2026, 1, 1))
+    load = premise_gross_load_kw(FIXTURE_DIR, "res-test-sin_fam-small", tg, start_hour_ending=1)
+    assert load == pytest.approx([10.0, 10.0, 12.0, 12.0, 8.0, 8.0])
 
 
 def test_premise_solar_available_kw_matches_hand_calc():
