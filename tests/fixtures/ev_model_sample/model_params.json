@@ -1,0 +1,15 @@
+{
+  "simulated_summary": {
+    "weibull": {
+      "daily_charge_kwh_p50": 7.5
+    }
+  },
+  "charging": {
+    "weibull": {
+      "charger_kw": 7.2,
+      "battery_kwh": 75.0,
+      "mean_hourly_profile_kw": [1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,5,5,5,3,3,2,1],
+      "p95_hourly_profile_kw": [7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7]
+    }
+  }
+}
