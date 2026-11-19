@@ -82,6 +82,8 @@ def _house_scenario(config: FeederScenarioConfig, house: HouseConfig) -> Scenari
         value_streams=house.value_streams if house.value_streams is not None else defaults.value_streams,
         external_load=house.external_load,
         poi_limit_kw=house.poi_limit_kw if house.poi_limit_kw is not None else defaults.poi_limit_kw,
+        import_limit_kw=house.import_limit_kw if house.import_limit_kw is not None else defaults.import_limit_kw,
+        export_limit_kw=house.export_limit_kw if house.export_limit_kw is not None else defaults.export_limit_kw,
         exclusive_import_export=(
             house.exclusive_import_export if house.exclusive_import_export is not None else defaults.exclusive_import_export
         ),

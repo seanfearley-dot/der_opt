@@ -73,6 +73,19 @@ class CounterfactualSimulator:
                 state.device_states[device.name] = result
 
             net = premise.external_load[t] - device_power_total
+            # an export-limited inverter curtails solar rather than exceed the limit
+            limit = premise.export_limit_kw
+            if limit is not None and -net > limit:
+                excess = -net - limit
+                for device in premise.devices:
+                    if excess <= 0 or not isinstance(device, SolarPV):
+                        continue
+                    series = device_series[device.name]
+                    cut = min(excess, series["p_gen"][-1])
+                    series["p_gen"][-1] -= cut
+                    series["net_power"][-1] -= cut
+                    excess -= cut
+                    net += cut
             grid_import.append(max(net, 0.0))
             grid_export.append(max(-net, 0.0))
 

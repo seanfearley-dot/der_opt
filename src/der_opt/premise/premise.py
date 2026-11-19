@@ -28,7 +28,12 @@ class Premise:
     with no real energy flow, bypassing any devices entirely. Set this True to forbid
     that (adds one binary variable per period; makes the model a MILP, so unrelated
     duals go through the fix-and-resolve path -- off by default so a premise with no
-    other integer variables keeps exact LP duals)."""
+    other integer variables keeps exact LP duals).
+
+    Meter limits: `import_limit_kw` caps what the premise can draw from the grid (its
+    service or panel rating) and `export_limit_kw` what it can send back (its
+    interconnection agreement; 0 for a non-export system). `poi_limit_kw` is shorthand
+    that sets both; a direction-specific limit overrides it. None = no limit."""
 
     def __init__(
         self,
@@ -39,6 +44,8 @@ class Premise:
         external_load=None,
         poi_limit_kw: float | None = None,
         exclusive_import_export: bool = False,
+        import_limit_kw: float | None = None,
+        export_limit_kw: float | None = None,
     ):
         self.name = name
         self.time_grid = time_grid
@@ -55,11 +62,17 @@ class Premise:
                 )
             self.external_load = arr
         self.poi_limit_kw = poi_limit_kw
+        self.import_limit_kw = import_limit_kw if import_limit_kw is not None else poi_limit_kw
+        self.export_limit_kw = export_limit_kw if export_limit_kw is not None else poi_limit_kw
+        for label, limit in (("import", self.import_limit_kw), ("export", self.export_limit_kw)):
+            if limit is not None and limit < 0:
+                raise ValueError(f"{label} limit must be >= 0, got {limit}")
         self.exclusive_import_export = exclusive_import_export
-        if exclusive_import_export and poi_limit_kw is None:
+        if exclusive_import_export and (self.import_limit_kw is None or self.export_limit_kw is None):
             raise ValueError(
-                "exclusive_import_export=True needs poi_limit_kw set (it's used as the "
-                "big-M bound on the import/export exclusivity constraint)"
+                "exclusive_import_export=True needs both meter limits (poi_limit_kw, or "
+                "import_limit_kw and export_limit_kw): they're the big-M bounds on the "
+                "import/export exclusivity constraint"
             )
 
         # populated by register()
@@ -92,11 +105,10 @@ class Premise:
             stream.apply(model, self)
 
     def _build_poi_constraints(self, model: pyo.ConcreteModel) -> None:
-        bounds = (0, self.poi_limit_kw) if self.poi_limit_kw is not None else (0, None)
         periods = self.time_grid.periods
 
-        self.grid_import = pyo.Var(periods, domain=pyo.NonNegativeReals, bounds=bounds)
-        self.grid_export = pyo.Var(periods, domain=pyo.NonNegativeReals, bounds=bounds)
+        self.grid_import = pyo.Var(periods, domain=pyo.NonNegativeReals, bounds=(0, self.import_limit_kw))
+        self.grid_export = pyo.Var(periods, domain=pyo.NonNegativeReals, bounds=(0, self.export_limit_kw))
         model.add_component(f"{self.name}_grid_import", self.grid_import)
         model.add_component(f"{self.name}_grid_export", self.grid_export)
 
@@ -108,15 +120,14 @@ class Premise:
         model.add_component(f"{self.name}_poi_balance", self.poi_balance)
 
         if self.exclusive_import_export:
-            big_m = self.poi_limit_kw
             self.import_active = pyo.Var(periods, domain=pyo.Binary)
             model.add_component(f"{self.name}_import_active", self.import_active)
 
             def import_exclusive_rule(_m, t):
-                return self.grid_import[t] <= big_m * self.import_active[t]
+                return self.grid_import[t] <= self.import_limit_kw * self.import_active[t]
 
             def export_exclusive_rule(_m, t):
-                return self.grid_export[t] <= big_m * (1 - self.import_active[t])
+                return self.grid_export[t] <= self.export_limit_kw * (1 - self.import_active[t])
 
             model.add_component(
                 f"{self.name}_import_exclusive", pyo.Constraint(periods, rule=import_exclusive_rule)

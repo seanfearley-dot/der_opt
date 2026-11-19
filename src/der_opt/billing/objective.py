@@ -229,7 +229,8 @@ class NEM2Bill(_BillObjective):
         allowance) per cycle. It lowers a net consumer's charges and a net generator's
         credit, so its value isn't convex in net kWh: each cycle gets two yes/no
         variables (net consumer or not; net generation above the allowance or not),
-        which makes this a MILP and needs poi_limit_kw for the big-M bounds.
+        which makes this a MILP and needs both meter limits (poi_limit_kw, or
+        import_limit_kw and export_limit_kw) for the big-M bounds.
 
     The objective counts leftover credit at the end as $0, which under NEM2 is literally
     true at a true-up (it's zeroed)."""
@@ -267,10 +268,13 @@ class NEM2Bill(_BillObjective):
         accrued = sum(energy[m] for m in cycles)
 
         if self.tariff.baseline is not None:
-            if premise.poi_limit_kw is None:
-                raise ValueError("NEM2Bill with a baseline credit needs the premise's poi_limit_kw (for big-M bounds)")
+            if premise.import_limit_kw is None or premise.export_limit_kw is None:
+                raise ValueError("NEM2Bill with a baseline credit needs both meter limits (poi_limit_kw, or "
+                                 "import_limit_kw and export_limit_kw) for its big-M bounds")
             credit = self.tariff.baseline.credit_per_kwh
-            big_m = [premise.poi_limit_kw * self._dt * len(self._cycle_periods[m]) for m in cycles]
+            # a cycle's net kWh is bounded by the larger limit in either direction
+            limit = max(premise.import_limit_kw, premise.export_limit_kw)
+            big_m = [limit * self._dt * len(self._cycle_periods[m]) for m in cycles]
             allowance = self._allowance
             net_in = add("net_consumption_kwh", pyo.Var(cycles, domain=pyo.NonNegativeReals))
             net_out = add("net_generation_kwh", pyo.Var(cycles, domain=pyo.NonNegativeReals))

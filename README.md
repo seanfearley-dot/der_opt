@@ -84,7 +84,7 @@ Every run ends with **checks** (feeder runs too, on every house in every run):
 | Check | Level | Catches |
 |---|---|---|
 | energy balance | error | grid + devices don't add up to the load |
-| meter limit, storage limits | error | flow above `poi_limit_kw`; charge outside its min/max |
+| meter limit, storage limits | error | import or export above its limit; charge outside its min/max |
 | objective matches re-pricing | error | the solver's objective differs from re-pricing the same dispatch (e.g. a rate missing its x period length) |
 | hard ratings hold | error | a feeder element over a hard rating in the coordinated run |
 | import and export at once | warning | the same step both imports and exports, which a bill credits as real export |
@@ -139,7 +139,9 @@ devices: [...]                      # see Devices below; order matters for charg
 value_streams: [...]                # see Value streams below
 external_load: ...                  # kW the premise must serve (omit for none); see Data sources below
 
-poi_limit_kw: 15.0                  # max import/export at the meter
+poi_limit_kw: 15.0                  # meter limit, kW, both directions...
+import_limit_kw: 15.0               # ...or set each: draw from the grid (service/panel rating)
+export_limit_kw: 7.0                #     and send back (interconnection limit; 0 = non-export)
 exclusive_import_export: true       # see Modeling caveats -- turn on whenever export
                                     # price can exceed import price (NBT, LMP)
 
@@ -165,6 +167,11 @@ Every device has `type`, a unique `name`, and `params`. Any array-valued param
 | `thermostat` | `thermal_resistance_r`, `thermal_capacitance_c`, `ambient_temp_c` *array*, `comfort_min_c`, `comfort_max_c`, `cop`, `p_max_kw`, `initial_temp_c` | `mode` (`cooling` / `heating`) |
 | `curtailable_load` | `baseline_load_kw` *array*, `block_size_kw`, `max_blocks` | — |
 
+- **Meter limits.** `import_limit_kw` and `export_limit_kw` are separate because they
+  usually differ: import is the service rating, export what the interconnection allows.
+  `poi_limit_kw` sets both; a specific one overrides it. With an export limit, the
+  optimizer and the rule-based counterfactual both curtail solar rather than exceed it,
+  as an export-limited inverter does.
 - **`charge_sources: [solar]`** — restricts a battery/EV to charging no faster than
   the named solar device(s) are generating at that moment (SGIP-style "no grid
   charging"). The named devices must be **listed earlier** in `devices`.
@@ -359,7 +366,7 @@ so "value of optimization" and "bill savings" differ only by device wear.
   of a kWh.
 - `nem2_bill` is linear except the baseline credit, whose value flips direction when a
   month goes from net consumer to net generator. That takes two yes/no variables per
-  billing cycle (24 for a year), so it's a small MILP and needs `poi_limit_kw`. It
+  billing cycle (24 for a year), so it's a small MILP and needs both meter limits. It
   doesn't need `exclusive_import_export`: under NEM2 an import and an export in the
   same hour net at the same rate.
 

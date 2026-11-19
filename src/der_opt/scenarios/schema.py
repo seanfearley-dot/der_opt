@@ -75,6 +75,8 @@ class ScenarioConfig(BaseModel):
     # the right union member among several same-shaped dict models.
     external_load: list[float] | dict[str, Any] | None = None  # omitted = no load
     poi_limit_kw: float | None = None
+    import_limit_kw: float | None = None  # overrides poi_limit_kw for import
+    export_limit_kw: float | None = None  # overrides poi_limit_kw for export (0 = no export)
     exclusive_import_export: bool = False
     counterfactual: CounterfactualConfig | None = None
     billing: BillingConfig | None = None
@@ -108,6 +110,8 @@ class HouseDefaultsConfig(BaseModel):
 
     value_streams: list[ValueStreamConfig] = Field(default_factory=list)
     poi_limit_kw: float | None = None
+    import_limit_kw: float | None = None  # overrides poi_limit_kw for import
+    export_limit_kw: float | None = None  # overrides poi_limit_kw for export (0 = no export)
     exclusive_import_export: bool = False
     counterfactual: CounterfactualConfig | None = None
 
@@ -122,6 +126,8 @@ class HouseConfig(BaseModel):
     external_load: list[float] | dict[str, Any]
     value_streams: list[ValueStreamConfig] | None = None
     poi_limit_kw: float | None = None
+    import_limit_kw: float | None = None  # overrides poi_limit_kw for import
+    export_limit_kw: float | None = None  # overrides poi_limit_kw for export (0 = no export)
     exclusive_import_export: bool | None = None
     counterfactual: CounterfactualConfig | None = None
 

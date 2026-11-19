@@ -206,6 +206,8 @@ def build_premise(config: ScenarioConfig) -> Premise:
         value_streams=value_streams,
         external_load=external_load,
         poi_limit_kw=config.poi_limit_kw,
+        import_limit_kw=config.import_limit_kw,
+        export_limit_kw=config.export_limit_kw,
         exclusive_import_export=config.exclusive_import_export,
     )
 

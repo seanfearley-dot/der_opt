@@ -122,10 +122,10 @@ def check_dispatch(premise, dispatch: DispatchResult, run: str | None = None, na
 
     # meter limit
     found = []
-    if premise.poi_limit_kw is not None:
-        over = max(imp.max(initial=0), exp.max(initial=0)) - premise.poi_limit_kw
-        if over > TOLERANCE_KW:
-            found.append(finding("error", "meter limit", f"flow exceeds poi_limit_kw {premise.poi_limit_kw:g} by {over:.3f} kW"))
+    for direction, flow, limit in (("import", imp, premise.import_limit_kw), ("export", exp, premise.export_limit_kw)):
+        if limit is not None and flow.max(initial=0) - limit > TOLERANCE_KW:
+            found.append(finding("error", "meter limit", f"{direction} reaches {flow.max():.3f} kW, over its "
+                                 f"{limit:g} kW limit"))
     report.ran("meter limit", found)
 
     # storage within limits, and not charging and discharging at once
@@ -231,9 +231,10 @@ def check_prices(premise, name: str | None = None) -> CheckReport:
 def check_load(premise, name: str | None = None) -> CheckReport:
     found = []
     peak = float(np.max(premise.external_load, initial=0))
-    if premise.poi_limit_kw is not None and peak > premise.poi_limit_kw:
-        found.append(Finding("warning", "load vs meter limit", f"load peaks at {peak:.1f} kW, above poi_limit_kw "
-                             f"{premise.poi_limit_kw:g}; only on-site devices can make up the difference", None, name))
+    if premise.import_limit_kw is not None and peak > premise.import_limit_kw:
+        found.append(Finding("warning", "load vs meter limit", f"load peaks at {peak:.1f} kW, above the "
+                             f"{premise.import_limit_kw:g} kW import limit; only on-site devices can make up the "
+                             "difference", None, name))
     report = CheckReport()
     report.ran("load vs meter limit", found)
     return report
