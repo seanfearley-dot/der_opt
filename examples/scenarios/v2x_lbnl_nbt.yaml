@@ -1,5 +1,4 @@
-# V2X EV, no solar, 3 days -- the config-driven reproduction of
-# examples/05_v2x_lbnl_reference.py. Run with:
+# V2X EV, no solar, 3 days, on real LBNL load and EV-model plug-in times. Run with:
 #   der-opt run examples/scenarios/v2x_lbnl_nbt.yaml --duals -o /tmp/out
 #
 # Needs /Users/seanearley/Documents/LBNL_Phase_4 and

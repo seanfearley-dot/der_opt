@@ -41,11 +41,11 @@ devices:
       eta_discharge: 0.96
       soc_init_frac: 0.5
       degradation_cost_per_kwh: 0.015
-      # no soc_final_min_frac: see the Python example's comment -- a terminal floor
-      # here would also need to apply fairly to any counterfactual comparison.
+      # no soc_final_min_frac: the self-consumption counterfactual can't be held to a
+      # terminal floor, so neither run gets one -- same starting charge, end state
+      # free (der-opt run notes if they end differently).
       # (charge_sources: [solar] would restrict this battery to charging only from
-      # concurrent solar generation -- not used here, to match examples/04 exactly,
-      # but available; see the README's device reference.)
+      # concurrent solar generation; see the README's device reference.)
 
 value_streams:
   # Optimize the bill itself (the billing section below), not export value: NBT's

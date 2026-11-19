@@ -99,8 +99,7 @@ State columns (`soc`, `temp`) are the value at the **start** of each period in b
 the optimal and counterfactual CSVs.
 
 The fastest way to a new scenario: **copy one of the files in `examples/scenarios/`
-and edit it.** They use real PG&E E-ELEC import rates; the Python scripts
-`examples/04_*.py` and `05_*.py` still use an illustrative placeholder import price.
+and edit it.**
 
 ## Scenario file reference
 
@@ -487,15 +486,12 @@ wrong answer before it was understood:
 
 For anything the YAML doesn't cover — custom counterfactual policies, interval
 heatmaps, multiple solves in a loop (sweeps, sensitivity runs) — script against the
-Python API directly. The `examples/` scripts are the templates:
+Python API directly. `examples/03_full_mvp_with_duals.py` is the template: all five
+device types, a URDB tariff, duals, and every chart type. The `der-opt` CLI's own code
+(`src/der_opt/cli/main.py`, `src/der_opt/scenarios/`) shows how YAML scenarios map onto
+the same objects.
 
-| Script | Shows |
-|---|---|
-| `03_full_mvp_with_duals.py` | all five device types, URDB tariff, duals, all chart types |
-| `04_battery_solar_lbnl_reference.py` | battery + solar on real LBNL data and NBT export, vs. self-consumption |
-| `05_v2x_lbnl_reference.py` | multi-day V2X on real LBNL + EV-model data, vs. dumb charging |
-
-Run any with `MPLBACKEND=Agg python examples/<script>.py` (on Windows,
+Run it with `MPLBACKEND=Agg python examples/03_full_mvp_with_duals.py` (on Windows,
 `$env:MPLBACKEND = "Agg"` first); charts land in
 `examples/outputs/` (gitignored).
 
