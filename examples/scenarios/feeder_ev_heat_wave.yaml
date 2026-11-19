@@ -1,0 +1,79 @@
+# Twenty synthetic homes on two 50 kW service transformers through a three-day heat
+# wave -- the first multi-premise (feeder) scenario. Run with:
+#   der-opt run examples/scenarios/feeder_ev_heat_wave.yaml -o out/feeder
+#
+# Needs no external data: the houses are generated (see der_opt.network.synthetic).
+# Transformer A has high EV adoption, B low. The run compares three dispatches of the
+# same homes: coordinated (one optimization over all homes and both transformers),
+# independent (each home optimizing its own bill, blind to the transformer), and
+# today's rule-based behavior (EVs charge on plug-in, batteries self-consume).
+
+name: two_transformer_heat_wave
+
+time_grid:
+  resolution_minutes: 60
+  horizon_steps: 72 # three days, noon to noon, so every night's charging is inside
+  start: "2026-07-13T12:00:00"
+
+feeder:
+  elements:
+    - name: lateral
+      rating_kw: 200
+    - name: tx_a
+      parent: lateral
+      rating_kw: 50 # 50 kVA pole-top at unity power factor
+      # soft limit: flow can exceed the rating at this cost per kWh over, standing in
+      # for transformer loss of life (illustrative, not a sourced value)
+      overload_cost_per_kwh: 1.0
+    - name: tx_b
+      parent: lateral
+      rating_kw: 50
+      overload_cost_per_kwh: 1.0
+  value_streams:
+    # avoided upgrade cost on transformer A, $ per kW of peak load. An annual $/kW-year
+    # applied to this run's peak, i.e. treats this heat wave as the year's peak
+    # (illustrative, not a sourced value).
+    - type: capacity_deferral
+      element: tx_a
+      value_per_kw: 40.0
+
+synthetic_houses:
+  - element: tx_a
+    count: 10
+    seed: 1
+    ev_share: 0.7
+    solar_share: 0.4
+    battery_share: 0.5 # of the solar homes
+    t_min_c: 23
+    t_max_c: 41
+  - element: tx_b
+    count: 10
+    seed: 2
+    ev_share: 0.2
+    solar_share: 0.4
+    battery_share: 0.5
+    t_min_c: 23
+    t_max_c: 41
+
+house_defaults:
+  value_streams:
+    - type: nbt_bill
+  poi_limit_kw: 30
+  # left off so the run stays an LP and congestion prices are exact duals. Here one
+  # battery home imports and exports 3.6 kWh in the same hour (an NBT delivery credit
+  # above the import rate), worth $0.01; set true to forbid it (prices then come from
+  # fix-and-resolve).
+  exclusive_import_export: false
+  counterfactual:
+    policies:
+      ev: {type: rule_based_ev}
+      battery: {type: self_consumption}
+
+# every home on E-ELEC with Net Billing Tariff export credit (solar homes export;
+# the rest just buy)
+billing:
+  tariff: examples/data/tariffs/pge_e_elec_2026-06.yaml
+  program:
+    type: nbt
+    export_rates_csv: examples/data/pge_nbt_eec_2026.csv
+    acc_plus_per_kwh: 0.0088

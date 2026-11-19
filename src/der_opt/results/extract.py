@@ -15,7 +15,9 @@ def _solver_status(solver_result) -> str:
         return str(solver_result)
 
 
-def build_dispatch_result(premise, model: pyo.ConcreteModel, solver_result) -> DispatchResult:
+def build_dispatch_result(premise, model: pyo.ConcreteModel, solver_result, objective_value: float | None = None) -> DispatchResult:
+    """objective_value defaults to the model's objective; a premise inside a shared
+    (multi-premise) model passes its own share instead."""
     periods = list(premise.time_grid.periods)
     try:
         time_index = pd.DatetimeIndex(premise.time_grid.timestamps())
@@ -38,6 +40,6 @@ def build_dispatch_result(premise, model: pyo.ConcreteModel, solver_result) -> D
         device_dispatch=device_dispatch,
         grid_import=grid_import,
         grid_export=grid_export,
-        objective_value=pyo.value(model.obj),
+        objective_value=pyo.value(model.obj) if objective_value is None else objective_value,
         solver_status=_solver_status(solver_result),
     )

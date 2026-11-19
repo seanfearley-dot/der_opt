@@ -35,7 +35,11 @@ class V2XVehicle(Device):
     require the vehicle end the horizon ready for its next trip too).
 
     `charge_sources`: optional list of SolarPV devices this vehicle may charge from --
-    same instantaneous-cap mechanism and caveats as BatteryStorage's."""
+    same instantaneous-cap mechanism and caveats as BatteryStorage's.
+
+    `driving_kwh`: optional kWh drawn from the battery by driving in each period (an
+    array, normally nonzero only while disconnected). Without it, SOC is frozen while
+    the car is away, so over several days it never comes home needing a charge."""
 
     def __init__(
         self,
@@ -55,12 +59,17 @@ class V2XVehicle(Device):
         soc_final_min_frac: float | None = None,
         degradation_cost_per_kwh: float = 0.0,
         charge_sources: list[SolarPV] | None = None,
+        driving_kwh=None,
     ):
         super().__init__(name, time_grid)
         conn = np.asarray(connected, dtype=float)
         if conn.shape[0] != time_grid.horizon_steps:
             raise ValueError("connected length must match time_grid.horizon_steps")
         self.connected = conn
+        driving = np.zeros(time_grid.horizon_steps) if driving_kwh is None else np.asarray(driving_kwh, dtype=float)
+        if driving.shape[0] != time_grid.horizon_steps:
+            raise ValueError("driving_kwh length must match time_grid.horizon_steps")
+        self.driving_kwh = driving
         self.capacity_kwh = capacity_kwh
         self.p_max_charge_kw = p_max_charge_kw
         self.p_max_discharge_kw = p_max_discharge_kw
@@ -123,7 +132,7 @@ class V2XVehicle(Device):
         def soc_dynamics_rule(_m, t):
             return self.soc[t + 1] == self.soc[t] + dt * (
                 self.eta_charge * self.p_ch[t] - self.p_dis[t] / self.eta_discharge
-            )
+            ) - float(self.driving_kwh[t])
 
         model.add_component(
             self._component_name("soc_dynamics"),
@@ -194,7 +203,7 @@ class V2XVehicle(Device):
         max_dis_room = (soc - self.soc_min) * self.eta_discharge / dt
         p_dis = min(p_dis, max(max_dis_room, 0.0))
 
-        next_soc = soc + dt * (self.eta_charge * p_ch - p_dis / self.eta_discharge)
+        next_soc = soc + dt * (self.eta_charge * p_ch - p_dis / self.eta_discharge) - self.driving_kwh[t]
         next_soc = min(max(next_soc, self.soc_min), self.soc_max)
 
         return {

@@ -84,3 +84,75 @@ class ScenarioConfig(BaseModel):
     exclusive_import_export: bool = False
     counterfactual: Optional[CounterfactualConfig] = None
     billing: Optional[BillingConfig] = None
+
+
+# --- feeder (multi-premise) scenarios ------------------------------------------------
+
+
+class NetworkElementConfig(BaseModel):
+    name: str
+    rating_kw: Optional[float] = None
+    overload_cost_per_kwh: Optional[float] = None  # omitted = hard limit
+    parent: Optional[str] = None
+
+
+class NetworkValueStreamConfig(BaseModel):
+    type: Literal["capacity_deferral"]
+    element: str
+    value_per_kw: float
+    threshold_kw: float = 0.0
+
+
+class FeederConfig(BaseModel):
+    elements: list[NetworkElementConfig]
+    value_streams: list[NetworkValueStreamConfig] = Field(default_factory=list)
+
+
+class HouseDefaultsConfig(BaseModel):
+    """Applied to every house unless the house sets its own. Counterfactual policies
+    are keyed by device name and apply to each house that has that device."""
+
+    value_streams: list[ValueStreamConfig] = Field(default_factory=list)
+    poi_limit_kw: Optional[float] = None
+    exclusive_import_export: bool = False
+    counterfactual: Optional[CounterfactualConfig] = None
+
+
+class HouseConfig(BaseModel):
+    """One house, written out: the same fields as a single-premise scenario, plus the
+    network element it's served from."""
+
+    name: str
+    element: str
+    devices: list[DeviceConfig] = Field(default_factory=list)
+    external_load: Union[list[float], dict[str, Any]]
+    value_streams: Optional[list[ValueStreamConfig]] = None
+    poi_limit_kw: Optional[float] = None
+    exclusive_import_export: Optional[bool] = None
+    counterfactual: Optional[CounterfactualConfig] = None
+
+
+class SyntheticHousesConfig(BaseModel):
+    """Generated houses on one element; see der_opt.network.synthetic. Devices are
+    named solar, battery and ev."""
+
+    element: str
+    count: int
+    seed: int = 0
+    name_prefix: Optional[str] = None  # default "<element>_h"
+    solar_share: float = 0.4
+    battery_share: float = 0.3  # of the solar homes
+    ev_share: float = 0.4
+    ev_v2x: bool = False
+    t_min_c: float = 22.0
+    t_max_c: float = 40.0
+
+
+class FeederScenarioConfig(BaseModel):
+    name: str
+    time_grid: TimeGridConfig
+    feeder: FeederConfig
+    house_defaults: HouseDefaultsConfig = Field(default_factory=HouseDefaultsConfig)
+    houses: list[HouseConfig] = Field(default_factory=list)
+    synthetic_houses: list[SyntheticHousesConfig] = Field(default_factory=list)
+    billing: Optional[BillingConfig] = None

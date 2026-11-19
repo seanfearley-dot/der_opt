@@ -25,9 +25,12 @@ class Device(ABC):
     def __init__(self, name: str, time_grid: TimeGrid):
         self.name = name
         self.time_grid = time_grid
+        # set by Premise.register(model, prefix): keeps model component names unique
+        # when several premises, each with its own "battery", share one model
+        self.namespace = ""
 
     def _component_name(self, varname: str) -> str:
-        return f"{self.name}_{varname}"
+        return f"{self.namespace}{self.name}_{varname}"
 
     @abstractmethod
     def build_vars(self, model: pyo.ConcreteModel) -> None:

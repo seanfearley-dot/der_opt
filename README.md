@@ -4,7 +4,8 @@ A toolkit for modeling and optimizing distributed energy resources — solar, ba
 smart thermostats, curtailable load, and V2X EVs — under resource-specific constraints.
 Solves cost-minimizing dispatch for a premise (Pyomo + HiGHS), recovers dual/shadow
 prices, and compares optimal dispatch against realistic rule-based baselines
-(counterfactuals) to quantify the value of smart control.
+(counterfactuals) to quantify the value of smart control. Feeder scenarios put many
+premises on a distribution network with transformer limits and price the congestion.
 
 ## Setup
 
@@ -27,6 +28,7 @@ der-opt run examples/scenarios/battery_solar_lbnl_nbt.yaml
 der-opt run examples/scenarios/v2x_lbnl_nbt.yaml --duals -o out/v2x
 der-opt run examples/scenarios/battery_solar_lbnl_nbt_annual.yaml -o out/annual   # ~1 min
 der-opt run examples/scenarios/battery_solar_lbnl_nem2_annual.yaml -o out/nem2     # same house on NEM 2.0
+der-opt run examples/scenarios/feeder_ev_heat_wave.yaml -o out/feeder             # 20 houses, 2 transformers
 ```
 
 It prints the optimal dispatch's cost broken down by source. If the scenario has a
@@ -103,7 +105,7 @@ Every device has `type`, a unique `name`, and `params`. Any array-valued param
 |---|---|---|
 | `solar` | `available_kw` *array* | — |
 | `battery` | `capacity_kwh`, `p_max_charge_kw`, `p_max_discharge_kw` | `eta_charge` (0.95), `eta_discharge` (0.95), `soc_min_frac` (0), `soc_max_frac` (1), `soc_init_frac` (0.5), `soc_final_min_frac`, `degradation_cost_per_kwh` (0), `charge_sources` |
-| `ev_v2x` | `capacity_kwh`, `p_max_charge_kw`, `p_max_discharge_kw`, `connected` *array* (0/1 plug-in schedule) | same SOC/efficiency/degradation params as battery, plus `departure_period` (int or list), `soc_departure_min_frac` (float or list), `charge_sources` |
+| `ev_v2x` | `capacity_kwh`, `p_max_charge_kw`, `p_max_discharge_kw`, `connected` *array* (0/1 plug-in schedule) | same SOC/efficiency/degradation params as battery, plus `departure_period` (int or list), `soc_departure_min_frac` (float or list), `charge_sources`, `driving_kwh` *array* (kWh used driving each period; without it SOC is frozen while away) |
 | `thermostat` | `thermal_resistance_r`, `thermal_capacitance_c`, `ambient_temp_c` *array*, `comfort_min_c`, `comfort_max_c`, `cop`, `p_max_kw`, `initial_temp_c` | `mode` (`cooling` / `heating`) |
 | `curtailable_load` | `baseline_load_kw` *array*, `block_size_kw`, `max_blocks` | — |
 
@@ -297,6 +299,85 @@ NEM2 load aggregation and multiple-tariff facilities, the California Climate Cre
 and demand charges.
 None of this has been checked against a real bill yet — that's the real test.
 
+## Feeders: many houses on a network
+
+A scenario with a `feeder` section is a multi-house run. Every house is an ordinary
+premise (devices, value streams, bill, counterfactual), and the feeder is a tree of
+transformers and line sections with kW ratings. `der-opt run` dispatches the same
+houses three ways and prices each on the same terms:
+
+| Run | What it is |
+|---|---|
+| coordinated | one optimization over every house and the network: bills + wear + overload + deferral value |
+| independent | each house optimizing its own bill, blind to the network |
+| counterfactual | the rule-based policies in `house_defaults.counterfactual` (e.g. EVs charging on plug-in) |
+
+```yaml
+time_grid: {resolution_minutes: 60, horizon_steps: 72, start: "2026-07-13T12:00:00"}
+feeder:
+  elements:
+    - {name: lateral, rating_kw: 200}
+    - {name: tx_a, parent: lateral, rating_kw: 50, overload_cost_per_kwh: 1.0}
+  value_streams:
+    - {type: capacity_deferral, element: tx_a, value_per_kw: 40.0}
+synthetic_houses:              # generated houses (no data needed), or list them under houses:
+  - {element: tx_a, count: 10, seed: 1, ev_share: 0.7, solar_share: 0.4, battery_share: 0.5}
+house_defaults:                # applied to every house that doesn't set its own
+  value_streams: [{type: nbt_bill}]
+  poi_limit_kw: 30
+  counterfactual: {policies: {ev: {type: rule_based_ev}, battery: {type: self_consumption}}}
+billing: {...}                 # shared by every house
+```
+
+* **Elements:** `rating_kw` applies to load and backfeed. Without
+  `overload_cost_per_kwh` it's a hard limit (a run is infeasible if uncontrollable load
+  alone exceeds it); with one, flow may exceed it at that cost per kWh over.
+* **`capacity_deferral`:** `value_per_kw` x (peak flow above `threshold_kw`, default 0).
+  It takes an annual $/kW-year and applies it to the run's peak, so use it on a horizon
+  that contains the element's annual peak.
+* **Houses** under `houses:` take the same fields as a one-house scenario plus
+  `element`. **`synthetic_houses`** generates them (`der_opt.network.synthetic`): base
+  load, morning and evening occupancy bumps, air conditioning that follows a heat-wave
+  temperature with a few hours' lag, and, by share, rooftop solar, an EV that drives
+  each day and must be back at 90% by its departure, and a solar-only-charging battery
+  that must end where it started. The ranges are judgment calls for an inland
+  California summer, not fitted to data.
+* **Congestion prices** are the duals of each element's flow: the cost of one more kWh
+  through it in each hour. They're exact while the model is an LP.
+
+Output (`-o`): `houses.csv` (devices, the generated draws, each run's bill),
+`flows_kw.csv`, `loading.csv` (peak, % of rating, hours and kWh over),
+`congestion_prices.csv`, `dispatch_<run>.csv` per house, and `feeder_loading.png`.
+
+`feeder_ev_heat_wave.yaml`, three heat-wave days, transformer A with 7 EVs in 10
+homes:
+
+| | coordinated | independent | plug-in charging |
+|---|---|---|---|
+| Transformer A peak (50 kW rating) | 37.7 kW | 81.1 kW (6 h over) | 68.0 kW (8 h over) |
+| Customer bills, 20 homes | $1,398 | $1,397 | $1,468 |
+
+Each home optimizing its own bill is *worse* for the transformer than plug-in
+charging: every EV waits for the same off-peak start at midnight. Coordination holds
+the peak to the evening air-conditioning peak at a cost of $0.84 to two homes. The
+congestion price on transformer A, $8.10/kWh over the eight peak hours, is the $40/kW
+deferral value spread across the hours that set the peak.
+
+Two modeling choices matter here:
+
+* **Ties go to the earliest hour.** A TOU bill is indifferent among equally cheap
+  hours, so the solver would return an arbitrary schedule. Every optimization here
+  adds a negligible cost ($0.00001/kWh per hour into the run, left out of every
+  reported cost) so that charging starts as soon as the cheapest window opens, as a
+  "charge in off-peak" timer does. That is what produces the midnight spike in the
+  independent run.
+* **The coordinated run is a planner's optimum.** It minimizes everyone's costs
+  together. It reports which houses pay more, but doesn't compensate them; that's for
+  a settlement mechanism (not built yet).
+
+Flow is a power balance only: no losses, voltage, or reactive power, so convert kVA
+nameplates to kW yourself. Every house shares one time grid.
+
 ## Modeling caveats worth knowing
 
 These all came up while building the examples — each produced a plausible-looking but
@@ -371,8 +452,9 @@ src/der_opt/
   simulation/    counterfactual control policies + simulator
   billing/       retail tariffs, PG&E holidays, bill engine (NBT, NEM2), bill objectives
   integrations/  LBNL load, EV model, PVWatts, PG&E NBT export rates
-  scenarios/     YAML schema, loader, data-source resolvers
-  viz/           heatmap, dispatch, value stack, duals, comparison charts
+  network/       feeder topology, multi-premise dispatch, congestion prices, synthetic houses
+  scenarios/     YAML schema, loader, data-source resolvers, feeder scenarios
+  viz/           heatmap, dispatch, value stack, duals, comparison, feeder loading charts
   cli/           der-opt CLI
 examples/        Python-API scripts, scenarios/ (YAML), data/ (NBT rates, sample tariff)
 tests/           unit + golden-file integration tests

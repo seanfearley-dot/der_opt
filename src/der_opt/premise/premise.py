@@ -67,8 +67,15 @@ class Premise:
         self.grid_export = None
 
     def register(self, model: pyo.ConcreteModel, prefix: str = "") -> None:
+        """`prefix` namespaces this premise's device components (e.g. "house_01_"), so
+        premises with identically named devices can share one model. The premise's own
+        components already carry its name."""
         if not hasattr(model, "T"):
             model.T = pyo.Set(initialize=self.time_grid.periods)
+        elif list(model.T) != list(self.time_grid.periods):
+            raise ValueError(f"{self.name}'s time grid doesn't match the model's other premises")
+        for device in self.devices:
+            device.namespace = prefix
 
         # Two passes (all build_vars, then all build_constraints) rather than one
         # register() per device in sequence: lets a device's constraints reference

@@ -96,6 +96,117 @@ def _print_bills(bills: dict, tariff, program) -> None:
                 typer.echo(f"  Note ({label}): {note}")
 
 
+def _money(value: float) -> str:
+    return f"-${-value:,.2f}" if value < 0 else f"${value:,.2f}"
+
+
+def _run_feeder(scenario: Path, output_dir: Optional[Path], no_counterfactual: bool) -> None:
+    import pandas as pd
+
+    from der_opt.network import loading_summary
+    from der_opt.scenarios import (
+        build_feeder_scenario,
+        load_feeder_config,
+        run_feeder_study,
+    )
+
+    built = build_feeder_scenario(load_feeder_config(scenario))
+    study = run_feeder_study(built, counterfactual=not no_counterfactual)
+    runs = study.runs
+    time_grid = built.premises[0].time_grid
+
+    typer.echo(f"Feeder scenario: {built.config.name}")
+    typer.echo(f"{len(built.premises)} houses on {len(built.feeder.elements)} network elements")
+    counts = built.houses.groupby("element")["devices"].apply(
+        lambda d: ", ".join(f"{sum(k in x.split(', ') for x in d)} {k}" for k in ("solar", "battery", "ev"))
+    )
+    for element, described in counts.items():
+        typer.echo(f"  {element}: {(built.houses['element'] == element).sum()} houses ({described})")
+
+    typer.echo(f"\nCosts over the run ({', '.join(runs)}):")
+    rows = {
+        "Customer bills": {k: r.house_costs["bill"].sum() for k, r in runs.items()},
+        "Battery/EV degradation": {k: r.house_costs["degradation"].sum() for k, r in runs.items()},
+    }
+    for cost_name in next(iter(runs.values())).network_costs:
+        rows["Transformer overload" if cost_name == "overload" else cost_name] = {
+            k: r.network_costs[cost_name] for k, r in runs.items()
+        }
+    rows["Total"] = {k: r.total for k, r in runs.items()}
+    width = max(len(name) for name in rows) + 2
+    typer.echo(" " * (width + 2) + "".join(f"{label:>16}" for label in runs))
+    for name, values in rows.items():
+        typer.echo(f"  {name:<{width}}" + "".join(f"{_money(values[k]):>16}" for k in runs))
+
+    typer.echo("\nPeak loading:")
+    summaries = {label: loading_summary(run.flows, built.feeder, time_grid) for label, run in runs.items()}
+    for element in built.feeder.elements:
+        parts = []
+        for label, summary in summaries.items():
+            row = summary.loc[element.name]
+            text = f"{label} {row['peak_kw']:.1f} kW"
+            if element.rating_kw:
+                text += f" ({row['peak_pct_of_rating']:.0f}%"
+                text += f", {row['hours_over']:.0f} h over)" if row["hours_over"] else ")"
+            parts.append(text)
+        rating = f" [{element.rating_kw:g} kW]" if element.rating_kw else ""
+        typer.echo(f"  {element.name}{rating}: " + "; ".join(parts))
+
+    prices = study.congestion_prices
+    typer.echo("\nCongestion prices, coordinated run ($/kWh through each element):")
+    if not study.prices_exact:
+        typer.echo("  (approximate: the model has integer variables, so these come from fix-and-resolve)")
+    for element in built.feeder.elements:
+        series = prices[element.name]
+        binding = series[series.abs() > 1e-3]
+        if binding.empty:
+            typer.echo(f"  {element.name}: none -- the limit never binds")
+        else:
+            typer.echo(
+                f"  {element.name}: up to ${binding.max():.2f} in {len(binding)} hours "
+                f"(highest {binding.idxmax()}); ${binding.sum() * time_grid.dt_hours:.2f} per kW over the run"
+            )
+
+    if "independent" in runs:
+        change = runs["coordinated"].house_costs.sum(axis=1) - runs["independent"].house_costs.sum(axis=1)
+        worse = change[change > 0.005]
+        typer.echo("\nCoordination vs each house optimizing alone:")
+        if worse.empty:
+            typer.echo("  no house pays more")
+        else:
+            typer.echo(
+                f"  {len(worse)} of {len(change)} houses pay more (by {_money(worse.sum())} in total, "
+                f"at most {_money(worse.max())}, {worse.idxmax()}), for a network saving of "
+                f"{_money(sum(runs['independent'].network_costs.values()) - sum(runs['coordinated'].network_costs.values()))}"
+            )
+    for note in study.notes:
+        typer.echo(f"  Note: {note}")
+
+    if output_dir is not None:
+        from der_opt.viz import feeder_loading_plot
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        houses = built.houses.copy()
+        for label, run in runs.items():
+            houses[f"bill_{label}"] = run.house_costs["bill"].round(2)
+        houses.to_csv(output_dir / "houses.csv")
+        pd.concat({label: run.flows for label, run in runs.items()}, axis=1).to_csv(output_dir / "flows_kw.csv")
+        pd.concat(summaries).to_csv(output_dir / "loading.csv")
+        prices.to_csv(output_dir / "congestion_prices.csv")
+        for label, run in runs.items():
+            frames = {}
+            for name, result in run.dispatches.items():
+                frame = result.device_dispatch.copy()
+                frame["grid_import"] = result.grid_import
+                frame["grid_export"] = result.grid_export
+                frames[name] = frame
+            pd.concat(frames, axis=1).to_csv(output_dir / f"dispatch_{label}.csv")
+        feeder_loading_plot({label: run.flows for label, run in runs.items()}, built.feeder, title=built.config.name).savefig(
+            output_dir / "feeder_loading.png", dpi=120
+        )
+        typer.echo(f"\nWrote CSVs and charts to {output_dir}")
+
+
 @app.command()
 def run(
     scenario: Path = typer.Argument(..., help="Path to a scenario YAML file"),
@@ -109,7 +220,9 @@ def run(
 ) -> None:
     """Solve a scenario and print a summary. If the scenario has a `counterfactual`
     section, also simulates that rule-based baseline and reports the value of
-    optimization. With --output-dir, writes CSVs and charts for everything printed."""
+    optimization. A scenario with a `feeder` section is a multi-house run: it compares
+    coordinated, independent and rule-based dispatch on the network. With
+    --output-dir, writes CSVs and charts for everything printed."""
     import pandas as pd
 
     from der_opt.pricing import extract_duals, value_breakdown
@@ -117,9 +230,16 @@ def run(
         build_billing,
         build_counterfactual_policies,
         build_premise,
+        is_feeder_scenario,
         load_scenario_config,
     )
     from der_opt.simulation import CounterfactualSimulator
+
+    if is_feeder_scenario(scenario):
+        if duals:
+            typer.echo("(feeder runs always report congestion prices; --duals adds nothing)")
+        _run_feeder(scenario, output_dir, no_counterfactual)
+        return
 
     config = load_scenario_config(scenario)
     premise = build_premise(config)
