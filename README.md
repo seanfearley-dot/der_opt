@@ -25,6 +25,7 @@ Check it works: `pytest -q` (should be all green).
 ```bash
 der-opt run examples/scenarios/battery_solar_lbnl_nbt.yaml
 der-opt run examples/scenarios/v2x_lbnl_nbt.yaml --duals -o out/v2x
+der-opt run examples/scenarios/battery_solar_lbnl_nbt_annual.yaml -o out/annual   # ~15 s
 ```
 
 It prints the optimal dispatch's cost broken down by source. If the scenario has a
@@ -32,6 +33,13 @@ It prints the optimal dispatch's cost broken down by source. If the scenario has
 cost and the **value of optimization** (counterfactual cost minus optimal cost), plus
 a note if a battery/EV ends the horizon with a different charge in the two runs (see
 Modeling caveats — that difference isn't priced, so it tilts the comparison).
+
+If the scenario has a `billing` section, it then bills both runs the way the utility
+would (see Billing below) and prints each bill, the **bill savings from optimization**,
+and the export credit each run leaves unused. **Trust the bill over the objective**:
+the optimizer values every exported kWh at the full export rate, while the bill applies
+NBT's limits on what export credit can offset — for a household that exports more than
+it uses, the two can disagree in sign.
 
 | Flag | Effect |
 |---|---|
@@ -49,13 +57,14 @@ Files written with `-o`:
 | `counterfactual_*.csv`, `counterfactual_dispatch.png` | the same for the counterfactual |
 | `comparison.png` | optimal vs. counterfactual grid flows and value breakdown |
 | `duals.csv`, `duals.png` | all dual families (long format), and a chart of the marginal value of energy at the meter (with `--duals`) |
+| `bill_cycles.csv`, `counterfactual_bill_cycles.csv` | per billing cycle: kWh, charges by bucket, credits earned and applied, amount due, credit balances (with `billing`) |
 
 State columns (`soc`, `temp`) are the value at the **start** of each period in both
 the optimal and counterfactual CSVs.
 
 The fastest way to a new scenario: **copy one of the files in `examples/scenarios/`
-and edit it.** Both are verified to reproduce their Python-script counterparts
-(`examples/04_*.py`, `examples/05_*.py`) exactly.
+and edit it.** They use real PG&E E-ELEC import rates; the Python scripts
+`examples/04_*.py` and `05_*.py` still use an illustrative placeholder import price.
 
 ## Scenario file reference
 
@@ -78,6 +87,10 @@ exclusive_import_export: true       # see Modeling caveats -- turn on whenever e
 counterfactual:                     # optional; see Counterfactuals below
   policies:
     battery: {type: self_consumption}
+
+billing:                            # optional; see Billing below
+  tariff: examples/data/tariffs/pge_e_elec_2026-06.yaml
+  program: {type: nbt, export_rates_csv: examples/data/pge_nbt_eec_2026.csv, acc_plus_per_kwh: 0.0088}
 ```
 
 ### Devices
@@ -115,8 +128,11 @@ Price series (`import_price` / `export_price`):
 {type: constant, price: 0.25}
 {type: daily_tou, hourly_pattern: [24 values, $/kWh by hour of day]}
 {type: csv, path: prices.csv, column: price}          # first column = timestamps
-{type: nbt_export, csv_path: examples/data/pge_nbt_eec_2026.csv}   # real PG&E NEM3/NBT
-                                                       # add include_produced: false for CCA/DA customers
+{type: retail_tariff, path: examples/data/tariffs/pge_e_elec_2026-06.yaml}  # total $/kWh of a billing tariff
+{type: nbt_export, csv_path: examples/data/pge_nbt_eec_2026.csv, adder_per_kwh: 0.0088}
+    # real PG&E NBT export rate; adder_per_kwh = ACC Plus for the customer's application
+    # year (residential: 2023 0.022, 2024 0.0176, 2025 0.0132, 2026 0.0088, 2027 0.0044);
+    # include_produced: false drops the generation half, for CCA/DA customers
 ```
 
 ### Data sources
@@ -161,10 +177,65 @@ Power limits default to the device's own. The counterfactual follows its rule on
 it doesn't enforce `departure_period`, `soc_final_min_frac`, or `charge_sources`
 (those are optimizer constraints).
 
+## Billing
+
+`der_opt.billing` computes a bill from interval import/export the way PG&E bills it.
+The rules come from PG&E's tariff sheets (Schedule NBT, Special Conditions 2 and 5;
+Schedule E-ELEC), not from memory:
+
+- **Imports** are billed on the retail tariff: per-kWh components by season and
+  time-of-use period, plus a daily base services charge by income tier.
+- **Exports** earn the hourly NBT export rate, which has a **generation** half and a
+  **delivery** half. Generation credit only offsets generation kWh charges; delivery
+  credit only offsets delivery kWh charges. Neither offsets non-bypassable charges
+  (public purpose programs, nuclear decommissioning, competition transition, wildfire
+  fund) or the base services charge. Imports and exports are never netted.
+- **ACC Plus** (the early-adopter export bonus) is a separate credit that offsets any
+  charge. It isn't in the export rate table — set it per customer.
+- **Unused credit** rolls month to month. At the annual true-up, charges paid earlier
+  in the year that later credits would have covered are credited back, and remaining
+  excess credit **carries forward** to the next year (not forfeited, unless the
+  customer leaves NBT).
+- **Net Surplus Compensation**: if a year's export kWh exceed import kWh, the surplus
+  is debited at PG&E's average NBT export rate and credited at the NSC rate. Both
+  change monthly and aren't in the tariff sheet, so they're inputs
+  (`nsc_rate_per_kwh`, `nsc_debit_rate_per_kwh`); without them the bill says NSC
+  wasn't computed.
+- **Billing cycles** default to calendar months; pass `cycle_start_dates` (meter-read
+  dates) to match a real bill. A true-up runs only when the data spans exactly 12
+  cycles; shorter runs report credit balances as of the end of the data. The base
+  services charge is charged per calendar day that has data.
+- **Holidays** (for the export rate's weekday vs. weekend/holiday split): PG&E's TOU
+  holiday list from Schedule E-19, on observed dates. E-ELEC itself prices every day
+  the same.
+
+**Tariff files.** `examples/data/tariffs/pge_e_elec_2026-06.yaml` itemizes E-ELEC
+(effective 2026-06-01) component by component, each tagged `generation`, `delivery`,
+or `nbc` — the tag decides what export credit may offset it. The file also carries
+the sheet's published total rates, and the loader refuses a file whose components
+don't add up to them, so a mistyped rate fails loudly. To update for a new rate
+change, copy the numbers from the current E-ELEC sheets (pages 2-3) and update
+`published_totals`.
+
+**Not yet covered:** NEM 2.0 (kWh netting by TOU period), CCA/Direct Access customers
+(their generation charges and credits come from the CCA), CARE/FERA discounts,
+tiered or baseline-credit rates, the California Climate Credit, and demand charges.
+None of this has been checked against a real bill yet — that's the real test.
+
 ## Modeling caveats worth knowing
 
 These all came up while building the examples — each produced a plausible-looking but
 wrong answer before it was understood:
+
+- **The optimizer doesn't know NBT's credit limits.** It values each exported kWh at
+  the full export rate, but on the bill the generation half of export credit can only
+  offset generation charges. A household that exports more than it uses runs out of
+  generation charges to offset, so extra exports just pile up unusable credit, while
+  the charges it actually pays (delivery, non-bypassable, base services) only fall by
+  importing less. In `battery_solar_lbnl_nbt_annual.yaml` the optimizer claims $395/yr
+  of value over self-consumption, but the optimal dispatch's **bill is $89 higher**,
+  with $513 more stranded credit. Check the bill section, not the objective, for
+  exporting households.
 
 - **Terminal SOC and fair comparisons.** Energy left in a battery/EV at the end of the
   horizon isn't valued, so whichever dispatch ends with *less* stored energy looks
@@ -186,9 +257,9 @@ wrong answer before it was understood:
   midday NBT export-price trough to charge; commercial BMS products charge greedily
   as soon as solar exceeds load. That gap is the value of smart control — the
   counterfactual policies in `der_opt.simulation` model the greedy behavior.
-- **Demand charges** use one peak over the whole horizon (not per billing month), and
-  **tiered tariffs** apply tiers per period (not monthly-cumulative). Fine for short
-  horizons; inaccurate for multi-month runs.
+- **Demand charges** in the optimizer use one peak over the whole horizon (not per
+  billing month), and the optimizer's URDB **tiered tariffs** apply tiers per period
+  (not monthly-cumulative). Fine for short horizons; inaccurate for multi-month runs.
 
 ## Python API
 
@@ -213,6 +284,7 @@ src/der_opt/
   premise/       Premise (composition + POI balance), value streams, tariffs
   pricing/       price series, dual extraction, value breakdown
   simulation/    counterfactual control policies + simulator
+  billing/       retail tariffs, PG&E holidays, bill engine (NBT credits, true-up)
   integrations/  LBNL load, EV model, PVWatts, PG&E NBT export rates
   scenarios/     YAML schema, loader, data-source resolvers
   viz/           heatmap, dispatch, value stack, duals, comparison charts

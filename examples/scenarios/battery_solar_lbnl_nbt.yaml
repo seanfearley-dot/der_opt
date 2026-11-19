@@ -3,9 +3,8 @@
 #   der-opt run examples/scenarios/battery_solar_lbnl_nbt.yaml --duals -o /tmp/out
 #
 # Needs /Users/seanearley/Documents/LBNL_Phase_4 (not part of this repo).
-# Import price is still an illustrative flat/TOU placeholder; export is PG&E's real
-# 2026 NBT rate, which can spike above that placeholder import price for a few
-# summer-evening hours -- hence exclusive_import_export: true below.
+# Import price is PG&E's E-ELEC rate; export is PG&E's real 2026 NBT rate, which can
+# exceed import price for a few summer-evening hours -- hence exclusive_import_export.
 
 name: lbnl_reference_house
 
@@ -44,15 +43,12 @@ value_streams:
   - type: energy_arbitrage
     params:
       import_price:
-        type: daily_tou
-        hourly_pattern:
-          [0.12, 0.12, 0.12, 0.12, 0.12, 0.12,
-           0.22, 0.22, 0.22, 0.22, 0.22, 0.22, 0.22, 0.22, 0.22, 0.22,
-           0.45, 0.45, 0.45, 0.45, 0.45,
-           0.22, 0.22, 0.22]
+        type: retail_tariff # PG&E E-ELEC, the rate NBT customers are required to be on
+        path: examples/data/tariffs/pge_e_elec_2026-06.yaml
       export_price:
         type: nbt_export
         csv_path: examples/data/pge_nbt_eec_2026.csv
+        adder_per_kwh: 0.0088 # ACC Plus, 2026 residential applicants
 
 external_load:
   source: lbnl_gross_load
@@ -70,3 +66,13 @@ exclusive_import_export: true
 counterfactual:
   policies:
     battery: {type: self_consumption}
+
+# Bill both runs the way PG&E would: E-ELEC charges, NBT export credits (generation and
+# delivery halves offsetting only their own charges), ACC Plus, base services charge.
+billing:
+  tariff: examples/data/tariffs/pge_e_elec_2026-06.yaml
+  income_tier: 3
+  program:
+    type: nbt
+    export_rates_csv: examples/data/pge_nbt_eec_2026.csv
+    acc_plus_per_kwh: 0.0088

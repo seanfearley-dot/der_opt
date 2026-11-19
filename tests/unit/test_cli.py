@@ -100,3 +100,41 @@ def test_run_requires_subcommand_name():
     # @app.callback() forces subcommand-style dispatch -- this guards that choice.
     result = runner.invoke(app, [str(FIXTURE_PATH)])
     assert result.exit_code != 0
+
+
+REPO = Path(__file__).parent.parent.parent
+BILLING_SECTION = f"""
+billing:
+  tariff: {REPO / "examples/data/tariffs/pge_e_elec_2026-06.yaml"}
+  program:
+    type: nbt
+    export_rates_csv: {REPO / "examples/data/pge_nbt_eec_2026.csv"}
+    acc_plus_per_kwh: 0.0088
+"""
+
+
+def test_billing_section_prints_bills_for_both_runs(tmp_path):
+    scenario = tmp_path / "billed.yaml"
+    scenario.write_text(
+        FIXTURE_PATH.read_text()
+        + "\ncounterfactual:\n  policies:\n    battery: {type: self_consumption}\n"
+        + BILLING_SECTION
+    )
+    output_dir = tmp_path / "out"
+    result = runner.invoke(app, ["run", str(scenario), "-o", str(output_dir)])
+    assert result.exit_code == 0, result.stdout
+    assert "Bill (PG&E E-ELEC (bundled), NBT):" in result.stdout
+    assert "optimal: billed $" in result.stdout
+    assert "counterfactual: billed $" in result.stdout
+    assert "Bill savings from optimization: $" in result.stdout
+    assert "No true-up" in result.stdout  # 4 hours of data, not a 12-cycle year
+    assert (output_dir / "bill_cycles.csv").exists()
+    assert (output_dir / "counterfactual_bill_cycles.csv").exists()
+
+
+def test_billing_unknown_program_type_raises(tmp_path):
+    scenario = tmp_path / "bad_program.yaml"
+    scenario.write_text(FIXTURE_PATH.read_text() + BILLING_SECTION.replace("type: nbt", "type: nem2"))
+    result = runner.invoke(app, ["run", str(scenario)])
+    assert result.exit_code != 0
+    assert "only 'nbt'" in str(result.exception)

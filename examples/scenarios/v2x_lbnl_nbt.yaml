@@ -41,15 +41,12 @@ value_streams:
   - type: energy_arbitrage
     params:
       import_price:
-        type: daily_tou
-        hourly_pattern:
-          [0.12, 0.12, 0.12, 0.12, 0.12, 0.12,
-           0.22, 0.22, 0.22, 0.22, 0.22, 0.22, 0.22, 0.22, 0.22, 0.22,
-           0.45, 0.45, 0.45, 0.45, 0.45,
-           0.22, 0.22, 0.22]
+        type: retail_tariff # PG&E E-ELEC, the rate NBT customers are required to be on
+        path: examples/data/tariffs/pge_e_elec_2026-06.yaml
       export_price:
         type: nbt_export
         csv_path: examples/data/pge_nbt_eec_2026.csv
+        adder_per_kwh: 0.0088 # ACC Plus, 2026 residential applicants
 
 external_load:
   source: lbnl_net_load # no solar device in this scenario -- net, not gross
@@ -65,3 +62,17 @@ exclusive_import_export: true
 counterfactual:
   policies:
     ev: {type: rule_based_ev}
+
+# NOTE: this home has no solar. NBT is for customers with renewable generation, so
+# whether V2X exports from a no-solar home would be compensated at NBT rates at all is an
+# open question -- treat the export side of this example as an assumption.
+#
+# Bill both runs the way PG&E would: E-ELEC charges, NBT export credits (generation and
+# delivery halves offsetting only their own charges), ACC Plus, base services charge.
+billing:
+  tariff: examples/data/tariffs/pge_e_elec_2026-06.yaml
+  income_tier: 3
+  program:
+    type: nbt
+    export_rates_csv: examples/data/pge_nbt_eec_2026.csv
+    acc_plus_per_kwh: 0.0088

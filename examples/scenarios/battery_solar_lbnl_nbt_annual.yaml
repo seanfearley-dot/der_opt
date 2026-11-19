@@ -1,0 +1,84 @@
+# Battery + solar for a full year on real LBNL load/PV, real E-ELEC import rates, and
+# real NBT export rates, billed through a 12-cycle Relevant Period with true-up.
+#   der-opt run examples/scenarios/battery_solar_lbnl_nbt_annual.yaml -o out/annual
+# Takes ~15 seconds. Needs /Users/seanearley/Documents/LBNL_Phase_4.
+#
+# The instructive part is the bill, not the optimizer's objective: this household
+# exports more than it uses, so most of the extra export value the optimizer chases
+# is generation credit with nothing left to offset -- it piles up unused, while the
+# charges the household actually pays (delivery, non-bypassable, base services) are
+# only reduced by importing less. See the README's "Modeling caveats".
+#
+# Net Surplus Compensation isn't computed here: add nsc_rate_per_kwh and
+# nsc_debit_rate_per_kwh to billing.program (PG&E publishes both monthly).
+
+name: lbnl_reference_house_annual
+
+time_grid:
+  resolution_minutes: 60
+  horizon_steps: 8760 # one year
+  start: "2026-01-01T00:00:00"
+
+devices:
+  - type: solar
+    name: solar
+    params:
+      available_kw:
+        source: lbnl_pv
+        scenario_dir: /Users/seanearley/Documents/LBNL_Phase_4/anonymized-1in2-midDemand-with_EE_FS-2025
+        cluster_name: res-pge-res_unknown-allSize-hot_dry-nonCare-NoLCA-AllDay-0_50pct
+        start_hour_ending: 1 # Jan 1
+
+  - type: battery
+    name: battery
+    params:
+      capacity_kwh: 13.5
+      p_max_charge_kw: 5.0
+      p_max_discharge_kw: 5.0
+      eta_charge: 0.96
+      eta_discharge: 0.96
+      soc_init_frac: 0.5
+      degradation_cost_per_kwh: 0.015
+      # no soc_final_min_frac: see the Python example's comment -- a terminal floor
+      # here would also need to apply fairly to any counterfactual comparison.
+      # (charge_sources: [solar] would restrict this battery to charging only from
+      # concurrent solar generation -- not used here, to match examples/04 exactly,
+      # but available; see the README's device reference.)
+
+value_streams:
+  - type: energy_arbitrage
+    params:
+      import_price:
+        type: retail_tariff # PG&E E-ELEC, the rate NBT customers are required to be on
+        path: examples/data/tariffs/pge_e_elec_2026-06.yaml
+      export_price:
+        type: nbt_export
+        csv_path: examples/data/pge_nbt_eec_2026.csv
+        adder_per_kwh: 0.0088 # ACC Plus, 2026 residential applicants
+
+external_load:
+  source: lbnl_gross_load
+  scenario_dir: /Users/seanearley/Documents/LBNL_Phase_4/anonymized-1in2-midDemand-with_EE_FS-2025
+  cluster_name: res-pge-res_unknown-allSize-hot_dry-nonCare-NoLCA-AllDay-0_50pct
+  start_hour_ending: 1
+
+poi_limit_kw: 15.0
+exclusive_import_export: true
+
+# The baseline to compare against: a battery running plain self-consumption (charge
+# from solar surplus, discharge to cover load, no price awareness) -- roughly what an
+# off-the-shelf home battery does. Solar isn't listed, so it generates everything
+# available, as it would in reality.
+counterfactual:
+  policies:
+    battery: {type: self_consumption}
+
+# Bill both runs the way PG&E would: E-ELEC charges, NBT export credits (generation and
+# delivery halves offsetting only their own charges), ACC Plus, base services charge.
+billing:
+  tariff: examples/data/tariffs/pge_e_elec_2026-06.yaml
+  income_tier: 3
+  program:
+    type: nbt
+    export_rates_csv: examples/data/pge_nbt_eec_2026.csv
+    acc_plus_per_kwh: 0.0088

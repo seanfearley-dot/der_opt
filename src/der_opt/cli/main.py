@@ -43,6 +43,37 @@ def _end_state_warnings(premise, simulator, tolerance_frac: float = 0.01) -> lis
     return warnings
 
 
+def _print_bills(bills: dict, tariff, program) -> None:
+    program_label = "NBT" if program is not None else "no export credit"
+    typer.echo(f"\nBill ({tariff.name}, {program_label}):")
+    for label, bill in bills.items():
+        summary = bill.summary
+        unused = summary["unused_credits"]
+        typer.echo(
+            f"  {label}: billed ${summary['billed']:.2f}"
+            + (f", net of true-up ${summary['net_cost']:.2f}" if bill.true_up is not None else "")
+        )
+        if program is not None:
+            typer.echo(
+                f"    unused export credit carried forward: generation ${unused['generation']:.2f}, "
+                f"delivery ${unused['delivery']:.2f}, ACC Plus ${unused['acc_plus']:.2f}"
+            )
+    if {"optimal", "counterfactual"} <= set(bills):
+        difference = bills["counterfactual"].summary["net_cost"] - bills["optimal"].summary["net_cost"]
+        typer.echo(f"  Bill savings from optimization: ${difference:.2f}")
+        unused_diff = sum(bills["optimal"].summary["unused_credits"].values()) - sum(
+            bills["counterfactual"].summary["unused_credits"].values()
+        )
+        if abs(unused_diff) > 0.01:
+            typer.echo(
+                f"  Note: the two runs end with ${abs(unused_diff):.2f} different unused credit, which "
+                "carries forward to later bills and isn't counted in the savings above."
+            )
+    notes = {note for bill in bills.values() for note in bill.notes}
+    for note in sorted(notes):
+        typer.echo(f"  Note: {note}")
+
+
 @app.command()
 def run(
     scenario: Path = typer.Argument(..., help="Path to a scenario YAML file"),
@@ -61,6 +92,7 @@ def run(
 
     from der_opt.pricing import extract_duals, value_breakdown
     from der_opt.scenarios import (
+        build_billing,
         build_counterfactual_policies,
         build_premise,
         load_scenario_config,
@@ -99,6 +131,19 @@ def run(
         for warning in _end_state_warnings(premise, simulator):
             typer.echo(f"  Note: {warning}")
 
+    bills = {}
+    billing = build_billing(config)
+    if billing is not None:
+        from der_opt.billing import bill_from_dispatch
+
+        tariff, program, bill_kwargs = billing
+        runs = {"optimal": dispatch}
+        if counterfactual is not None:
+            runs["counterfactual"] = counterfactual
+        for label, result in runs.items():
+            bills[label] = bill_from_dispatch(result, premise.time_grid, tariff, program, **bill_kwargs)
+        _print_bills(bills, tariff, program)
+
     dual_results = None
     if duals:
         dual_results = extract_duals(model, backend)
@@ -136,6 +181,10 @@ def run(
         breakdown_table = breakdown_table.fillna(0.0)
         breakdown_table.loc["total"] = breakdown_table.sum()
         breakdown_table.to_csv(output_dir / "value_breakdown.csv", index_label="source")
+
+        for label, bill in bills.items():
+            prefix = "" if label == "optimal" else "counterfactual_"
+            bill.cycles.to_csv(output_dir / f"{prefix}bill_cycles.csv")
 
         if dual_results is not None:
             rows = [

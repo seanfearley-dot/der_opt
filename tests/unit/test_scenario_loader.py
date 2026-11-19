@@ -244,3 +244,35 @@ def test_counterfactual_policy_on_wrong_device_type_raises(tmp_path):
     config = load_scenario_config(path)
     with pytest.raises(ValueError, match="wrong policy for this device type"):
         build_counterfactual_policies(config, build_premise(config))
+
+
+def test_retail_tariff_and_nbt_adder_price_types(tmp_path):
+    repo = Path(__file__).parent.parent.parent
+    scenario_yaml = f"""
+name: tariff_price_test
+time_grid:
+  resolution_minutes: 60
+  horizon_steps: 24
+  start: "2026-07-15T00:00:00"
+devices: []
+value_streams:
+  - type: energy_arbitrage
+    params:
+      import_price:
+        type: retail_tariff
+        path: {repo / "examples/data/tariffs/pge_e_elec_2026-06.yaml"}
+      export_price:
+        type: nbt_export
+        csv_path: {repo / "examples/data/pge_nbt_eec_2026.csv"}
+        adder_per_kwh: 0.0088
+external_load: [{", ".join(["1.0"] * 24)}]
+"""
+    path = tmp_path / "scenario.yaml"
+    path.write_text(scenario_yaml)
+    premise = load_scenario(path)
+    stream = premise.value_streams[0]
+    assert stream._import_rates[18] == pytest.approx(0.55214)  # E-ELEC summer peak
+    from der_opt.integrations.pge_nbt_export import NBTExportPriceSeries
+
+    without_adder = NBTExportPriceSeries(repo / "examples/data/pge_nbt_eec_2026.csv").values(premise.time_grid)
+    assert stream._export_rates == pytest.approx(without_adder + 0.0088)

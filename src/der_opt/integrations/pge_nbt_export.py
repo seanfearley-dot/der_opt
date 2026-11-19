@@ -47,33 +47,52 @@ def load_eec_table(csv_path: str | Path) -> pd.DataFrame:
     return pd.read_csv(csv_path)
 
 
-class NBTExportPriceSeries(PriceSeries):
-    """Export PriceSeries backed by a PG&E EEC table. Weekends are detected from the
-    TimeGrid's own timestamps (Sat/Sun); recognized holidays (which PG&E also prices
-    at the weekend/holiday rate) aren't accounted for -- a documented simplification,
-    not a silent one."""
+def eec_component_rates(csv_path: str | Path, timestamps) -> pd.DataFrame:
+    """Per-interval generation ("produced") and delivery ("delivered") export credit
+    rates, $/kWh. The two halves are kept separate because NBT applies them separately:
+    generation credits only offset generation charges, delivery credits only delivery
+    charges (NBT Special Condition 2.d). Weekends and PG&E holidays get the
+    weekend/holiday rate (see der_opt.billing.holidays)."""
+    from der_opt.billing.holidays import is_weekend_or_holiday
 
-    def __init__(self, csv_path: str | Path, include_produced: bool = True):
-        table = load_eec_table(csv_path)
+    table = load_eec_table(csv_path)
+    lookup = {
+        (row.day_type, row.month, int(row.hour)): (float(row.produced_usd_per_kwh), float(row.delivered_usd_per_kwh))
+        for row in table.itertuples()
+    }
+    index = pd.DatetimeIndex(timestamps)
+    generation, delivery = [], []
+    for ts in index:
+        day_type = "weekend_holiday" if is_weekend_or_holiday(ts.date()) else "weekday"
+        key = (day_type, _MONTH_NAMES[ts.month - 1], ts.hour)
+        if key not in lookup:
+            raise ValueError(f"no EEC rate found for {ts} (key={key})")
+        g, d = lookup[key]
+        generation.append(g)
+        delivery.append(d)
+    return pd.DataFrame({"generation": generation, "delivery": delivery}, index=index)
+
+
+class NBTExportPriceSeries(PriceSeries):
+    """Export PriceSeries backed by a PG&E EEC table: generation + delivery halves, plus
+    an optional flat ACC Plus adder ($/kWh, by interconnection-application year; e.g.
+    0.0088 for 2026 residential -- see NBT Rates section D). Weekends and PG&E holidays
+    get the weekend/holiday rate.
+
+    include_produced=False drops the generation half, for CCA/Direct Access customers,
+    whose generation export credit comes from their CCA, not PG&E."""
+
+    def __init__(self, csv_path: str | Path, include_produced: bool = True, adder_per_kwh: float = 0.0):
+        self.csv_path = csv_path
         self.include_produced = include_produced
-        self._lookup: dict[tuple[str, str, int], float] = {}
-        for _, row in table.iterrows():
-            value = row["delivered_usd_per_kwh"]
-            if include_produced:
-                value += row["produced_usd_per_kwh"]
-            self._lookup[(row["day_type"], row["month"], int(row["hour"]))] = float(value)
+        self.adder_per_kwh = adder_per_kwh
 
     def values(self, time_grid: TimeGrid) -> np.ndarray:
         if time_grid.start is None:
             raise ValueError("TimeGrid.start is required to look up NBT export rates")
-        rates = []
-        for ts in time_grid.timestamps():
-            day_type = "weekend_holiday" if ts.weekday() >= 5 else "weekday"
-            key = (day_type, _MONTH_NAMES[ts.month - 1], ts.hour)
-            if key not in self._lookup:
-                raise ValueError(f"no EEC rate found for {ts} (key={key})")
-            rates.append(self._lookup[key])
-        return np.array(rates, dtype=float)
+        rates = eec_component_rates(self.csv_path, time_grid.timestamps())
+        total = rates["delivery"] + (rates["generation"] if self.include_produced else 0.0)
+        return total.to_numpy(dtype=float) + self.adder_per_kwh
 
 
 def parse_eec_price_sheet_pdf(pdf_path: str | Path) -> dict[str, list[dict]]:

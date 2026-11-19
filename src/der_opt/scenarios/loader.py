@@ -97,9 +97,18 @@ def _build_price_series(config: dict) -> PriceSeries:
     if kind == "nbt_export":
         from der_opt.integrations.pge_nbt_export import NBTExportPriceSeries
 
-        return NBTExportPriceSeries(config["csv_path"], include_produced=config.get("include_produced", True))
+        return NBTExportPriceSeries(
+            config["csv_path"],
+            include_produced=config.get("include_produced", True),
+            adder_per_kwh=config.get("adder_per_kwh", 0.0),
+        )
+    if kind == "retail_tariff":
+        from der_opt.billing import RetailTariffPriceSeries, load_retail_tariff
+
+        return RetailTariffPriceSeries(load_retail_tariff(config["path"]))
     raise ValueError(
-        f"Unknown price series type {kind!r}; expected 'constant', 'csv', 'daily_tou', or 'nbt_export'"
+        f"Unknown price series type {kind!r}; expected 'constant', 'csv', 'daily_tou', "
+        "'nbt_export', or 'retail_tariff'"
     )
 
 
@@ -233,3 +242,25 @@ def build_counterfactual_policies(config: ScenarioConfig, premise: Premise) -> d
             )
         policies[device_name] = _build_policy(device_name, policy_config, devices[device_name])
     return policies
+
+
+def build_billing(config: ScenarioConfig):
+    """(tariff, program, compute_bill keyword args) for the scenario's billing section,
+    or None if it has none."""
+    if config.billing is None:
+        return None
+    from der_opt.billing import NBTProgram, load_retail_tariff
+
+    billing = config.billing
+    tariff = load_retail_tariff(billing.tariff)
+    program = None
+    if billing.program is not None:
+        params = dict(billing.program)
+        kind = params.pop("type", None)
+        if kind != "nbt":
+            raise ValueError(f"Unknown billing program type {kind!r}; only 'nbt' is supported so far")
+        program = NBTProgram(**params)
+    kwargs = {"income_tier": billing.income_tier, "relevant_period_cycles": billing.relevant_period_cycles}
+    if billing.cycle_start_dates:
+        kwargs["cycle_start_dates"] = [datetime.fromisoformat(d).date() for d in billing.cycle_start_dates]
+    return tariff, program, kwargs

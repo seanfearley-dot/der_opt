@@ -43,6 +43,19 @@ class CounterfactualConfig(BaseModel):
     policies: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
+class BillingConfig(BaseModel):
+    """Bills the optimal (and counterfactual) dispatch on a retail tariff. `program` is
+    {type: nbt, export_rates_csv: ..., acc_plus_per_kwh: ..., ...} (see
+    der_opt.billing.NBTProgram for all fields), or omitted for no export credit.
+    `cycle_start_dates` are meter-read dates (ISO); calendar months if omitted."""
+
+    tariff: str
+    income_tier: int = 3
+    program: Optional[dict[str, Any]] = None
+    cycle_start_dates: Optional[list[str]] = None
+    relevant_period_cycles: int = 12
+
+
 class ScenarioConfig(BaseModel):
     """Top-level structure of a scenario YAML file. Per-device and per-value-stream
     `params` are intentionally left as loose dicts rather than one pydantic model per
@@ -65,3 +78,4 @@ class ScenarioConfig(BaseModel):
     poi_limit_kw: Optional[float] = None
     exclusive_import_export: bool = False
     counterfactual: Optional[CounterfactualConfig] = None
+    billing: Optional[BillingConfig] = None

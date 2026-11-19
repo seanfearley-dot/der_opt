@@ -1,4 +1,5 @@
 from der_opt.scenarios.loader import (
+    build_billing,
     build_counterfactual_policies,
     build_premise,
     load_scenario,
@@ -8,6 +9,7 @@ from der_opt.scenarios.schema import ScenarioConfig
 
 __all__ = [
     "ScenarioConfig",
+    "build_billing",
     "build_counterfactual_policies",
     "build_premise",
     "load_scenario",
