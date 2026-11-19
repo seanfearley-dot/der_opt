@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 from der_opt.billing import NBTProgram, bill_from_dispatch, load_retail_tariff
-from der_opt.billing.objective import NBTBill
+from der_opt.billing.objective import NBTBill, NEM2Bill
 from der_opt.devices import BatteryStorage, SolarPV
 from der_opt.premise import EnergyArbitrage, Premise
 from der_opt.pricing import ConstantPriceSeries
@@ -127,3 +127,67 @@ def test_energy_arbitrage_charges_energy_not_power_on_sub_hourly_grids():
     premise = Premise("house", tg, devices=[], value_streams=[stream], external_load=[2.0] * 4, poi_limit_kw=10)
     dispatch, _, _ = premise.solve()
     assert dispatch.objective_value == pytest.approx(2.0 * 1.0 * 0.10)  # 2 kW for an hour
+
+
+# --- NEM2Bill ----------------------------------------------------------------------
+
+E_TOU_C = REPO / "examples" / "data" / "tariffs" / "pge_e_tou_c_2026-06.yaml"
+
+
+def _nem2_house(stream_factory, start=datetime(2026, 7, 13), days=3, solar_peak_kw=8.0):
+    tg = TimeGrid(resolution_minutes=60, horizon_steps=24 * days, start=start)
+    hours = np.arange(24 * days) % 24
+    solar_kw = np.clip(solar_peak_kw * np.sin((hours - 6) / 12 * np.pi), 0, None)
+    load_kw = 1.0 + 1.5 * ((hours >= 17) & (hours < 22))
+    battery = BatteryStorage(
+        "battery", tg, capacity_kwh=13.5, p_max_charge_kw=5, p_max_discharge_kw=5,
+        eta_charge=0.96, eta_discharge=0.96, degradation_cost_per_kwh=0.015,
+    )
+    solar = SolarPV("solar", tg, available_kw=solar_kw)
+    premise = Premise(
+        "house", tg, devices=[battery, solar], value_streams=[stream_factory(tg)],
+        external_load=load_kw, poi_limit_kw=15,
+    )
+    return premise, tg
+
+
+@pytest.mark.parametrize("solar_peak_kw", [8.0, 2.0])  # net generator, net consumer
+def test_nem2_objective_equals_bill_on_e_tou_c(solar_peak_kw):
+    from der_opt.billing import NEM2Program
+
+    tariff = load_retail_tariff(E_TOU_C)
+    program = NEM2Program()
+    premise, tg = _nem2_house(
+        lambda tg: NEM2Bill(tariff, program, tg, baseline_territory="R"), solar_peak_kw=solar_peak_kw
+    )
+    dispatch, _, _ = premise.solve()
+    degradation = dispatch.device_dispatch["battery.cost"].sum()
+    bill = bill_from_dispatch(dispatch, tg, tariff, program, baseline_territory="R")
+    assert dispatch.objective_value - degradation == pytest.approx(bill.summary["net_cost"], abs=1e-4)
+
+
+def test_nem2_objective_equals_bill_with_baseline_on_both_sides_of_zero(tou_with_baseline):
+    """Two cycles under a true-up: one a net consumer, one a net generator past its
+    baseline allowance -- exercises every branch of the baseline formulation."""
+    from datetime import date as _date
+
+    from der_opt.billing import NEM2Program
+
+    program = NEM2Program(nsc_rate_per_kwh=0.03)
+    tg = TimeGrid(resolution_minutes=60, horizon_steps=48, start=datetime(2026, 6, 1))
+    load = [1.0] * 24 + [-2.0] * 24
+    kwargs = {"baseline_territory": "X", "cycle_start_dates": [_date(2026, 6, 1), _date(2026, 6, 2)]}
+    for cycles in (2, 12):
+        stream = NEM2Bill(tou_with_baseline, program, tg, relevant_period_cycles=cycles, **kwargs)
+        premise = Premise("house", tg, devices=[], value_streams=[stream], external_load=load, poi_limit_kw=10)
+        dispatch, _, _ = premise.solve()
+        engine = stream.evaluate_numeric(dispatch.grid_import.to_numpy(), dispatch.grid_export.to_numpy(), tg)
+        assert dispatch.objective_value == pytest.approx(engine, abs=1e-6), cycles
+
+
+def test_nem2_needs_a_baseline_territory_for_a_baseline_tariff():
+    from der_opt.billing import NEM2Program
+
+    tg = TimeGrid(resolution_minutes=60, horizon_steps=24, start=datetime(2026, 7, 1))
+    with pytest.raises(ValueError, match="baseline_territory"):
+        NEM2Bill(load_retail_tariff(E_TOU_C), NEM2Program(), tg)

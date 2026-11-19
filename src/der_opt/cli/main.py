@@ -44,11 +44,28 @@ def _end_state_warnings(premise, simulator, tolerance_frac: float = 0.01) -> lis
 
 
 def _print_bills(bills: dict, tariff, program) -> None:
-    program_label = "NBT" if program is not None else "no export credit"
+    from der_opt.billing import NEM2Program
+
+    nem2 = isinstance(program, NEM2Program)
+    program_label = "NEM2" if nem2 else "NBT" if program is not None else "no export credit"
     typer.echo(f"\nBill ({tariff.name}, {program_label}):")
     for label, bill in bills.items():
         summary = bill.summary
         unused = summary["unused_credits"]
+        if nem2:
+            # NEM2 bills non-bypassable + base services monthly; energy settles at true-up
+            typer.echo(
+                f"  {label}: ${summary['net_cost']:.2f} "
+                f"(monthly charges ${summary['billed']:.2f}"
+                + (f", energy at true-up ${bill.true_up['energy_owed']:.2f}" if bill.true_up else "")
+                + (f", NSC -${bill.true_up['nsc_credit']:.2f}" if bill.true_up and bill.true_up["nsc_credit"] else "")
+                + ")"
+            )
+            if bill.true_up and bill.true_up["credit_zeroed"]:
+                typer.echo(f"    energy credit zeroed at true-up: ${bill.true_up['credit_zeroed']:.2f}")
+            elif unused["energy"]:
+                typer.echo(f"    energy credit accrued, not yet settled: ${unused['energy']:.2f}")
+            continue
         typer.echo(
             f"  {label}: billed ${summary['billed']:.2f}"
             + (f", net of true-up ${summary['net_cost']:.2f}" if bill.true_up is not None else "")
@@ -64,7 +81,7 @@ def _print_bills(bills: dict, tariff, program) -> None:
         unused_diff = sum(bills["optimal"].summary["unused_credits"].values()) - sum(
             bills["counterfactual"].summary["unused_credits"].values()
         )
-        if abs(unused_diff) > 0.01:
+        if abs(unused_diff) > 0.01 and not nem2:
             typer.echo(
                 f"  Note: the two runs end with ${abs(unused_diff):.2f} different unused credit, which "
                 "carries forward to later bills and isn't counted in the savings above."

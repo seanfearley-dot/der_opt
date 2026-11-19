@@ -16,6 +16,8 @@ Follows PG&E Schedule NBT (Net Billing Tariff) Special Condition 2 for export cr
     NSC rate (Special Condition 5.d). Both rates change monthly and aren't in the
     tariff sheet, so they're inputs here.
 
+NEM 2.0 (PG&E Schedule NEM2) is billed by _compute_nem2_bill below; see its docstring.
+
 Bundled-service customers only: a CCA/Direct Access customer's generation charges and
 credits are billed by their CCA, which this doesn't model.
 """
@@ -54,6 +56,19 @@ class NBTProgram:
     carry_in_acc_plus: float = 0.0
 
 
+@dataclass
+class NEM2Program:
+    """NEM 2.0 settings for one customer (PG&E Schedule NEM2, for systems that applied
+    before April 15, 2023; 20 years from interconnection).
+
+    nsc_rate_per_kwh: Net Surplus Compensation rate for the true-up month (PG&E
+        publishes it monthly: a 12-month average of daytime wholesale prices). Only used
+        at a true-up with net surplus; if missing then, the bill notes NSC wasn't computed.
+    """
+
+    nsc_rate_per_kwh: float | None = None
+
+
 def _clean(value: float) -> float:
     """Plain float, with floating-point residue (e.g. -5e-14) snapped to zero."""
     value = float(value)
@@ -83,10 +98,12 @@ def compute_bill(
     import_kwh,
     export_kwh,
     tariff: RetailTariff,
-    program: NBTProgram | None = None,
+    program: NBTProgram | NEM2Program | None = None,
     income_tier: int = 3,
     cycle_start_dates: list[date] | None = None,
     relevant_period_cycles: int = 12,
+    baseline_territory: str | None = None,
+    baseline_code: str = "basic",
 ) -> Bill:
     """Bill for interval data. `timestamps` mark the start of each interval;
     `import_kwh`/`export_kwh` are energy (kWh) per interval, any interval length.
@@ -98,6 +115,9 @@ def compute_bill(
 
     A true-up runs only when the data spans exactly `relevant_period_cycles` cycles;
     otherwise credit balances are reported as of the end of the data.
+
+    baseline_territory / baseline_code: the customer's baseline territory letter and
+    "basic" or "all_electric"; required if the tariff has a baseline credit.
     """
     index = pd.DatetimeIndex(timestamps)
     imports = np.asarray(import_kwh, dtype=float)
@@ -112,9 +132,20 @@ def compute_bill(
         raise ValueError(f"tariff has no base services charge for income tier {income_tier}")
     bsc_per_day = tariff.base_services_charge_per_day.get(tier_key, 0.0)
 
+    cycle_of = _assign_cycles(index, cycle_start_dates)
+    if tariff.baseline is not None and baseline_territory is None:
+        raise ValueError(f"{tariff.name} has a baseline credit: pass baseline_territory (e.g. 'X')")
+    if isinstance(program, NEM2Program):
+        return _compute_nem2_bill(
+            index, imports, exports, tariff, program, bsc_per_day, cycle_of,
+            relevant_period_cycles, baseline_territory, baseline_code,
+        )
+    if tariff.baseline is not None and program is not None:
+        raise NotImplementedError("a baseline-credit tariff under NBT isn't supported (NBT bills on E-ELEC)")
+
     rates = tariff.bucket_rates(index)
     frame = pd.DataFrame({
-        "cycle": _assign_cycles(index, cycle_start_dates),
+        "cycle": cycle_of,
         "date": index.normalize(),
         "import_kwh": imports,
         "export_kwh": exports,
@@ -140,6 +171,12 @@ def compute_bill(
     ]].sum()
     cycles["days"] = grouped["date"].nunique()
     cycles["base_services_charge"] = cycles["days"] * bsc_per_day
+    if tariff.baseline is not None:  # no export program: a plain usage discount
+        allowance = grouped["date"].agg(lambda dates: tariff.baseline.allowance_kwh(
+            dates.unique(), tariff.season_by_month, baseline_territory, baseline_code
+        ))
+        cycles["baseline_kwh"] = np.minimum(cycles["import_kwh"], allowance)
+        cycles[f"{tariff.baseline.bucket}_charges"] -= cycles["baseline_kwh"] * tariff.baseline.credit_per_kwh
 
     gen_balance = program.carry_in_generation if program else 0.0
     del_balance = program.carry_in_delivery if program else 0.0
@@ -258,7 +295,7 @@ def _true_up(cycles: pd.DataFrame, program: NBTProgram, gen_balance: float, del_
     }.items()}
 
 
-def bill_from_dispatch(dispatch, time_grid, tariff: RetailTariff, program: NBTProgram | None = None, **kwargs) -> Bill:
+def bill_from_dispatch(dispatch, time_grid, tariff: RetailTariff, program: NBTProgram | NEM2Program | None = None, **kwargs) -> Bill:
     """compute_bill for a DispatchResult (optimal or counterfactual): converts its
     per-period grid import/export power (kW) to energy (kWh) for the period length."""
     if time_grid.start is None:
@@ -272,3 +309,114 @@ def bill_from_dispatch(dispatch, time_grid, tariff: RetailTariff, program: NBTPr
         program,
         **kwargs,
     )
+
+
+def _compute_nem2_bill(
+    index: pd.DatetimeIndex,
+    imports: np.ndarray,
+    exports: np.ndarray,
+    tariff: RetailTariff,
+    program: NEM2Program,
+    bsc_per_day: float,
+    cycle_of: pd.Series,
+    relevant_period_cycles: int,
+    baseline_territory: str | None,
+    baseline_code: str,
+) -> Bill:
+    """NEM 2.0, per PG&E Schedule NEM2 Special Conditions 2 and 5:
+      - each billing cycle, imports and exports are netted within each discrete TOU period
+        (season + period); net kWh are billed, or credited, at that period's rate (2.b),
+        excluding the non-bypassable charges
+      - non-bypassable charges (public purpose, nuclear decommissioning, competition
+        transition, wildfire fund) are paid on each interval's imports net of that
+        interval's exports, and no export credit reduces them (2.c)
+      - with a baseline-credit rate, the cycle's net kWh up to the baseline allowance get
+        the baseline rate: a net consumer's charges drop by the credit, and a net
+        generator's credit is valued at the baseline rate too, so it drops by the same
+        amount (2.a)
+      - the base services charge is paid monthly; energy charges accrue and are settled at
+        the true-up after 12 cycles (2.f, 2.h). Paying them monthly instead gives the same
+        total: overpayments are credited back at the true-up
+      - at the true-up, leftover credit is set to zero, and if exports exceed imports for
+        the year, the surplus kWh are paid the NSC rate (2.h, 5)
+    """
+    rates = tariff.bucket_rates(index)
+    frame = pd.DataFrame({
+        "cycle": cycle_of,
+        "date": index.normalize(),
+        "tou_period": [f"{tariff.season_by_month[ts.month]}_{tariff.period_by_hour[ts.hour]}" for ts in index],
+        "import_kwh": imports,
+        "export_kwh": exports,
+        "net_kwh": imports - exports,
+        "energy_rate": (rates["generation"] + rates["delivery"]).to_numpy(),
+        "nbc_charges": np.maximum(imports - exports, 0.0) * rates["nbc"].to_numpy(),
+    }, index=index)
+
+    by_period = frame.groupby(["cycle", "tou_period"]).agg(
+        net_kwh=("net_kwh", "sum"), rate_min=("energy_rate", "min"), rate_max=("energy_rate", "max")
+    )
+    if ((by_period["rate_max"] - by_period["rate_min"]).abs() > 1e-9).any():
+        raise ValueError("energy rate varies within a TOU period; NEM2 netting needs one rate per period")
+    by_period["energy_charges"] = by_period["net_kwh"] * by_period["rate_min"]
+
+    grouped = frame.groupby("cycle")
+    cycles = grouped[["import_kwh", "export_kwh", "net_kwh", "nbc_charges"]].sum()
+    cycles = cycles.join(by_period["net_kwh"].unstack("tou_period").add_prefix("net_kwh_").fillna(0.0))
+    cycles["energy_charges"] = by_period["energy_charges"].groupby(level="cycle").sum()
+    cycles["days"] = grouped["date"].nunique()
+    cycles["base_services_charge"] = cycles["days"] * bsc_per_day
+
+    if tariff.baseline is not None:
+        allowance = grouped["date"].agg(lambda dates: tariff.baseline.allowance_kwh(
+            dates.unique(), tariff.season_by_month, baseline_territory, baseline_code
+        ))
+        cycles["baseline_allowance_kwh"] = allowance
+        cycles["baseline_kwh"] = np.clip(cycles["net_kwh"], -allowance, allowance)
+        cycles["baseline_adjustment"] = -tariff.baseline.credit_per_kwh * cycles["baseline_kwh"]
+    else:
+        cycles["baseline_adjustment"] = 0.0
+    cycles["energy_due"] = cycles["energy_charges"] + cycles["baseline_adjustment"]
+    cycles["energy_balance"] = cycles["energy_due"].cumsum()
+    cycles["amount_due"] = cycles["nbc_charges"] + cycles["base_services_charge"]
+    cycles.index.name = "cycle_start"
+
+    notes: list[str] = []
+    billed = float(cycles["amount_due"].sum())
+    balance = float(cycles["energy_balance"].iloc[-1])
+    true_up = None
+    if len(cycles) == relevant_period_cycles:
+        surplus_kwh = max(0.0, float(cycles["export_kwh"].sum() - cycles["import_kwh"].sum()))
+        nsc_credit = 0.0
+        if surplus_kwh > 0:
+            if program.nsc_rate_per_kwh is None:
+                notes.append(
+                    f"Net surplus of {surplus_kwh:.0f} kWh, but NSC wasn't computed: pass "
+                    "nsc_rate_per_kwh (published monthly by PG&E)."
+                )
+            else:
+                nsc_credit = surplus_kwh * program.nsc_rate_per_kwh
+        true_up = {key: _clean(value) for key, value in {
+            "energy_owed": max(0.0, balance),
+            "credit_zeroed": max(0.0, -balance),
+            "net_surplus_kwh": surplus_kwh,
+            "nsc_credit": nsc_credit,
+        }.items()}
+        net_cost = billed + true_up["energy_owed"] - nsc_credit
+        unused = 0.0  # zeroed, not carried forward
+    else:
+        notes.append(
+            f"No true-up: the data spans {len(cycles)} billing cycle(s), not a full "
+            f"{relevant_period_cycles}-cycle Relevant Period. Net energy charges accrued so far "
+            f"are ${balance:.2f}; the bill counts them if positive, and a credit as $0."
+        )
+        net_cost = billed + max(0.0, balance)
+        unused = max(0.0, -balance)
+
+    summary = {
+        "import_kwh": _clean(cycles["import_kwh"].sum()),
+        "export_kwh": _clean(cycles["export_kwh"].sum()),
+        "billed": _clean(billed),
+        "net_cost": _clean(net_cost),
+        "unused_credits": {"energy": _clean(unused)},
+    }
+    return Bill(cycles=cycles, true_up=true_up, summary=summary, notes=notes)

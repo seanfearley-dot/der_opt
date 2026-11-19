@@ -24,7 +24,7 @@ class DeviceConfig(BaseModel):
 
 
 class ValueStreamConfig(BaseModel):
-    type: Literal["energy_arbitrage", "tariff_energy_charge", "demand_charge", "capacity_payment", "nbt_bill"]
+    type: Literal["energy_arbitrage", "tariff_energy_charge", "demand_charge", "capacity_payment", "nbt_bill", "nem2_bill"]
     params: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -46,14 +46,19 @@ class CounterfactualConfig(BaseModel):
 class BillingConfig(BaseModel):
     """Bills the optimal (and counterfactual) dispatch on a retail tariff. `program` is
     {type: nbt, export_rates_csv: ..., acc_plus_per_kwh: ..., ...} (see
-    der_opt.billing.NBTProgram for all fields), or omitted for no export credit.
-    `cycle_start_dates` are meter-read dates (ISO); calendar months if omitted."""
+    der_opt.billing.NBTProgram), {type: nem2, nsc_rate_per_kwh: ...} (see
+    der_opt.billing.NEM2Program), or omitted for no export credit.
+    `cycle_start_dates` are meter-read dates (ISO); calendar months if omitted.
+    `baseline_territory` (e.g. "X") and `baseline_code` ("basic"/"all_electric") are
+    needed for a tariff with a baseline credit, such as E-TOU-C."""
 
     tariff: str
     income_tier: int = 3
     program: Optional[dict[str, Any]] = None
     cycle_start_dates: Optional[list[str]] = None
     relevant_period_cycles: int = 12
+    baseline_territory: Optional[str] = None
+    baseline_code: str = "basic"
 
 
 class ScenarioConfig(BaseModel):

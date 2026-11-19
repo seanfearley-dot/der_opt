@@ -123,20 +123,27 @@ def _build_tariff(config: dict) -> TariffSchedule:
 
 def _build_value_stream(config: ValueStreamConfig, time_grid: TimeGrid, scenario: ScenarioConfig) -> ValueStream:
     params = config.params
-    if config.type == "nbt_bill":
+    if config.type in ("nbt_bill", "nem2_bill"):
         billing = build_billing(scenario)
         if billing is None:
             raise ValueError(
-                "value stream nbt_bill optimizes the bill, so the scenario needs a billing section"
+                f"value stream {config.type} optimizes the bill, so the scenario needs a billing section"
             )
         if any(stream.type == "energy_arbitrage" for stream in scenario.value_streams):
             raise ValueError(
-                "nbt_bill and energy_arbitrage both price grid import/export -- use one, "
+                f"{config.type} and energy_arbitrage both price grid import/export -- use one, "
                 "or energy is counted twice"
             )
-        from der_opt.billing.objective import NBTBill
+        from der_opt.billing import NBTProgram, NEM2Program
+        from der_opt.billing.objective import NBTBill, NEM2Bill
 
         tariff, program, kwargs = billing
+        if config.type == "nem2_bill":
+            if not isinstance(program, NEM2Program):
+                raise ValueError("value stream nem2_bill needs billing.program type: nem2")
+            return NEM2Bill(tariff, program, time_grid, **kwargs)
+        if program is not None and not isinstance(program, NBTProgram):
+            raise ValueError("value stream nbt_bill needs billing.program type: nbt")
         return NBTBill(tariff, program, time_grid, **kwargs)
     if config.type == "energy_arbitrage":
         import_price = _build_price_series(params["import_price"])
@@ -264,7 +271,7 @@ def build_billing(config: ScenarioConfig):
     or None if it has none."""
     if config.billing is None:
         return None
-    from der_opt.billing import NBTProgram, load_retail_tariff
+    from der_opt.billing import NBTProgram, NEM2Program, load_retail_tariff
 
     billing = config.billing
     tariff = load_retail_tariff(billing.tariff)
@@ -272,10 +279,18 @@ def build_billing(config: ScenarioConfig):
     if billing.program is not None:
         params = dict(billing.program)
         kind = params.pop("type", None)
-        if kind != "nbt":
-            raise ValueError(f"Unknown billing program type {kind!r}; only 'nbt' is supported so far")
-        program = NBTProgram(**params)
-    kwargs = {"income_tier": billing.income_tier, "relevant_period_cycles": billing.relevant_period_cycles}
+        if kind == "nbt":
+            program = NBTProgram(**params)
+        elif kind == "nem2":
+            program = NEM2Program(**params)
+        else:
+            raise ValueError(f"Unknown billing program type {kind!r}; expected 'nbt' or 'nem2'")
+    kwargs = {
+        "income_tier": billing.income_tier,
+        "relevant_period_cycles": billing.relevant_period_cycles,
+        "baseline_territory": billing.baseline_territory,
+        "baseline_code": billing.baseline_code,
+    }
     if billing.cycle_start_dates:
         kwargs["cycle_start_dates"] = [datetime.fromisoformat(d).date() for d in billing.cycle_start_dates]
     return tariff, program, kwargs

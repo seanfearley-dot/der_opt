@@ -1,0 +1,97 @@
+# PG&E Schedule E-TOU-C (Residential Time-of-Use, Peak Pricing 4-9 p.m. Every Day) --
+# bundled service. The most common rate for NEM2 (NEM 2.0) solar customers.
+#
+# Source: https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_E-TOU-C.pdf
+#   Sheet 2 (total rates, baseline credit, base services charge): Advice 7921-E, effective 2026-06-01
+#   Sheet 3 (unbundled components):                              Advice 7846-E, effective 2026-03-01
+#   Sheet 5 (baseline quantities, time periods)
+# The components below sum exactly to Sheet 2's "Total Usage" rates, and the baseline
+# credit they imply matches Sheet 2's (both checked by the loader).
+#
+# Not modeled: medical baseline, the California Climate Credit, CCA/DA billing.
+
+name: PG&E E-TOU-C (bundled)
+effective_date: "2026-06-01"
+
+seasons:
+  summer: [6, 7, 8, 9]                 # June 1 - September 30
+  winter: [10, 11, 12, 1, 2, 3, 4, 5]  # October 1 - May 31
+
+periods_by_hour:                       # all days, weekends and holidays included
+  peak: [16, 17, 18, 19, 20]           # 4-9 pm
+  off_peak: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 21, 22, 23]
+
+# bucket: generation / delivery / nbc. Under NEM2, net energy is billed at the
+# generation + delivery rate, and the nbc charges (the four NEM2 Special Condition 2.c
+# names) are paid on every kWh imported, net of exports in the same interval.
+components:
+  generation:
+    bucket: generation
+    rate:
+      summer: {peak: 0.20782, off_peak: 0.10482}
+      winter: {peak: 0.13710, off_peak: 0.11042}
+  bundled_pcia:                        # combined with generation on bundled bills
+    bucket: generation
+    rate: -0.01011
+  distribution:
+    bucket: delivery
+    rate:
+      summer: {peak: 0.20388, off_peak: 0.18388}
+      winter: {peak: 0.14977, off_peak: 0.14645}
+  # Sheet 3 lists $0.05354 for over-baseline usage and ($0.02786) for baseline usage.
+  # The total rate carries the over-baseline value; see baseline below.
+  conservation_incentive_adjustment: {bucket: delivery, rate: 0.05354}
+  transmission: {bucket: delivery, rate: 0.04638}
+  transmission_rate_adjustments: {bucket: delivery, rate: 0.00453}
+  reliability_services: {bucket: delivery, rate: 0.00013}
+  energy_cost_recovery_amount: {bucket: delivery, rate: 0.00002}
+  new_system_generation_charge: {bucket: delivery, rate: 0.0}
+  wildfire_hardening_charge: {bucket: delivery, rate: 0.00391}
+  recovery_bond_charge: {bucket: delivery, rate: 0.00857}
+  recovery_bond_credit: {bucket: delivery, rate: -0.00857}
+  public_purpose_programs: {bucket: nbc, rate: 0.00614}
+  nuclear_decommissioning: {bucket: nbc, rate: -0.00002}
+  competition_transition_charge: {bucket: nbc, rate: 0.00027}
+  wildfire_fund_charge: {bucket: nbc, rate: 0.00591}
+
+# $ per customer per day, by income tier (Tier 3 = not CARE/FERA-eligible).
+base_services_charge_per_day:
+  tier_1: 0.19713
+  tier_2: 0.39688
+  tier_3: 0.79343
+
+published_totals:
+  summer: {peak: 0.52240, off_peak: 0.39940}
+  winter: {peak: 0.39757, off_peak: 0.36757}
+
+# Baseline usage pays the baseline Conservation Incentive Adjustment instead of the
+# over-baseline one: a credit of 0.05354 - (-0.02786) = $0.08140/kWh, in every period.
+baseline:
+  component: conservation_incentive_adjustment
+  baseline_rate: -0.02786
+  published_credit_per_kwh: 0.08140
+  # kWh per day by baseline territory (Preliminary Statement Part A) and season.
+  # basic = Code B; all_electric = Code H (permanent electric space heating).
+  quantities_kwh_per_day:
+    basic:
+      P: {summer: 13.5, winter: 11.0}
+      Q: {summer: 9.8, winter: 11.0}
+      R: {summer: 17.7, winter: 10.4}
+      S: {summer: 15.0, winter: 10.2}
+      T: {summer: 6.5, winter: 7.5}
+      V: {summer: 7.1, winter: 8.1}
+      W: {summer: 19.2, winter: 9.8}
+      X: {summer: 9.8, winter: 9.7}
+      Y: {summer: 10.5, winter: 11.1}
+      Z: {summer: 5.9, winter: 7.8}
+    all_electric:
+      P: {summer: 15.2, winter: 26.0}
+      Q: {summer: 8.5, winter: 26.0}
+      R: {summer: 19.9, winter: 26.7}
+      S: {summer: 17.8, winter: 23.7}
+      T: {summer: 7.1, winter: 12.9}
+      V: {summer: 10.4, winter: 19.1}
+      W: {summer: 22.4, winter: 19.0}
+      X: {summer: 8.5, winter: 14.6}
+      Y: {summer: 12.0, winter: 24.0}
+      Z: {summer: 6.7, winter: 15.7}

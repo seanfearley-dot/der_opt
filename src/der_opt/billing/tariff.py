@@ -3,8 +3,13 @@ each tagged with the bucket that determines what export credits may offset it, p
 daily fixed charge. Loaded from a YAML file transcribed from the utility's tariff sheet
 (see examples/data/tariffs/), and checked on load against the sheet's published totals.
 
-Scope: time-of-use periods that are the same every day (true of PG&E's E-ELEC); tiered
-or baseline-credit rates and weekday/weekend-specific periods aren't supported yet.
+Optionally a baseline credit: a $/kWh discount on usage up to a daily allowance that
+depends on the customer's baseline territory and season (PG&E's E-TOU-C has one). The
+credit is the same in every TOU period, which is what lets it be applied per billing
+cycle without splitting usage across periods.
+
+Scope: time-of-use periods that are the same every day (true of PG&E's E-ELEC and
+E-TOU-C); multi-tier rates and weekday/weekend-specific periods aren't supported yet.
 """
 
 from __future__ import annotations
@@ -31,6 +36,28 @@ class TariffComponent:
 
 
 @dataclass(frozen=True)
+class Baseline:
+    """credit_per_kwh: discount on baseline usage, taken from `bucket`'s charges.
+    quantities: {(code, territory, season): kWh/day}, code e.g. "basic"/"all_electric"."""
+
+    credit_per_kwh: float
+    bucket: str
+    quantities: dict[tuple[str, str, str], float]
+
+    def allowance_kwh(self, dates, season_by_month: dict[int, str], territory: str, code: str = "basic") -> float:
+        """Baseline kWh for a billing period: each day's allowance for its season,
+        summed (so a period spanning a season change is prorated by days)."""
+        total = 0.0
+        for day in dates:
+            key = (code, territory, season_by_month[day.month])
+            if key not in self.quantities:
+                known = sorted({(c, t) for c, t, _ in self.quantities})
+                raise ValueError(f"no baseline quantity for code {code!r}, territory {territory!r}; known: {known}")
+            total += self.quantities[key]
+        return total
+
+
+@dataclass(frozen=True)
 class RetailTariff:
     name: str
     effective_date: str
@@ -38,6 +65,7 @@ class RetailTariff:
     period_by_hour: dict[int, str]
     components: tuple[TariffComponent, ...]
     base_services_charge_per_day: dict[str, float]
+    baseline: Baseline | None = None
 
     def bucket_rates(self, timestamps) -> pd.DataFrame:
         """$/kWh per bucket (generation, delivery, nbc) for each interval timestamp."""
@@ -114,7 +142,34 @@ def load_retail_tariff(path: str | Path) -> RetailTariff:
                 "probably mistyped or one sheet is out of date:\n  " + "\n  ".join(mismatches)
             )
 
+    baseline = None
+    if "baseline" in data:
+        # The tariff's total rate includes `component` at its over-baseline rate; baseline
+        # usage pays `baseline_rate` instead. The difference is the baseline credit.
+        spec = data["baseline"]
+        component = next((c for c in components if c.name == spec["component"]), None)
+        if component is None:
+            raise ValueError(f"baseline component {spec['component']!r} isn't among the tariff's components")
+        if len(set(component.rates.values())) != 1:
+            raise ValueError(f"baseline component {component.name!r} must have one rate for all seasons and periods")
+        credit = next(iter(component.rates.values())) - float(spec["baseline_rate"])
+        published_credit = spec.get("published_credit_per_kwh")
+        if published_credit is not None and abs(credit - published_credit) > 1e-5:
+            raise ValueError(
+                f"{path}: baseline credit works out to {credit:.5f} ({component.name} minus its "
+                f"baseline rate), but the sheet publishes {published_credit:.5f}"
+            )
+        quantities = {}
+        for code, territories in spec["quantities_kwh_per_day"].items():
+            for territory, by_season in territories.items():
+                if set(by_season) != seasons:
+                    raise ValueError(f"baseline {code}/{territory} needs a quantity for each of {sorted(seasons)}")
+                for season, kwh in by_season.items():
+                    quantities[(code, str(territory), season)] = float(kwh)
+        baseline = Baseline(credit, component.bucket, quantities)
+
     return RetailTariff(
+        baseline=baseline,
         name=data["name"],
         effective_date=str(data.get("effective_date", "")),
         season_by_month=season_by_month,

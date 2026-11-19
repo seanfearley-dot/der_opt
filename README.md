@@ -25,7 +25,8 @@ Check it works: `pytest -q` (should be all green).
 ```bash
 der-opt run examples/scenarios/battery_solar_lbnl_nbt.yaml
 der-opt run examples/scenarios/v2x_lbnl_nbt.yaml --duals -o out/v2x
-der-opt run examples/scenarios/battery_solar_lbnl_nbt_annual.yaml -o out/annual   # ~15 s
+der-opt run examples/scenarios/battery_solar_lbnl_nbt_annual.yaml -o out/annual   # ~1 min
+der-opt run examples/scenarios/battery_solar_lbnl_nem2_annual.yaml -o out/nem2     # same house on NEM 2.0
 ```
 
 It prints the optimal dispatch's cost broken down by source. If the scenario has a
@@ -117,7 +118,8 @@ Every device has `type`, a unique `name`, and `params`. Any array-valued param
 
 | `type` | Params |
 |---|---|
-| `nbt_bill` | none — optimizes the bill from the scenario's `billing` section, with NBT's credit limits (see Billing). Use instead of `energy_arbitrage`, not with it |
+| `nbt_bill` | none — optimizes the bill from the scenario's `billing` section (program `nbt`), with NBT's credit limits (see Billing). Use instead of `energy_arbitrage`, not with it |
+| `nem2_bill` | none — the same for a `billing` section with program `nem2` |
 | `energy_arbitrage` | `import_price`, `export_price` — each a price series (below). Values every exported kWh at its full export rate |
 | `tariff_energy_charge` | `tariff: {urdb_json_path: ...}`, `direction` (`import`/`export`) — tiered TOU tariffs from OpenEI URDB JSON |
 | `demand_charge` | `rate_per_kw` |
@@ -180,9 +182,23 @@ it doesn't enforce `departure_period`, `soc_final_min_frac`, or `charge_sources`
 
 ## Billing
 
-`der_opt.billing` computes a bill from interval import/export the way PG&E bills it.
-The rules come from PG&E's tariff sheets (Schedule NBT, Special Conditions 2 and 5;
-Schedule E-ELEC), not from memory:
+`der_opt.billing` computes a bill from interval import/export the way PG&E bills it,
+under the Net Billing Tariff (NBT, "NEM 3") or NEM 2.0. The rules come from PG&E's
+tariff sheets, not from memory.
+
+```yaml
+billing:
+  tariff: examples/data/tariffs/pge_e_elec_2026-06.yaml
+  income_tier: 3                  # base services charge tier (3 = not CARE/FERA)
+  program: {type: nbt, export_rates_csv: examples/data/pge_nbt_eec_2026.csv, acc_plus_per_kwh: 0.0088}
+  # or, for NEM 2.0 on E-TOU-C:
+  # tariff: examples/data/tariffs/pge_e_tou_c_2026-06.yaml
+  # baseline_territory: R         # the customer's baseline territory letter
+  # baseline_code: basic          # or all_electric
+  # program: {type: nem2, nsc_rate_per_kwh: 0.02781}
+```
+
+### NBT (Schedule NBT, Special Conditions 2 and 5; Schedule E-ELEC)
 
 - **Imports** are billed on the retail tariff: per-kWh components by season and
   time-of-use period, plus a daily base services charge by income tier.
@@ -210,24 +226,75 @@ Schedule E-ELEC), not from memory:
   holiday list from Schedule E-19, on observed dates. E-ELEC itself prices every day
   the same.
 
-**Tariff files.** `examples/data/tariffs/pge_e_elec_2026-06.yaml` itemizes E-ELEC
-(effective 2026-06-01) component by component, each tagged `generation`, `delivery`,
-or `nbc` — the tag decides what export credit may offset it. The file also carries
-the sheet's published total rates, and the loader refuses a file whose components
-don't add up to them, so a mistyped rate fails loudly. To update for a new rate
-change, copy the numbers from the current E-ELEC sheets (pages 2-3) and update
-`published_totals`.
+### NEM 2.0 (Schedule NEM2, Special Conditions 2, 5 and 9; Schedule E-TOU-C)
 
-**Optimizing the bill.** The `nbt_bill` value stream (`der_opt.billing.objective.NBTBill`
-in Python) puts these rules into the optimization as a linear program: per billing
-cycle, credit applied to each bucket is capped by that bucket's charges and by the
-credit earned so far (or earned any time in the year, when a true-up runs). Its cost is
+- **Netting by TOU period:** each billing cycle, imports and exports within the same
+  TOU period (e.g. summer peak) are netted; net kWh are billed — or credited — at that
+  period's rate, excluding non-bypassable charges. A peak export earns the peak rate.
+- **Non-bypassable charges** are paid on each interval's imports net of that
+  interval's exports; no export credit reduces them.
+- **Baseline credit** (E-TOU-C: $0.0814/kWh on up to 6–20 kWh/day, by territory and
+  season) applies to the cycle's net kWh. For a net *generator* it works the other
+  way: the first baseline-allowance kWh of net generation are credited at the lower
+  baseline rate.
+- **Base services charge** is paid monthly and can't be offset by credits.
+- **Energy settles at the true-up** after 12 cycles: a positive balance is owed, and a
+  credit balance is **set to zero** (unlike NBT, it doesn't carry forward). If exports
+  exceed imports for the year, the surplus kWh earn the NSC rate, which PG&E publishes
+  monthly (`nsc_rate_per_kwh`; $0.02781 for November 2026 true-ups).
+- **Paired storage:** NEM2 only credits renewable exports. A battery on a NEM2 system
+  is normally set up as "No Grid Charging" (Special Condition 9) — model it with
+  `charge_sources: [solar]`.
+- Billing cycles and the true-up trigger work as for NBT.
+
+### Tariff files
+
+`examples/data/tariffs/` has E-ELEC and E-TOU-C (both effective 2026-06-01), itemized
+component by component, each tagged `generation`, `delivery`, or `nbc` — the tag
+decides what NBT export credit may offset, and which charges NEM2 bills on gross
+imports. Each file also carries the sheet's published total rates, and the loader
+refuses a file whose components don't add up to them, so a mistyped rate fails
+loudly. A baseline credit is described by the component it changes (E-TOU-C's
+Conservation Incentive Adjustment, over-baseline vs. baseline rate) and checked
+against the sheet's published credit. To update for a new rate change, copy the
+numbers from the current sheets (pages 2-3) and update `published_totals`.
+
+### Optimizing the bill
+
+The `nbt_bill` and `nem2_bill` value streams (`NBTBill` / `NEM2Bill` in
+`der_opt.billing.objective`) put these rules into the optimization. Each one's cost is
 the bill engine's net cost for the same dispatch, which the tests check to the cent,
-and the meter-balance duals become the marginal *bill* value of a kWh.
+so "value of optimization" and "bill savings" differ only by device wear.
 
-**Not yet covered:** NEM 2.0 (kWh netting by TOU period), CCA/Direct Access customers
-(their generation charges and credits come from the CCA), CARE/FERA discounts,
-tiered or baseline-credit rates, the California Climate Credit, and demand charges.
+- `nbt_bill` is a linear program: per billing cycle, credit applied to each bucket is
+  capped by that bucket's charges and by the credit earned so far (or any time in the
+  year, when a true-up runs). The meter-balance duals become the marginal *bill* value
+  of a kWh.
+- `nem2_bill` is linear except the baseline credit, whose value flips direction when a
+  month goes from net consumer to net generator. That takes two yes/no variables per
+  billing cycle (24 for a year), so it's a small MILP and needs `poi_limit_kw`. It
+  doesn't need `exclusive_import_export`: under NEM2 an import and an export in the
+  same hour net at the same rate.
+
+**What the two programs say about the same house.** The annual examples run one
+household (LBNL hot-dry cluster, 13.5 kWh battery, solar that exports ~9,400 kWh more
+than it imports in a year):
+
+| | NBT bill | NEM2 bill |
+|---|---|---|
+| Self-consumption battery | $259 | $31 |
+| Bill-optimal dispatch | $233 | $67 (battery nearly idle) |
+
+Under NEM2 this house's leftover energy credit (~$3,200) is zeroed at true-up, so the
+only bill value a battery can add is avoiding ~$0.012/kWh of non-bypassable charges.
+Cycling costs more than that in wear, so the optimizer leaves the battery nearly idle
+and comes out $79 ahead of self-consumption once wear is counted, despite a $37 higher
+bill. A household that imports more than it exports would see a different answer.
+
+**Not yet covered:** CCA/Direct Access customers (their generation charges and credits
+come from the CCA), CARE/FERA discounts, multi-tier rates (e.g. E-1), medical baseline,
+NEM2 load aggregation and multiple-tariff facilities, the California Climate Credit,
+and demand charges.
 None of this has been checked against a real bill yet — that's the real test.
 
 ## Modeling caveats worth knowing
@@ -302,7 +369,7 @@ src/der_opt/
   premise/       Premise (composition + POI balance), value streams, tariffs
   pricing/       price series, dual extraction, value breakdown
   simulation/    counterfactual control policies + simulator
-  billing/       retail tariffs, PG&E holidays, bill engine (NBT credits, true-up)
+  billing/       retail tariffs, PG&E holidays, bill engine (NBT, NEM2), bill objectives
   integrations/  LBNL load, EV model, PVWatts, PG&E NBT export rates
   scenarios/     YAML schema, loader, data-source resolvers
   viz/           heatmap, dispatch, value stack, duals, comparison charts

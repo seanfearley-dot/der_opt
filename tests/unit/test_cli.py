@@ -135,10 +135,10 @@ def test_billing_section_prints_bills_for_both_runs(tmp_path):
 
 def test_billing_unknown_program_type_raises(tmp_path):
     scenario = tmp_path / "bad_program.yaml"
-    scenario.write_text(FIXTURE_PATH.read_text() + BILLING_SECTION.replace("type: nbt", "type: nem2"))
+    scenario.write_text(FIXTURE_PATH.read_text() + BILLING_SECTION.replace("type: nbt", "type: nem3"))
     result = runner.invoke(app, ["run", str(scenario)])
     assert result.exit_code != 0
-    assert "only 'nbt'" in str(result.exception)
+    assert "expected 'nbt' or 'nem2'" in str(result.exception)
 
 
 def _bill_objective_scenario(tmp_path, billing: str, keep_arbitrage: bool = False) -> Path:
