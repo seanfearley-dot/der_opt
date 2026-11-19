@@ -59,3 +59,9 @@ external_load:
 
 poi_limit_kw: 15.0
 exclusive_import_export: true
+
+# The baseline to compare against: charge at full power the moment it's plugged in
+# until full, never discharge -- what a plug-and-forget Level 2 charger does.
+counterfactual:
+  policies:
+    ev: {type: rule_based_ev}

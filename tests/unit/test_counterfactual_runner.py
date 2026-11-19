@@ -80,3 +80,20 @@ def test_simulator_result_has_same_schema_as_optimizer_result():
     assert set(result.device_dispatch.columns) == set(optimized.device_dispatch.columns)
     assert list(result.device_dispatch.index) == list(optimized.device_dispatch.index)
     assert result.solver_status == "simulated"
+
+
+def test_state_columns_are_start_of_period_like_the_optimizer():
+    # soc[t] in the optimizer's output is the SOC at the *start* of period t; the
+    # simulator must report the same, or the two CSVs are an hour out of step.
+    tg = TimeGrid(resolution_minutes=60, horizon_steps=2, start=datetime(2026, 6, 1))
+    battery = BatteryStorage(
+        "battery", tg, capacity_kwh=10, p_max_charge_kw=5, p_max_discharge_kw=5,
+        eta_charge=1.0, eta_discharge=1.0, soc_init_frac=0.5,
+    )
+    solar = SolarPV("solar", tg, available_kw=[4.0, 4.0])
+    premise = Premise("house1", tg, devices=[battery, solar], external_load=[0.0, 0.0], poi_limit_kw=30)
+    simulator = CounterfactualSimulator(premise, policies={"battery": SelfConsumptionBatteryPolicy(5.0, 5.0)})
+    result = simulator.run()
+
+    assert result.device_dispatch["battery.soc"].tolist() == pytest.approx([5.0, 9.0])
+    assert simulator.final_device_states["battery"]["soc"] == pytest.approx(10.0)

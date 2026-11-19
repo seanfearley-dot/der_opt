@@ -17,31 +17,89 @@ def _main() -> None:
     return
 
 
+def _end_state_warnings(premise, simulator, tolerance_frac: float = 0.01) -> list[str]:
+    """Storage devices that finish the horizon with a different SOC under the optimal
+    and counterfactual dispatches. Neither side values energy left in storage at the
+    end, so a difference silently tilts the comparison -- the trap that once made a
+    self-consumption counterfactual score *better* than the optimum."""
+    import pyomo.environ as pyo
+
+    warnings = []
+    end = premise.time_grid.horizon_steps
+    for device in premise.devices:
+        if not hasattr(device, "soc") or "soc" not in simulator.final_device_states.get(device.name, {}):
+            continue
+        optimal_end = pyo.value(device.soc[end])
+        counterfactual_end = simulator.final_device_states[device.name]["soc"]
+        difference = counterfactual_end - optimal_end
+        if abs(difference) <= tolerance_frac * getattr(device, "capacity_kwh", 1.0):
+            continue
+        favors = "optimal" if difference > 0 else "counterfactual"
+        warnings.append(
+            f"{device.name} ends at {optimal_end:.1f} kWh (optimal) vs {counterfactual_end:.1f} kWh "
+            f"(counterfactual). Energy left in storage isn't valued by either side, so this "
+            f"{abs(difference):.1f} kWh difference tilts the comparison toward the {favors} dispatch."
+        )
+    return warnings
+
+
 @app.command()
 def run(
     scenario: Path = typer.Argument(..., help="Path to a scenario YAML file"),
     output_dir: Optional[Path] = typer.Option(
         None, "--output-dir", "-o", help="Directory to write dispatch CSVs and charts to"
     ),
-    duals: bool = typer.Option(False, "--duals", help="Print the dual/shadow-price summary"),
+    duals: bool = typer.Option(False, "--duals", help="Print (and with -o, write) dual/shadow prices"),
+    no_counterfactual: bool = typer.Option(
+        False, "--no-counterfactual", help="Skip the scenario's counterfactual comparison"
+    ),
 ) -> None:
-    """Solve a scenario (built on the same Premise/Device objects as the Python API)
-    and print a summary; optionally write dispatch CSVs and charts to --output-dir."""
-    from der_opt.pricing import extract_duals, value_breakdown
-    from der_opt.scenarios import load_scenario
+    """Solve a scenario and print a summary. If the scenario has a `counterfactual`
+    section, also simulates that rule-based baseline and reports the value of
+    optimization. With --output-dir, writes CSVs and charts for everything printed."""
+    import pandas as pd
 
-    premise = load_scenario(scenario)
+    from der_opt.pricing import extract_duals, value_breakdown
+    from der_opt.scenarios import (
+        build_counterfactual_policies,
+        build_premise,
+        load_scenario_config,
+    )
+    from der_opt.simulation import CounterfactualSimulator
+
+    config = load_scenario_config(scenario)
+    premise = build_premise(config)
     dispatch, model, backend = premise.solve()
 
     typer.echo(f"Scenario: {premise.name}")
     typer.echo(f"Status: {dispatch.solver_status}")
-    typer.echo(f"Objective: ${dispatch.objective_value:.2f}")
 
     breakdown = value_breakdown(premise, dispatch)
-    typer.echo("\nValue breakdown:")
+    typer.echo(f"\nOptimal dispatch: ${sum(breakdown.values()):.2f}")
     for label, value in breakdown.items():
         typer.echo(f"  {label}: ${value:.2f}")
 
+    counterfactual = None
+    cf_breakdown = None
+    policies = None if no_counterfactual else build_counterfactual_policies(config, premise)
+    if policies is not None:
+        simulator = CounterfactualSimulator(premise, policies)
+        counterfactual = simulator.run()
+        cf_breakdown = value_breakdown(premise, counterfactual)
+
+        described = ", ".join(
+            f"{name}: {config.counterfactual.policies[name]['type']}" for name in policies
+        ) or "all devices passive"
+        typer.echo(f"\nCounterfactual ({described}): ${sum(cf_breakdown.values()):.2f}")
+        for label, value in cf_breakdown.items():
+            typer.echo(f"  {label}: ${value:.2f}")
+
+        value_of_optimization = sum(cf_breakdown.values()) - sum(breakdown.values())
+        typer.echo(f"\nValue of optimization: ${value_of_optimization:.2f}")
+        for warning in _end_state_warnings(premise, simulator):
+            typer.echo(f"  Note: {warning}")
+
+    dual_results = None
     if duals:
         dual_results = extract_duals(model, backend)
         typer.echo("\nDual/shadow-price families:")
@@ -50,16 +108,49 @@ def run(
             typer.echo(f"  {name}: is_exact={dual.is_exact}{note}")
 
     if output_dir is not None:
+        from der_opt.viz import comparison_plot, dispatch_plot, duals_plot, value_stack
+
         output_dir.mkdir(parents=True, exist_ok=True)
         dispatch.device_dispatch.to_csv(output_dir / "device_dispatch.csv")
         dispatch.grid_import.to_csv(output_dir / "grid_import.csv", header=["grid_import_kw"])
         dispatch.grid_export.to_csv(output_dir / "grid_export.csv", header=["grid_export_kw"])
-
-        from der_opt.viz import dispatch_plot, value_stack
-
         dispatch_plot(dispatch, title=premise.name).savefig(output_dir / "dispatch.png")
         value_stack(breakdown, title=premise.name).savefig(output_dir / "value_stack.png")
-        typer.echo(f"\nWrote dispatch CSVs and charts to {output_dir}")
+
+        breakdown_table = pd.DataFrame({"optimal": pd.Series(breakdown)})
+        if counterfactual is not None:
+            breakdown_table["counterfactual"] = pd.Series(cf_breakdown)
+            counterfactual.device_dispatch.to_csv(output_dir / "counterfactual_device_dispatch.csv")
+            counterfactual.grid_import.to_csv(
+                output_dir / "counterfactual_grid_import.csv", header=["grid_import_kw"]
+            )
+            counterfactual.grid_export.to_csv(
+                output_dir / "counterfactual_grid_export.csv", header=["grid_export_kw"]
+            )
+            dispatch_plot(counterfactual, title=f"{premise.name} (counterfactual)").savefig(
+                output_dir / "counterfactual_dispatch.png"
+            )
+            comparison_plot(dispatch, counterfactual, premise=premise, title=premise.name).savefig(
+                output_dir / "comparison.png"
+            )
+        breakdown_table = breakdown_table.fillna(0.0)
+        breakdown_table.loc["total"] = breakdown_table.sum()
+        breakdown_table.to_csv(output_dir / "value_breakdown.csv", index_label="source")
+
+        if dual_results is not None:
+            rows = [
+                {"family": name, "index": index, "value": value, "is_exact": dual.is_exact}
+                for name, dual in dual_results.items()
+                for index, value in dual.values.items()
+            ]
+            pd.DataFrame(rows).to_csv(output_dir / "duals.csv", index=False)
+            poi_family = f"{premise.name}_poi_balance"
+            if poi_family in dual_results:
+                duals_plot(
+                    dual_results, names=[poi_family], title=f"{premise.name}: marginal value of energy at the meter"
+                ).savefig(output_dir / "duals.png")
+
+        typer.echo(f"\nWrote CSVs and charts to {output_dir}")
 
 
 if __name__ == "__main__":

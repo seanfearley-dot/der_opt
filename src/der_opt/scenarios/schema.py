@@ -34,6 +34,15 @@ class CSVSeriesConfig(BaseModel):
     column: str
 
 
+class CounterfactualConfig(BaseModel):
+    """Rule-based baseline to compare the optimal dispatch against. `policies` maps a
+    device name to {type: ..., optional overrides}; devices not listed run their
+    passive default (solar generates everything available, storage/EV/thermostat
+    idle, curtailable load fully served)."""
+
+    policies: dict[str, dict[str, Any]] = Field(default_factory=dict)
+
+
 class ScenarioConfig(BaseModel):
     """Top-level structure of a scenario YAML file. Per-device and per-value-stream
     `params` are intentionally left as loose dicts rather than one pydantic model per
@@ -55,3 +64,4 @@ class ScenarioConfig(BaseModel):
     external_load: Union[list[float], dict[str, Any]]
     poi_limit_kw: Optional[float] = None
     exclusive_import_export: bool = False
+    counterfactual: Optional[CounterfactualConfig] = None

@@ -167,3 +167,80 @@ exclusive_import_export: true
 
     premise = load_scenario(scenario_path)
     assert premise.exclusive_import_export is True
+
+
+def _scenario_with_policies(tmp_path, policies_yaml: str) -> Path:
+    path = tmp_path / "scenario_cf.yaml"
+    path.write_text(FIXTURE_PATH.read_text() + "\ncounterfactual:\n  policies:\n" + policies_yaml)
+    return path
+
+
+def test_counterfactual_policies_default_power_limits_to_the_device(tmp_path):
+    from der_opt.scenarios import (
+        build_counterfactual_policies,
+        build_premise,
+        load_scenario_config,
+    )
+    from der_opt.simulation import SelfConsumptionBatteryPolicy
+
+    path = _scenario_with_policies(tmp_path, "    battery: {type: self_consumption}\n")
+    config = load_scenario_config(path)
+    premise = build_premise(config)
+    policies = build_counterfactual_policies(config, premise)
+
+    assert isinstance(policies["battery"], SelfConsumptionBatteryPolicy)
+    assert policies["battery"].p_max_charge_kw == 5
+    assert policies["battery"].p_max_discharge_kw == 5
+
+
+def test_counterfactual_policy_overrides(tmp_path):
+    from der_opt.scenarios import (
+        build_counterfactual_policies,
+        build_premise,
+        load_scenario_config,
+    )
+
+    path = _scenario_with_policies(tmp_path, "    battery: {type: self_consumption, p_max_charge_kw: 2.5}\n")
+    config = load_scenario_config(path)
+    policies = build_counterfactual_policies(config, build_premise(config))
+    assert policies["battery"].p_max_charge_kw == 2.5
+    assert policies["battery"].p_max_discharge_kw == 5
+
+
+def test_no_counterfactual_section_gives_none():
+    from der_opt.scenarios import (
+        build_counterfactual_policies,
+        build_premise,
+        load_scenario_config,
+    )
+
+    config = load_scenario_config(FIXTURE_PATH)
+    assert build_counterfactual_policies(config, build_premise(config)) is None
+
+
+def test_counterfactual_policy_for_unknown_device_raises(tmp_path):
+    from der_opt.scenarios import (
+        build_counterfactual_policies,
+        build_premise,
+        load_scenario_config,
+    )
+
+    path = _scenario_with_policies(tmp_path, "    not_a_device: {type: self_consumption}\n")
+    config = load_scenario_config(path)
+    with pytest.raises(ValueError, match="not_a_device"):
+        build_counterfactual_policies(config, build_premise(config))
+
+
+def test_counterfactual_policy_on_wrong_device_type_raises(tmp_path):
+    # rule_based_ev needs soc_max; solar has no such attribute -- should say so
+    # clearly rather than failing deep inside the simulator.
+    from der_opt.scenarios import (
+        build_counterfactual_policies,
+        build_premise,
+        load_scenario_config,
+    )
+
+    path = _scenario_with_policies(tmp_path, "    solar: {type: rule_based_ev}\n")
+    config = load_scenario_config(path)
+    with pytest.raises(ValueError, match="wrong policy for this device type"):
+        build_counterfactual_policies(config, build_premise(config))

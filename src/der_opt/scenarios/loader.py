@@ -37,6 +37,12 @@ from der_opt.scenarios.schema import (
     ScenarioConfig,
     ValueStreamConfig,
 )
+from der_opt.simulation import (
+    ControlPolicy,
+    NoFlexibilityPolicy,
+    RuleBasedEVChargingPolicy,
+    SelfConsumptionBatteryPolicy,
+)
 from der_opt.time_grid import TimeGrid
 
 DEVICE_REGISTRY: dict[str, type[Device]] = {
@@ -143,15 +149,13 @@ def _resolve_external_load(config, time_grid: TimeGrid) -> np.ndarray:
     )
 
 
-def load_scenario(path: str | Path) -> Premise:
-    """Builds a Premise directly from a scenario YAML file -- the config-driven layer
-    on top of the Python API (same Premise/Device/ValueStream objects, scenarios/
-    loader.py just assembles them from YAML instead of a script). See
-    examples/scenarios/ for scenarios that pull real LBNL load/PV, real EV plug-in
-    schedules, and real PG&E NBT export rates entirely from YAML."""
+def load_scenario_config(path: str | Path) -> ScenarioConfig:
+    """Parses and validates a scenario YAML file without building anything."""
     raw = yaml.safe_load(Path(path).read_text())
-    config = ScenarioConfig.model_validate(raw)
+    return ScenarioConfig.model_validate(raw)
 
+
+def build_premise(config: ScenarioConfig) -> Premise:
     time_grid = _build_time_grid(config.time_grid)
 
     built_devices: dict[str, Device] = {}
@@ -171,3 +175,61 @@ def load_scenario(path: str | Path) -> Premise:
         poi_limit_kw=config.poi_limit_kw,
         exclusive_import_export=config.exclusive_import_export,
     )
+
+
+def load_scenario(path: str | Path) -> Premise:
+    """Builds a Premise directly from a scenario YAML file -- the config-driven layer
+    on top of the Python API (same Premise/Device/ValueStream objects, scenarios/
+    loader.py just assembles them from YAML instead of a script). See
+    examples/scenarios/ for scenarios that pull real LBNL load/PV, real EV plug-in
+    schedules, and real PG&E NBT export rates entirely from YAML."""
+    return build_premise(load_scenario_config(path))
+
+
+def _build_policy(device_name: str, policy_config: dict, device: Device) -> ControlPolicy:
+    kind = policy_config.get("type")
+    overrides = {k: v for k, v in policy_config.items() if k != "type"}
+
+    def device_attr(attr: str):
+        if attr in overrides:
+            return overrides[attr]
+        if not hasattr(device, attr):
+            raise ValueError(
+                f"counterfactual policy {kind!r} on {device_name!r} needs `{attr}`, which a "
+                f"{type(device).__name__} doesn't have -- wrong policy for this device type?"
+            )
+        return getattr(device, attr)
+
+    if kind == "no_flexibility":
+        return NoFlexibilityPolicy()
+    if kind == "self_consumption":
+        return SelfConsumptionBatteryPolicy(
+            p_max_charge_kw=device_attr("p_max_charge_kw"),
+            p_max_discharge_kw=device_attr("p_max_discharge_kw"),
+        )
+    if kind == "rule_based_ev":
+        return RuleBasedEVChargingPolicy(
+            p_max_charge_kw=device_attr("p_max_charge_kw"), soc_max=device_attr("soc_max")
+        )
+    raise ValueError(
+        f"Unknown counterfactual policy type {kind!r} for {device_name!r}; "
+        "expected 'self_consumption', 'rule_based_ev', or 'no_flexibility'"
+    )
+
+
+def build_counterfactual_policies(config: ScenarioConfig, premise: Premise) -> dict[str, ControlPolicy] | None:
+    """The scenario's counterfactual policies keyed by device name, or None if the
+    scenario has no counterfactual section. Policy power limits default to the
+    device's own (p_max_charge_kw etc.) unless overridden in the YAML."""
+    if config.counterfactual is None:
+        return None
+    devices = {device.name: device for device in premise.devices}
+    policies: dict[str, ControlPolicy] = {}
+    for device_name, policy_config in config.counterfactual.policies.items():
+        if device_name not in devices:
+            raise ValueError(
+                f"counterfactual policy for unknown device {device_name!r}; "
+                f"devices are {sorted(devices)}"
+            )
+        policies[device_name] = _build_policy(device_name, policy_config, devices[device_name])
+    return policies

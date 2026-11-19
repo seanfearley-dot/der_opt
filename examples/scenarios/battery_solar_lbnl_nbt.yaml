@@ -62,3 +62,11 @@ external_load:
 
 poi_limit_kw: 15.0
 exclusive_import_export: true
+
+# The baseline to compare against: a battery running plain self-consumption (charge
+# from solar surplus, discharge to cover load, no price awareness) -- roughly what an
+# off-the-shelf home battery does. Solar isn't listed, so it generates everything
+# available, as it would in reality.
+counterfactual:
+  policies:
+    battery: {type: self_consumption}

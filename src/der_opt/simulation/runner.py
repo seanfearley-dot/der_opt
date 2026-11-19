@@ -42,6 +42,11 @@ class CounterfactualSimulator:
             t=0, device_states={device.name: device.initial_state() for device in premise.devices}
         )
         device_series: dict[str, dict[str, list]] = {device.name: {} for device in premise.devices}
+        # State keys (e.g. "soc", "temp") are recorded at the *start* of each period,
+        # matching the optimizer's dispatch_series (soc[t] for t in periods); step()
+        # returns the end-of-period value, so recording that would put the two
+        # DispatchResults' state columns an hour out of step with each other.
+        state_keys = {device.name: set(device.initial_state()) for device in premise.devices}
         grid_import: list[float] = []
         grid_export: list[float] = []
         total_device_cost = 0.0
@@ -62,13 +67,22 @@ class CounterfactualSimulator:
                 device_power_total += result.get("net_power", 0.0)
                 total_device_cost += result.get("cost", 0.0)
                 for key, value in result.items():
-                    device_series[device.name].setdefault(key, []).append(value)
+                    recorded = current_state[key] if key in state_keys[device.name] else value
+                    device_series[device.name].setdefault(key, []).append(recorded)
 
                 state.device_states[device.name] = result
 
             net = premise.external_load[t] - device_power_total
             grid_import.append(max(net, 0.0))
             grid_export.append(max(-net, 0.0))
+
+        # End-of-horizon state (e.g. final SOC), which the start-of-period columns
+        # above don't include -- needed to check whether a comparison against the
+        # optimizer ends both dispatches in the same storage state.
+        self.final_device_states = {
+            name: {key: device_state[key] for key in state_keys[name]}
+            for name, device_state in state.device_states.items()
+        }
 
         try:
             time_index = pd.DatetimeIndex(time_grid.timestamps())

@@ -27,10 +27,31 @@ der-opt run examples/scenarios/battery_solar_lbnl_nbt.yaml
 der-opt run examples/scenarios/v2x_lbnl_nbt.yaml --duals -o out/v2x
 ```
 
-- `--duals` prints which dual/shadow-price families were recovered (and whether they
-  are exact LP duals or fix-and-resolve approximations).
-- `-o DIR` writes `device_dispatch.csv`, `grid_import.csv`, `grid_export.csv`,
-  `dispatch.png`, and `value_stack.png` to `DIR`.
+It prints the optimal dispatch's cost broken down by source. If the scenario has a
+`counterfactual` section, it also simulates that rule-based baseline and prints its
+cost and the **value of optimization** (counterfactual cost minus optimal cost), plus
+a note if a battery/EV ends the horizon with a different charge in the two runs (see
+Modeling caveats — that difference isn't priced, so it tilts the comparison).
+
+| Flag | Effect |
+|---|---|
+| `--duals` | print the dual/shadow-price families, marking exact LP duals vs. fix-and-resolve approximations |
+| `-o DIR` | write everything printed as CSVs and charts (below) |
+| `--no-counterfactual` | skip the scenario's counterfactual comparison |
+
+Files written with `-o`:
+
+| File | Contents |
+|---|---|
+| `device_dispatch.csv`, `grid_import.csv`, `grid_export.csv` | optimal dispatch, per period |
+| `value_breakdown.csv` | $ by source, optimal and counterfactual side by side, with a total row |
+| `dispatch.png`, `value_stack.png` | optimal dispatch and its value stack |
+| `counterfactual_*.csv`, `counterfactual_dispatch.png` | the same for the counterfactual |
+| `comparison.png` | optimal vs. counterfactual grid flows and value breakdown |
+| `duals.csv`, `duals.png` | all dual families (long format), and a chart of the marginal value of energy at the meter (with `--duals`) |
+
+State columns (`soc`, `temp`) are the value at the **start** of each period in both
+the optimal and counterfactual CSVs.
 
 The fastest way to a new scenario: **copy one of the files in `examples/scenarios/`
 and edit it.** Both are verified to reproduce their Python-script counterparts
@@ -53,6 +74,10 @@ external_load: ...                  # kW the premise must serve; see Data source
 poi_limit_kw: 15.0                  # max import/export at the meter
 exclusive_import_export: true       # see Modeling caveats -- turn on whenever export
                                     # price can exceed import price (NBT, LMP)
+
+counterfactual:                     # optional; see Counterfactuals below
+  policies:
+    battery: {type: self_consumption}
 ```
 
 ### Devices
@@ -120,15 +145,34 @@ Price series (`import_price` / `export_price`):
 - **PVWatts**: live NREL API. Set `NREL_API_KEY` in your environment; otherwise it
   uses NREL's rate-limited `DEMO_KEY`.
 
+### Counterfactuals
+
+`counterfactual.policies` maps a device name to the rule it follows in the baseline.
+Devices you don't list run their passive default: solar generates everything
+available, batteries/EVs/thermostats sit idle, curtailable load is fully served.
+
+| `type` | Behavior | Fits | Overridable params |
+|---|---|---|---|
+| `self_consumption` | charge from solar surplus, discharge to cover load, ignore prices | `battery` (or `ev_v2x`) | `p_max_charge_kw`, `p_max_discharge_kw` |
+| `rule_based_ev` | charge at full power from plug-in until full, never discharge | `ev_v2x` | `p_max_charge_kw`, `soc_max` (kWh) |
+| `no_flexibility` | idle | any | — |
+
+Power limits default to the device's own. The counterfactual follows its rule only —
+it doesn't enforce `departure_period`, `soc_final_min_frac`, or `charge_sources`
+(those are optimizer constraints).
+
 ## Modeling caveats worth knowing
 
 These all came up while building the examples — each produced a plausible-looking but
 wrong answer before it was understood:
 
-- **Terminal SOC and fair comparisons.** A battery/EV with no `soc_final_min_frac` can
-  drain itself for "free" revenue at the end of the horizon. When comparing optimal vs.
-  a counterfactual, make sure both end in a comparable state — a floor on one side only
-  can make the counterfactual look *better* than optimal.
+- **Terminal SOC and fair comparisons.** Energy left in a battery/EV at the end of the
+  horizon isn't valued, so whichever dispatch ends with *less* stored energy looks
+  better by roughly that energy's worth. `der-opt run` prints a note when the optimal
+  and counterfactual end states differ. Both shipped examples trigger it: the optimal
+  battery drains to 0 kWh vs. 3.8 kWh for self-consumption, and the optimal EV ends at
+  60 kWh vs. 75 kWh for rule-based charging — so their reported value of optimization
+  is somewhat overstated. Longer horizons shrink the effect relative to the total.
 - **`exclusive_import_export`.** By default import and export are only linked by their
   difference, so if export price ever exceeds import price the optimizer can import
   and export simultaneously for free money. Real NBT export rates spike above typical
@@ -148,9 +192,9 @@ wrong answer before it was understood:
 
 ## Python API
 
-For anything the YAML doesn't cover yet — notably counterfactual comparisons and the
-comparison/duals/heatmap charts — script against the Python API directly. The
-`examples/` scripts are the templates:
+For anything the YAML doesn't cover — custom counterfactual policies, interval
+heatmaps, multiple solves in a loop (sweeps, sensitivity runs) — script against the
+Python API directly. The `examples/` scripts are the templates:
 
 | Script | Shows |
 |---|---|
