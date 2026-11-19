@@ -404,5 +404,73 @@ def fetch_lmp(
     typer.echo(f"Wrote {output}")
 
 
+def _print_data_report(summary: dict, report) -> None:
+    for key, value in summary.items():
+        typer.echo(f"  {key}: {value}")
+    typer.echo(f"\nChecks: {report.summary()}")
+    for line in report.lines():
+        typer.echo(f"  {line}")
+
+
+@app.command()
+def ingest(
+    source: Path = typer.Argument(..., help="An ingest config (YAML), or with --pge a PG&E Download My Data CSV"),
+    output: Path = typer.Option(..., "--output", "-o", help="Scenario CSV to write"),
+    pge: bool = typer.Option(False, "--pge", help="SOURCE is a PG&E Download My Data electric CSV"),
+    resolution_minutes: int | None = typer.Option(None, help="Output step (default: the data's own interval)"),
+) -> None:
+    """Turn a meter interval file into a scenario CSV (timestamp, import_kw, export_kw,
+    net_kw on the local clock), reporting every gap filled and daylight-saving fix.
+    Use it as external_load: {type: csv, path: <output>, column: net_kw}."""
+    import json
+
+    from der_opt.ingest import (
+        ingest_interval_data,
+        load_interval_spec,
+        read_pge_interval_csv,
+        write_table,
+    )
+
+    if pge:
+        result = read_pge_interval_csv(source, resolution_minutes=resolution_minutes)
+    else:
+        spec, base = load_interval_spec(source)
+        if resolution_minutes is not None:
+            spec = spec.model_copy(update={"resolution_minutes": resolution_minutes})
+        result = ingest_interval_data(spec, base)
+    write_table(result, output)
+    report_path = output.with_name(output.stem + "_report.json")
+    payload = json.dumps({
+        "source": str(source), "summary": result.summary, "checks": result.report.summary(),
+        "findings": result.report.to_frame().to_dict(orient="records"),
+    }, indent=2, default=str)
+    report_path.write_text(payload, encoding="utf-8")
+    typer.echo(f"Ingested {source}:")
+    _print_data_report(result.summary, result.report)
+    typer.echo(f"\nWrote {output} and {report_path.name}")
+
+
+@app.command("check-data")
+def check_data(
+    path: Path = typer.Argument(..., help="CSV with timestamps in the first column"),
+    column: str = typer.Option(..., "--column", "-c", help="Column to check, in kW"),
+    resolution_minutes: int | None = typer.Option(None, help="Expected step (default: the most common one)"),
+) -> None:
+    """Check a CSV a scenario will read: regular steps, duplicates, gaps, long zero or
+    flat runs, spikes, and values that look like the wrong unit."""
+    import pandas as pd
+
+    from der_opt.ingest import check_series
+
+    frame = pd.read_csv(path, parse_dates=[0], index_col=0)
+    if column not in frame:
+        raise typer.BadParameter(f"no column {column!r}; columns are {list(frame.columns)}")
+    series = frame[column]
+    report = check_series(series, resolution_minutes, label=column)
+    typer.echo(f"{path} [{column}]: {len(series)} rows, {series.index.min()} to {series.index.max()}")
+    _print_data_report({"min_kw": round(float(series.min()), 3), "mean_kw": round(float(series.mean()), 3),
+                        "max_kw": round(float(series.max()), 3)}, report)
+
+
 if __name__ == "__main__":
     app()

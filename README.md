@@ -384,6 +384,44 @@ NEM2 load aggregation and multiple-tariff facilities, the California Climate Cre
 and demand charges.
 None of this has been checked against a real bill yet — that's the real test.
 
+## Meter data: `der-opt ingest` and `der-opt check-data`
+
+To run a scenario on a real customer's load, turn their interval data into the CSV a
+scenario reads (`timestamp, import_kw, export_kw, net_kw`, local clock, kW):
+
+```bash
+der-opt ingest pge_download.csv --pge -o data/house.csv --resolution-minutes 60       # PG&E Download My Data
+der-opt ingest examples/ingest/meter_interval.yaml -o data/house.csv --resolution-minutes 60  # any other extract
+der-opt check-data data/house.csv --column net_kw                                    # check any prepared CSV
+```
+
+```yaml
+external_load: {type: csv, path: data/house.csv, column: net_kw}
+```
+
+* **PG&E files** (`--pge`): the account preamble is skipped and never copied into the
+  output or report. The reader uses separate import/export columns if the file has
+  them, and otherwise reads the usage column as net (negative = export); it says which.
+  It was built from PG&E's published layout, not a real solar customer's file, so
+  check the first file's totals against that customer's bill.
+* **Other extracts** take a config, `examples/ingest/meter_interval.yaml` (commented, with
+  a synthetic sample file): long or wide (HE1..HE25) layout, one timestamp column or
+  date + time, interval beginning or ending, local or UTC labels, W/kW/MW or
+  Wh/kWh/MWh, delivered/received channels or one signed net channel, one meter out of
+  many. The options follow loadcast's ingestion config.
+* **Every repair is reported**, in the printout and in `<output>_report.json`: gaps of up
+  to `max_fill_intervals` (default 2) are interpolated and longer ones left empty
+  (a scenario then warns about them); November's repeated hour is averaged into one
+  and March's skipped hour interpolated, so each day has 24 hours; duplicate readings
+  are averaged; negative delivered/received values are flagged.
+* **`check-data`** checks any prepared CSV for irregular steps, duplicates, empty
+  steps, 24 h or more with no import (outage, vacancy or failed meter), 12 h or more
+  unchanged (estimated reads), spikes over 10x the 99th percentile, and values that
+  look like W or MW mistaken for kW.
+
+`net_kw` is what the meter saw. For a home with solar it already has solar
+subtracted, so use it without a solar device; adding one would count solar twice.
+
 ## Feeders: many houses on a network
 
 A scenario with a `feeder` section is a multi-house run. Every house is an ordinary
@@ -534,6 +572,7 @@ src/der_opt/
   pricing/       price series, dual extraction, value breakdown
   simulation/    counterfactual control policies + simulator
   billing/       retail tariffs, PG&E holidays, bill engine (NBT, NEM2), bill objectives
+  ingest/        meter interval files (PG&E Download My Data, any extract) -> scenario CSVs
   integrations/  LBNL load, EV model, PVWatts, PG&E NBT export rates, CAISO LMP
   network/       feeder topology, multi-premise dispatch, congestion prices, synthetic houses
   scenarios/     YAML schema, loader, data-source resolvers, feeder scenarios

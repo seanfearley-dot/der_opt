@@ -1,0 +1,28 @@
+# An ingest config for a utility interval extract. Run:
+#   der-opt ingest examples/ingest/meter_interval.yaml -o data/house.csv --resolution-minutes 60
+# then use the result in a scenario:
+#   external_load: {type: csv, path: data/house.csv, column: net_kw}
+# (net_kw is metered net load. For a home with solar, that already has solar
+# subtracted, so don't also add a solar device -- or rebuild gross load first.)
+#
+# sample_meter_15min.csv is synthetic: one week of 15-minute delivered and received kWh
+# with interval-ending labels, and two readings missing.
+# For a PG&E "Download My Data" file, skip the config: der-opt ingest FILE.csv --pge -o ...
+
+path: sample_meter_15min.csv        # relative to this file
+# header_row: 0                     # found automatically (rows above it, e.g. an account preamble, are skipped)
+timestamp:
+  column: READ_END_TS               # or date_column + time_column, e.g. DATE and START TIME
+  format: "%m/%d/%Y %H:%M"          # omit to let pandas infer
+  tz: America/Los_Angeles           # zone of the labels; "Etc/GMT+8" for standard time all year
+  convention: ending                # the label is when the interval ends
+columns:
+  delivered: KWH_DEL                # import; or `net: <col>` for one signed channel
+  received: KWH_REC                 # export
+  # meter_id: SA_ID                 # with `meter: "0000000001"` when a file holds several meters
+unit: kwh                           # w | kw | mw (average power) or wh | kwh | mwh (energy per interval)
+# interval_minutes: 15              # inferred if omitted
+# resolution_minutes: 60            # output step; default is the data's own
+max_fill_intervals: 2               # interpolate gaps up to 2 intervals; longer ones stay empty
+min_coverage: 0.75                  # when averaging up, keep a step only if 75% of it has data
+# wide_hours: {pattern: "HE{h}", first: 1}   # for files with one row per day and HE1..HE25 columns
