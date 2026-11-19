@@ -69,9 +69,14 @@ def _print_bills(bills: dict, tariff, program) -> None:
                 f"  Note: the two runs end with ${abs(unused_diff):.2f} different unused credit, which "
                 "carries forward to later bills and isn't counted in the savings above."
             )
-    notes = {note for bill in bills.values() for note in bill.notes}
-    for note in sorted(notes):
+    # a note both runs share is printed once; one that differs says which run it's about
+    shared = set.intersection(*(set(bill.notes) for bill in bills.values()))
+    for note in sorted(shared):
         typer.echo(f"  Note: {note}")
+    for label, bill in bills.items():
+        for note in bill.notes:
+            if note not in shared:
+                typer.echo(f"  Note ({label}): {note}")
 
 
 @app.command()

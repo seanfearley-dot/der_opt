@@ -51,8 +51,10 @@ class EnergyArbitrage(ValueStream):
     streams (retail tariff, wholesale LMP, or any other PriceSeries)."""
 
     def __init__(self, import_price: PriceSeries, export_price: PriceSeries, time_grid: TimeGrid):
-        self._import_rates = import_price.values(time_grid)
-        self._export_rates = export_price.values(time_grid)
+        # $/kWh x period length = $ per kW held for one period, so sub-hourly grids are
+        # costed in energy (kWh), consistent with device degradation costs
+        self._import_rates = import_price.values(time_grid) * time_grid.dt_hours
+        self._export_rates = export_price.values(time_grid) * time_grid.dt_hours
 
     def cost_expr(self, model: pyo.ConcreteModel, premise: Premise, t: int):
         return (

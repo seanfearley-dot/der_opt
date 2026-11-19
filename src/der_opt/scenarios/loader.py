@@ -121,8 +121,23 @@ def _build_tariff(config: dict) -> TariffSchedule:
     )
 
 
-def _build_value_stream(config: ValueStreamConfig, time_grid: TimeGrid) -> ValueStream:
+def _build_value_stream(config: ValueStreamConfig, time_grid: TimeGrid, scenario: ScenarioConfig) -> ValueStream:
     params = config.params
+    if config.type == "nbt_bill":
+        billing = build_billing(scenario)
+        if billing is None:
+            raise ValueError(
+                "value stream nbt_bill optimizes the bill, so the scenario needs a billing section"
+            )
+        if any(stream.type == "energy_arbitrage" for stream in scenario.value_streams):
+            raise ValueError(
+                "nbt_bill and energy_arbitrage both price grid import/export -- use one, "
+                "or energy is counted twice"
+            )
+        from der_opt.billing.objective import NBTBill
+
+        tariff, program, kwargs = billing
+        return NBTBill(tariff, program, time_grid, **kwargs)
     if config.type == "energy_arbitrage":
         import_price = _build_price_series(params["import_price"])
         export_price = _build_price_series(params["export_price"])
@@ -172,7 +187,7 @@ def build_premise(config: ScenarioConfig) -> Premise:
         built_devices[device_config.name] = _build_device(device_config, time_grid, built_devices)
     devices = list(built_devices.values())
 
-    value_streams = [_build_value_stream(stream_config, time_grid) for stream_config in config.value_streams]
+    value_streams = [_build_value_stream(stream_config, time_grid, config) for stream_config in config.value_streams]
     external_load = _resolve_external_load(config.external_load, time_grid)
 
     return Premise(

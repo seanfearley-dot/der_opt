@@ -1,13 +1,15 @@
 # Battery + solar for a full year on real LBNL load/PV, real E-ELEC import rates, and
 # real NBT export rates, billed through a 12-cycle Relevant Period with true-up.
 #   der-opt run examples/scenarios/battery_solar_lbnl_nbt_annual.yaml -o out/annual
-# Takes ~15 seconds. Needs /Users/seanearley/Documents/LBNL_Phase_4.
+# Takes about a minute (exclusive_import_export adds a yes/no per hour; without it
+# the solve is ~4 s, but the bill objective then imports and exports in the same
+# hour on some summer evenings, when the delivery export credit beats the delivery
+# import rate). Needs /Users/seanearley/Documents/LBNL_Phase_4.
 #
-# The instructive part is the bill, not the optimizer's objective: this household
-# exports more than it uses, so most of the extra export value the optimizer chases
-# is generation credit with nothing left to offset -- it piles up unused, while the
-# charges the household actually pays (delivery, non-bypassable, base services) are
-# only reduced by importing less. See the README's "Modeling caveats".
+# This household exports more than it uses. Optimizing export value (energy_arbitrage)
+# chases generation credit that has nothing left to offset and makes the bill worse
+# than a plain self-consumption battery; optimizing the bill (nbt_bill, below) doesn't.
+# See the README's "Billing" section.
 #
 # Net Surplus Compensation isn't computed here: add nsc_rate_per_kwh and
 # nsc_debit_rate_per_kwh to billing.program (PG&E publishes both monthly).
@@ -46,15 +48,14 @@ devices:
       # but available; see the README's device reference.)
 
 value_streams:
-  - type: energy_arbitrage
-    params:
-      import_price:
-        type: retail_tariff # PG&E E-ELEC, the rate NBT customers are required to be on
-        path: examples/data/tariffs/pge_e_elec_2026-06.yaml
-      export_price:
-        type: nbt_export
-        csv_path: examples/data/pge_nbt_eec_2026.csv
-        adder_per_kwh: 0.0088 # ACC Plus, 2026 residential applicants
+  # Optimize the bill itself (the billing section below), not export value: NBT's
+  # credit limits are in the objective, so stranded credit isn't counted as value.
+  # To see what the naive objective does instead, swap this for:
+  #   - type: energy_arbitrage
+  #     params:
+  #       import_price: {type: retail_tariff, path: examples/data/tariffs/pge_e_elec_2026-06.yaml}
+  #       export_price: {type: nbt_export, csv_path: examples/data/pge_nbt_eec_2026.csv, adder_per_kwh: 0.0088}
+  - type: nbt_bill
 
 external_load:
   source: lbnl_gross_load

@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from der_opt.cli.main import app
@@ -138,3 +139,36 @@ def test_billing_unknown_program_type_raises(tmp_path):
     result = runner.invoke(app, ["run", str(scenario)])
     assert result.exit_code != 0
     assert "only 'nbt'" in str(result.exception)
+
+
+def _bill_objective_scenario(tmp_path, billing: str, keep_arbitrage: bool = False) -> Path:
+    text = FIXTURE_PATH.read_text()
+    if not keep_arbitrage:
+        start, end = text.index("value_streams:"), text.index("external_load:")
+        text = text[:start] + "value_streams:\n  - type: nbt_bill\n" + text[end:]
+    else:
+        text = text.replace("value_streams:\n", "value_streams:\n  - type: nbt_bill\n")
+    path = tmp_path / "bill_objective.yaml"
+    path.write_text(text + "\ncounterfactual:\n  policies:\n    battery: {type: self_consumption}\n" + billing)
+    return path
+
+
+def test_nbt_bill_objective_matches_the_printed_bill(tmp_path):
+    result = runner.invoke(app, ["run", str(_bill_objective_scenario(tmp_path, BILLING_SECTION))])
+    assert result.exit_code == 0, result.stdout
+    lines = result.stdout.splitlines()
+    objective_bill = float(next(l for l in lines if l.strip().startswith("NBTBill:")).split("$")[1])
+    billed = float(next(l for l in lines if l.strip().startswith("optimal: billed")).split("$")[1])
+    assert objective_bill == pytest.approx(billed, abs=0.005)
+
+
+def test_nbt_bill_needs_a_billing_section(tmp_path):
+    result = runner.invoke(app, ["run", str(_bill_objective_scenario(tmp_path, ""))])
+    assert result.exit_code != 0
+    assert "needs a billing section" in str(result.exception)
+
+
+def test_nbt_bill_and_energy_arbitrage_together_are_rejected(tmp_path):
+    result = runner.invoke(app, ["run", str(_bill_objective_scenario(tmp_path, BILLING_SECTION, keep_arbitrage=True))])
+    assert result.exit_code != 0
+    assert "counted twice" in str(result.exception)

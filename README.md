@@ -36,10 +36,10 @@ Modeling caveats — that difference isn't priced, so it tilts the comparison).
 
 If the scenario has a `billing` section, it then bills both runs the way the utility
 would (see Billing below) and prints each bill, the **bill savings from optimization**,
-and the export credit each run leaves unused. **Trust the bill over the objective**:
-the optimizer values every exported kWh at the full export rate, while the bill applies
-NBT's limits on what export credit can offset — for a household that exports more than
-it uses, the two can disagree in sign.
+and the export credit each run leaves unused. With the `nbt_bill` value stream the
+objective *is* this bill (plus device costs), so "value of optimization" and "bill
+savings" differ only by battery/EV wear. With `energy_arbitrage` they can disagree in
+sign — see Modeling caveats.
 
 | Flag | Effect |
 |---|---|
@@ -117,7 +117,8 @@ Every device has `type`, a unique `name`, and `params`. Any array-valued param
 
 | `type` | Params |
 |---|---|
-| `energy_arbitrage` | `import_price`, `export_price` — each a price series (below) |
+| `nbt_bill` | none — optimizes the bill from the scenario's `billing` section, with NBT's credit limits (see Billing). Use instead of `energy_arbitrage`, not with it |
+| `energy_arbitrage` | `import_price`, `export_price` — each a price series (below). Values every exported kWh at its full export rate |
 | `tariff_energy_charge` | `tariff: {urdb_json_path: ...}`, `direction` (`import`/`export`) — tiered TOU tariffs from OpenEI URDB JSON |
 | `demand_charge` | `rate_per_kw` |
 | `capacity_payment` | `event_periods`, `payment_per_kw_event`, `committed_kw` |
@@ -217,6 +218,13 @@ don't add up to them, so a mistyped rate fails loudly. To update for a new rate
 change, copy the numbers from the current E-ELEC sheets (pages 2-3) and update
 `published_totals`.
 
+**Optimizing the bill.** The `nbt_bill` value stream (`der_opt.billing.objective.NBTBill`
+in Python) puts these rules into the optimization as a linear program: per billing
+cycle, credit applied to each bucket is capped by that bucket's charges and by the
+credit earned so far (or earned any time in the year, when a true-up runs). Its cost is
+the bill engine's net cost for the same dispatch, which the tests check to the cent,
+and the meter-balance duals become the marginal *bill* value of a kWh.
+
 **Not yet covered:** NEM 2.0 (kWh netting by TOU period), CCA/Direct Access customers
 (their generation charges and credits come from the CCA), CARE/FERA discounts,
 tiered or baseline-credit rates, the California Climate Credit, and demand charges.
@@ -227,15 +235,25 @@ None of this has been checked against a real bill yet — that's the real test.
 These all came up while building the examples — each produced a plausible-looking but
 wrong answer before it was understood:
 
-- **The optimizer doesn't know NBT's credit limits.** It values each exported kWh at
-  the full export rate, but on the bill the generation half of export credit can only
-  offset generation charges. A household that exports more than it uses runs out of
-  generation charges to offset, so extra exports just pile up unusable credit, while
+- **`energy_arbitrage` doesn't know NBT's credit limits.** It values each exported kWh
+  at the full export rate, but on the bill the generation half of export credit can
+  only offset generation charges. A household that exports more than it uses runs out
+  of generation charges to offset, so extra exports just pile up unusable credit, while
   the charges it actually pays (delivery, non-bypassable, base services) only fall by
-  importing less. In `battery_solar_lbnl_nbt_annual.yaml` the optimizer claims $395/yr
-  of value over self-consumption, but the optimal dispatch's **bill is $89 higher**,
-  with $513 more stranded credit. Check the bill section, not the objective, for
-  exporting households.
+  importing less. In `battery_solar_lbnl_nbt_annual.yaml`, `energy_arbitrage` claims
+  $395/yr of value over self-consumption, but its dispatch's **bill is $89 higher**.
+  `nbt_bill` fixes this: same household, bill $233 vs $259 for self-consumption. Use
+  `nbt_bill` whenever a scenario is billed on NBT.
+
+- **`nbt_bill` values leftover credit at zero.** Credit still unused at the end of the
+  run (carried forward at a true-up, or simply left over in a run shorter than a year)
+  counts for nothing. That's right for a household that's a net exporter every year;
+  for a run of a few days it understates exports late in the run, since in reality
+  that credit would offset the rest of the month. It also needs
+  `exclusive_import_export: true`: on some summer evenings the delivery export credit
+  is higher than the delivery import rate, and without it the optimizer imports and
+  exports in the same hour. That makes the solve a MILP (the annual example takes
+  about a minute instead of ~4 s).
 
 - **Terminal SOC and fair comparisons.** Energy left in a battery/EV at the end of the
   horizon isn't valued, so whichever dispatch ends with *less* stored energy looks

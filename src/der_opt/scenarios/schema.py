@@ -24,7 +24,7 @@ class DeviceConfig(BaseModel):
 
 
 class ValueStreamConfig(BaseModel):
-    type: Literal["energy_arbitrage", "tariff_energy_charge", "demand_charge", "capacity_payment"]
+    type: Literal["energy_arbitrage", "tariff_energy_charge", "demand_charge", "capacity_payment", "nbt_bill"]
     params: dict[str, Any] = Field(default_factory=dict)
 
 
