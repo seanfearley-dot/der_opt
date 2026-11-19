@@ -79,7 +79,7 @@ class ScenarioConfig(BaseModel):
     # to dispatch on "type"/"source" for devices and value streams) is the single place
     # that decides what shape a dict here means, instead of relying on pydantic to pick
     # the right union member among several same-shaped dict models.
-    external_load: Union[list[float], dict[str, Any]]
+    external_load: Optional[Union[list[float], dict[str, Any]]] = None  # omitted = no load
     poi_limit_kw: Optional[float] = None
     exclusive_import_export: bool = False
     counterfactual: Optional[CounterfactualConfig] = None

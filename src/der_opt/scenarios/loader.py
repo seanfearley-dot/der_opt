@@ -164,6 +164,8 @@ def _build_value_stream(config: ValueStreamConfig, time_grid: TimeGrid, scenario
 
 
 def _resolve_external_load(config, time_grid: TimeGrid) -> np.ndarray:
+    if config is None:
+        return np.zeros(time_grid.horizon_steps)
     if isinstance(config, list):
         return np.asarray(config, dtype=float)
     if "source" in config:

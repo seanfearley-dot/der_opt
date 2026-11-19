@@ -17,7 +17,7 @@ pip install -e ".[dev]"
 ```
 
 Optional extras: `.[pdf]` (re-parse PG&E NBT price-sheet PDFs), `.[validation]`
-(PySAM bill cross-check), `.[lmp]` (wholesale LMP via `gridstatus`).
+(PySAM bill cross-check).
 
 Check it works: `pytest -q` (should be all green).
 
@@ -61,6 +61,7 @@ der-opt run examples/scenarios/v2x_lbnl_nbt.yaml --duals -o out/v2x
 der-opt run examples/scenarios/battery_solar_lbnl_nbt_annual.yaml -o out/annual   # ~1 min
 der-opt run examples/scenarios/battery_solar_lbnl_nem2_annual.yaml -o out/nem2     # same house on NEM 2.0
 der-opt run examples/scenarios/feeder_ev_heat_wave.yaml -o out/feeder             # 20 houses, 2 transformers
+der-opt run examples/scenarios/battery_caiso_lmp.yaml                             # battery on CAISO LMP
 ```
 
 It prints the optimal dispatch's cost broken down by source. If the scenario has a
@@ -113,7 +114,7 @@ time_grid:
 
 devices: [...]                      # see Devices below; order matters for charge_sources
 value_streams: [...]                # see Value streams below
-external_load: ...                  # kW the premise must serve; see Data sources below
+external_load: ...                  # kW the premise must serve (omit for none); see Data sources below
 
 poi_limit_kw: 15.0                  # max import/export at the meter
 exclusive_import_export: true       # see Modeling caveats -- turn on whenever export
@@ -171,6 +172,29 @@ Price series (`import_price` / `export_price`):
     # year (residential: 2023 0.022, 2024 0.0176, 2025 0.0132, 2026 0.0088, 2027 0.0044);
     # include_produced: false drops the generation half, for CCA/DA customers
 ```
+
+**Wholesale prices (LMP)** come in as a `csv` price series. The CSV must have a
+`timestamp` column on the scenario's local clock (no time zone), one row per step at
+the scenario's resolution, and a $/kWh price column. `der-opt fetch-lmp` downloads one
+CAISO pricing node from CAISO's public OASIS site (no account) and writes exactly that:
+
+```bash
+der-opt fetch-lmp TH_NP15_GEN-APND 2026-07-13 2026-07-20 -o data/lmp.csv          # day-ahead, hourly
+der-opt fetch-lmp TH_NP15_GEN-APND 2026-07-13 2026-07-14 --market RTPD --resolution-minutes 15 -o data/lmp15.csv
+```
+
+```yaml
+import_price: {type: csv, path: data/lmp.csv, column: lmp_per_kwh}
+```
+
+The end date is exclusive. Markets: `DAM` (day-ahead, hourly), `RTPD` (15-min), `RTM`
+(5-min). Long ranges are split into several requests 5 s apart, as CAISO asks. For
+another ISO, or prices you downloaded yourself, `der_opt.integrations.caiso_lmp.
+lmp_price_table` does the same conversion on any table of interval times, nodes and
+$/MWh prices: it divides by 1000, keeps one node, moves UTC to the local clock,
+averages finer intervals down to the step, averages November's repeated hour, and
+repeats the hour before March's skipped one. `examples/scenarios/battery_caiso_lmp.yaml`
+is a 1 MW battery arbitraging a week of NP15 day-ahead prices.
 
 ### Data sources
 
@@ -484,7 +508,7 @@ src/der_opt/
   pricing/       price series, dual extraction, value breakdown
   simulation/    counterfactual control policies + simulator
   billing/       retail tariffs, PG&E holidays, bill engine (NBT, NEM2), bill objectives
-  integrations/  LBNL load, EV model, PVWatts, PG&E NBT export rates
+  integrations/  LBNL load, EV model, PVWatts, PG&E NBT export rates, CAISO LMP
   network/       feeder topology, multi-premise dispatch, congestion prices, synthetic houses
   scenarios/     YAML schema, loader, data-source resolvers, feeder scenarios
   viz/           heatmap, dispatch, value stack, duals, comparison, feeder loading charts

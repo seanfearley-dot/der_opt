@@ -1,0 +1,40 @@
+# A grid-scale battery buying and selling at CAISO's day-ahead price for one week --
+# the reference for using wholesale LMP as a price. Run with:
+#   der-opt run examples/scenarios/battery_caiso_lmp.yaml --duals -o out/lmp
+#
+# The price file came from:
+#   der-opt fetch-lmp TH_NP15_GEN-APND 2026-07-13 2026-07-20 \
+#     -o examples/data/caiso_lmp_np15_dam_2026-07-13.csv
+# (NP15 trading hub, day-ahead market, converted to $/kWh on the local clock). Any
+# other node, market or ISO works the same way once it's in that CSV format; see
+# der_opt.integrations.caiso_lmp.
+
+name: caiso_lmp_battery
+
+time_grid:
+  resolution_minutes: 60 # must match the CSV's resolution (fetch-lmp --resolution-minutes)
+  horizon_steps: 168
+  start: "2026-07-13T00:00:00"
+
+devices:
+  - type: battery
+    name: battery
+    params:
+      capacity_kwh: 4000 # 1 MW / 4 MWh
+      p_max_charge_kw: 1000
+      p_max_discharge_kw: 1000
+      eta_charge: 0.94
+      eta_discharge: 0.94
+      soc_init_frac: 0.5
+      soc_final_min_frac: 0.5 # end where it started, so the week's profit is real
+      degradation_cost_per_kwh: 0.005 # illustrative
+
+value_streams:
+  - type: energy_arbitrage
+    params:
+      # buying and selling at the same price, so there's no gain in doing both at once
+      import_price: {type: csv, path: examples/data/caiso_lmp_np15_dam_2026-07-13.csv, column: lmp_per_kwh}
+      export_price: {type: csv, path: examples/data/caiso_lmp_np15_dam_2026-07-13.csv, column: lmp_per_kwh}
+
+# no external_load: a standalone battery serves no load of its own
+poi_limit_kw: 1000

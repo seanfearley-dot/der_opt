@@ -344,5 +344,34 @@ def run(
         typer.echo(f"\nWrote CSVs and charts to {output_dir}")
 
 
+@app.command("fetch-lmp")
+def fetch_lmp(
+    node: str = typer.Argument(..., help='CAISO pricing node, e.g. TH_NP15_GEN-APND (NP15 trading hub)'),
+    start: str = typer.Argument(..., help="First day, YYYY-MM-DD (from local midnight)"),
+    end: str = typer.Argument(..., help="Day after the last day, YYYY-MM-DD (exclusive)"),
+    output: Path = typer.Option(..., "--output", "-o", help="CSV to write"),
+    market: str = typer.Option("DAM", help="DAM (day-ahead, hourly), RTPD (15-min) or RTM (5-min)"),
+    resolution_minutes: int = typer.Option(60, help="Resolution of the scenario that will read it"),
+) -> None:
+    """Download CAISO LMP for one node and write it as a scenario price CSV
+    (timestamp on the local clock, lmp_per_kwh). Use it in a scenario as
+    {type: csv, path: <output>, column: lmp_per_kwh}."""
+    from datetime import date
+
+    from der_opt.integrations.caiso_lmp import fetch_caiso_lmp, lmp_price_table, write_lmp_csv
+
+    first, stop = date.fromisoformat(start), date.fromisoformat(end)
+    raw = fetch_caiso_lmp(node, first, stop, market=market)
+    table = lmp_price_table(raw, resolution_minutes=resolution_minutes, node=node)
+    write_lmp_csv(table, output)
+    prices = table["lmp_per_kwh"]
+    typer.echo(
+        f"{node} {market}: {len(raw)} intervals -> {len(table)} rows at {resolution_minutes} min, "
+        f"{table.index[0]} to {table.index[-1]}"
+    )
+    typer.echo(f"  $/kWh: min {prices.min():.4f}, mean {prices.mean():.4f}, max {prices.max():.4f}")
+    typer.echo(f"Wrote {output}")
+
+
 if __name__ == "__main__":
     app()
