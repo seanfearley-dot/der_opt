@@ -51,7 +51,7 @@ def crosscheck_annual_bill(
             f"horizon_steps={time_grid.horizon_steps}"
         )
 
-    urdb_data = json.loads(Path(urdb_json_path).read_text())
+    urdb_data = json.loads(Path(urdb_json_path).read_text(encoding="utf-8"))
     if "items" in urdb_data:
         urdb_data = urdb_data["items"][0]
 

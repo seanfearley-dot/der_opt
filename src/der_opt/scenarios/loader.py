@@ -182,7 +182,7 @@ def _resolve_external_load(config, time_grid: TimeGrid) -> np.ndarray:
 
 def load_scenario_config(path: str | Path) -> ScenarioConfig:
     """Parses and validates a scenario YAML file without building anything."""
-    raw = yaml.safe_load(Path(path).read_text())
+    raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     return ScenarioConfig.model_validate(raw)
 
 

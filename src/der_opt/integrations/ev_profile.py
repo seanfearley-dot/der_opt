@@ -25,7 +25,7 @@ from der_opt.time_grid import TimeGrid
 
 
 def load_model_params(model_params_path: str | Path) -> dict:
-    return json.loads(Path(model_params_path).read_text())
+    return json.loads(Path(model_params_path).read_text(encoding="utf-8"))
 
 
 def typical_arrival_departure_hours(

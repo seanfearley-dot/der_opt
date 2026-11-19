@@ -100,7 +100,7 @@ def _expand_rate(name: str, rate, seasons: set[str], periods: set[str]) -> dict[
 
 
 def load_retail_tariff(path: str | Path) -> RetailTariff:
-    data = yaml.safe_load(Path(path).read_text())
+    data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
 
     season_by_month: dict[int, str] = {}
     for season, months in data["seasons"].items():

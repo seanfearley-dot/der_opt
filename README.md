@@ -21,6 +21,38 @@ Optional extras: `.[pdf]` (re-parse PG&E NBT price-sheet PDFs), `.[validation]`
 
 Check it works: `pytest -q` (should be all green).
 
+### On Windows
+
+Same steps in PowerShell (Python 3.11+ from python.org; HiGHS, the default solver,
+installs from pip with nothing extra):
+
+```powershell
+cd "C:\path\to\optimization tools"
+py -3.12 -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+pytest -q
+```
+
+* If PowerShell won't run `Activate.ps1`, allow local scripts once:
+  `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+* Environment variables: `$env:NREL_API_KEY = "..."` instead of `export`, and
+  `$env:MPLBACKEND = "Agg"` before running the example scripts.
+* The repo has no remote. To move it with its history, run
+  `git bundle create der-opt.bundle --all` here, then `git clone der-opt.bundle der-opt` there. Don't copy `.venv`:
+  it holds this machine's builds.
+* The examples that use the LBNL Phase 4 dataset or the EV charging model point at
+  `/Users/seanearley/...`. Copy those datasets over and edit the paths; forward
+  slashes work in YAML on Windows (`C:/Users/you/Documents/LBNL_Phase_4`) and avoid
+  escaping backslashes. The feeder example and the tests need no external data.
+* Close output CSVs in Excel before rerunning with the same `-o` folder: Windows
+  won't let the run overwrite a file that's open.
+* Scenario and tariff files are read as UTF-8 on every platform, so save them as
+  UTF-8 (Notepad and VS Code do by default).
+
+So far this has only been tested on macOS with Python 3.9. A current Python on
+Windows pulls newer pandas and numpy, so run the tests there before trusting results.
+
 ## Running a scenario
 
 ```bash
@@ -439,7 +471,8 @@ Python API directly. The `examples/` scripts are the templates:
 | `04_battery_solar_lbnl_reference.py` | battery + solar on real LBNL data and NBT export, vs. self-consumption |
 | `05_v2x_lbnl_reference.py` | multi-day V2X on real LBNL + EV-model data, vs. dumb charging |
 
-Run any with `MPLBACKEND=Agg python examples/<script>.py`; charts land in
+Run any with `MPLBACKEND=Agg python examples/<script>.py` (on Windows,
+`$env:MPLBACKEND = "Agg"` first); charts land in
 `examples/outputs/` (gitignored).
 
 ## Layout

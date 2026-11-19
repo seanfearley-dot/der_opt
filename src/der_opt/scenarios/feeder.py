@@ -46,12 +46,12 @@ from der_opt.scenarios.schema import (
 
 
 def is_feeder_scenario(path: str | Path) -> bool:
-    raw = yaml.safe_load(Path(path).read_text())
+    raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     return isinstance(raw, dict) and "feeder" in raw
 
 
 def load_feeder_config(path: str | Path) -> FeederScenarioConfig:
-    return FeederScenarioConfig.model_validate(yaml.safe_load(Path(path).read_text()))
+    return FeederScenarioConfig.model_validate(yaml.safe_load(Path(path).read_text(encoding="utf-8")))
 
 
 @dataclass

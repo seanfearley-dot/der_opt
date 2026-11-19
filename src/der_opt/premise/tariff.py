@@ -105,7 +105,7 @@ class TariffSchedule:
         sheets -- treat this as a reference, not a substitute for the actual tariff
         sheet, when accuracy matters."""
         if isinstance(path_or_dict, (str, Path)):
-            data = json.loads(Path(path_or_dict).read_text())
+            data = json.loads(Path(path_or_dict).read_text(encoding="utf-8"))
         else:
             data = path_or_dict
         if "items" in data:
