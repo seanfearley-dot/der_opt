@@ -46,5 +46,12 @@ class ScenarioConfig(BaseModel):
     time_grid: TimeGridConfig
     devices: list[DeviceConfig] = Field(default_factory=list)
     value_streams: list[ValueStreamConfig] = Field(default_factory=list)
-    external_load: Union[list[float], CSVSeriesConfig]
+    # A literal array, {type: csv, path, column}, or {source: "<name>", ...kwargs} for
+    # one of scenarios/data_sources.py's resolvers (e.g. real LBNL load data) -- left
+    # as a generic dict rather than a stricter union so the loader (which already has
+    # to dispatch on "type"/"source" for devices and value streams) is the single place
+    # that decides what shape a dict here means, instead of relying on pydantic to pick
+    # the right union member among several same-shaped dict models.
+    external_load: Union[list[float], dict[str, Any]]
     poi_limit_kw: Optional[float] = None
+    exclusive_import_export: bool = False

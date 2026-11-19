@@ -3,6 +3,7 @@ from der_opt.pricing.evaluate import value_breakdown
 from der_opt.pricing.sources import (
     ConstantPriceSeries,
     CSVPriceSeries,
+    DailyTOUPriceSeries,
     LMPPriceSeries,
     PriceSeries,
     TariffPriceSeries,
@@ -11,6 +12,7 @@ from der_opt.pricing.sources import (
 __all__ = [
     "CSVPriceSeries",
     "ConstantPriceSeries",
+    "DailyTOUPriceSeries",
     "LMPPriceSeries",
     "PriceSeries",
     "TariffPriceSeries",

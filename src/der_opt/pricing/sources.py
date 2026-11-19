@@ -57,6 +57,28 @@ class CSVPriceSeries(PriceSeries):
         return arr
 
 
+class DailyTOUPriceSeries(PriceSeries):
+    """Repeats a 24-value hour-of-day rate pattern across the whole TimeGrid horizon --
+    an illustrative/placeholder TOU shape (e.g. "cheap overnight, expensive 4-9pm"),
+    not a real tariff. Several of this toolkit's own examples hand-rolled exactly this
+    pattern inline (`[rate_for_hour(ts.hour) for ts in time_grid.timestamps()]`);
+    exposed here as a reusable PriceSeries so a YAML scenario can express it directly
+    without a CSV file or external computation. Hourly resolution only."""
+
+    def __init__(self, hourly_pattern):
+        pattern = list(hourly_pattern)
+        if len(pattern) != 24:
+            raise ValueError(f"hourly_pattern must have exactly 24 values, got {len(pattern)}")
+        self.hourly_pattern = pattern
+
+    def values(self, time_grid: TimeGrid) -> np.ndarray:
+        if time_grid.start is None:
+            raise ValueError("TimeGrid.start is required for DailyTOUPriceSeries")
+        if time_grid.resolution_minutes != 60:
+            raise ValueError("DailyTOUPriceSeries only supports hourly (resolution_minutes=60) TimeGrids")
+        return np.array([self.hourly_pattern[ts.hour] for ts in time_grid.timestamps()], dtype=float)
+
+
 class TariffPriceSeries(PriceSeries):
     """Wraps a non-tiered TariffSchedule's TOU energy rate into a per-period array.
     Raises if the tariff has tiers — a tiered rate is decision-dependent (which tier

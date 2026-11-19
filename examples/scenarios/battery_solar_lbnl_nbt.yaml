@@ -1,0 +1,64 @@
+# Battery + solar on real reference data, entirely from YAML -- the config-driven
+# reproduction of examples/04_battery_solar_lbnl_reference.py. Run with:
+#   der-opt run examples/scenarios/battery_solar_lbnl_nbt.yaml --duals -o /tmp/out
+#
+# Needs /Users/seanearley/Documents/LBNL_Phase_4 (not part of this repo).
+# Import price is still an illustrative flat/TOU placeholder; export is PG&E's real
+# 2026 NBT rate, which can spike above that placeholder import price for a few
+# summer-evening hours -- hence exclusive_import_export: true below.
+
+name: lbnl_reference_house
+
+time_grid:
+  resolution_minutes: 60
+  horizon_steps: 168 # 7 days
+  start: "2025-07-15T00:00:00"
+
+devices:
+  - type: solar
+    name: solar
+    params:
+      available_kw:
+        source: lbnl_pv
+        scenario_dir: /Users/seanearley/Documents/LBNL_Phase_4/anonymized-1in2-midDemand-with_EE_FS-2025
+        cluster_name: res-pge-res_unknown-allSize-hot_dry-nonCare-NoLCA-AllDay-0_50pct
+        start_hour_ending: 4681 # mid-July
+
+  - type: battery
+    name: battery
+    params:
+      capacity_kwh: 13.5
+      p_max_charge_kw: 5.0
+      p_max_discharge_kw: 5.0
+      eta_charge: 0.96
+      eta_discharge: 0.96
+      soc_init_frac: 0.5
+      degradation_cost_per_kwh: 0.015
+      # no soc_final_min_frac: see the Python example's comment -- a terminal floor
+      # here would also need to apply fairly to any counterfactual comparison.
+      # (charge_sources: [solar] would restrict this battery to charging only from
+      # concurrent solar generation -- not used here, to match examples/04 exactly,
+      # but available; see the README's device reference.)
+
+value_streams:
+  - type: energy_arbitrage
+    params:
+      import_price:
+        type: daily_tou
+        hourly_pattern:
+          [0.12, 0.12, 0.12, 0.12, 0.12, 0.12,
+           0.22, 0.22, 0.22, 0.22, 0.22, 0.22, 0.22, 0.22, 0.22, 0.22,
+           0.45, 0.45, 0.45, 0.45, 0.45,
+           0.22, 0.22, 0.22]
+      export_price:
+        type: nbt_export
+        csv_path: examples/data/pge_nbt_eec_2026.csv
+
+external_load:
+  source: lbnl_gross_load
+  scenario_dir: /Users/seanearley/Documents/LBNL_Phase_4/anonymized-1in2-midDemand-with_EE_FS-2025
+  cluster_name: res-pge-res_unknown-allSize-hot_dry-nonCare-NoLCA-AllDay-0_50pct
+  start_hour_ending: 4681
+
+poi_limit_kw: 15.0
+exclusive_import_export: true

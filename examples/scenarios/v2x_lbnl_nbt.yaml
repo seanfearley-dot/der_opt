@@ -1,0 +1,61 @@
+# V2X EV, no solar, 3 days -- the config-driven reproduction of
+# examples/05_v2x_lbnl_reference.py. Run with:
+#   der-opt run examples/scenarios/v2x_lbnl_nbt.yaml --duals -o /tmp/out
+#
+# Needs /Users/seanearley/Documents/LBNL_Phase_4 and
+# /Users/seanearley/claude runs/ev-daily-charging-model (neither is part of this repo).
+
+name: v2x_reference_house
+
+time_grid:
+  resolution_minutes: 60
+  horizon_steps: 72 # 3 days
+  start: "2025-07-15T00:00:00"
+
+devices:
+  - type: ev_v2x
+    name: ev
+    params:
+      capacity_kwh: 75.0
+      p_max_charge_kw: 7.2
+      p_max_discharge_kw: 7.2
+      eta_charge: 0.95
+      eta_discharge: 0.95
+      soc_init_frac: 0.5
+      connected:
+        source: ev_connected_schedule
+        arrivals_csv: /Users/seanearley/claude runs/ev-daily-charging-model/excel_build/raw_arrivals.csv
+        departures_csv: /Users/seanearley/claude runs/ev-daily-charging-model/excel_build/raw_departures.csv
+      # one departure per day (3 days = 3 mornings); each needs its own entry -- see
+      # V2XVehicle's docstring on why a single value would silently only protect day 1.
+      departure_period: [9, 33, 57]
+      # 0.8 = the realistic customer-expectation target (see
+      # integrations/ev_profile.charging_device_params), not the bare statistical
+      # daily-need minimum -- the latter would let the optimizer run the vehicle down
+      # toward empty for export revenue, which real owners wouldn't tolerate.
+      soc_departure_min_frac: 0.8
+      soc_final_min_frac: 0.8
+      degradation_cost_per_kwh: 0.02 # illustrative, not sourced from the EV model project
+
+value_streams:
+  - type: energy_arbitrage
+    params:
+      import_price:
+        type: daily_tou
+        hourly_pattern:
+          [0.12, 0.12, 0.12, 0.12, 0.12, 0.12,
+           0.22, 0.22, 0.22, 0.22, 0.22, 0.22, 0.22, 0.22, 0.22, 0.22,
+           0.45, 0.45, 0.45, 0.45, 0.45,
+           0.22, 0.22, 0.22]
+      export_price:
+        type: nbt_export
+        csv_path: examples/data/pge_nbt_eec_2026.csv
+
+external_load:
+  source: lbnl_net_load # no solar device in this scenario -- net, not gross
+  scenario_dir: /Users/seanearley/Documents/LBNL_Phase_4/anonymized-1in2-midDemand-with_EE_FS-2025
+  cluster_name: res-pge-res_unknown-allSize-hot_dry-nonCare-NoLCA-Flat-80_100pct # pv_penetration=0.0
+  start_hour_ending: 4681
+
+poi_limit_kw: 15.0
+exclusive_import_export: true
