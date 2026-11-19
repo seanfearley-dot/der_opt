@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "der-opt"
 version = "0.1.0"
 description = "Toolkit for modeling and optimizing distributed energy resources (DERs) under resource-specific constraints"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies = [
     "pyomo>=6.7",
     "highspy",

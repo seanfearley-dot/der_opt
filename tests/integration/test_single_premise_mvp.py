@@ -44,7 +44,7 @@ def solved_summary():
 
 
 def test_golden_scenario_matches_stored_snapshot(solved_summary):
-    expected = json.loads(GOLDEN_PATH.read_text())
+    expected = json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))
 
     assert solved_summary["solver_status"] == expected["solver_status"]
     assert solved_summary["objective_value"] == pytest.approx(expected["objective_value"], abs=1e-4)
@@ -53,6 +53,12 @@ def test_golden_scenario_matches_stored_snapshot(solved_summary):
     assert solved_summary["duals_exact_flags"] == expected["duals_exact_flags"]
 
     for col, value in expected["device_column_sums"].items():
+        # The battery's charge path isn't unique: when holding energy an hour longer
+        # costs nothing, equally cheap schedules differ only in when it sits charged,
+        # and solver versions pick different ones (HiGHS 1.15 vs 1.16 here). The
+        # objective, flows, and duals above pin the solution; the path doesn't.
+        if col.endswith(".soc"):
+            continue
         assert solved_summary["device_column_sums"][col] == pytest.approx(value, abs=1e-4)
 
     for idx, value in expected["poi_balance_dual_sample"].items():

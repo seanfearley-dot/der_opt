@@ -1,20 +1,14 @@
 from __future__ import annotations
 
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
-
-# pydantic v2 evaluates field annotations at runtime to build validators (unlike plain
-# dataclasses, which never do even with `from __future__ import annotations`), and
-# Python 3.9 doesn't support the `X | None` syntax at runtime -- so these models use
-# typing.Optional/Union explicitly rather than the newer `|` syntax used elsewhere in
-# this codebase.
 
 
 class TimeGridConfig(BaseModel):
     resolution_minutes: int
     horizon_steps: int
-    start: Optional[str] = None  # ISO-8601, e.g. "2026-07-15T00:00:00"
+    start: str | None = None  # ISO-8601, e.g. "2026-07-15T00:00:00"
 
 
 class DeviceConfig(BaseModel):
@@ -54,10 +48,10 @@ class BillingConfig(BaseModel):
 
     tariff: str
     income_tier: int = 3
-    program: Optional[dict[str, Any]] = None
-    cycle_start_dates: Optional[list[str]] = None
+    program: dict[str, Any] | None = None
+    cycle_start_dates: list[str] | None = None
     relevant_period_cycles: int = 12
-    baseline_territory: Optional[str] = None
+    baseline_territory: str | None = None
     baseline_code: str = "basic"
 
 
@@ -79,11 +73,11 @@ class ScenarioConfig(BaseModel):
     # to dispatch on "type"/"source" for devices and value streams) is the single place
     # that decides what shape a dict here means, instead of relying on pydantic to pick
     # the right union member among several same-shaped dict models.
-    external_load: Optional[Union[list[float], dict[str, Any]]] = None  # omitted = no load
-    poi_limit_kw: Optional[float] = None
+    external_load: list[float] | dict[str, Any] | None = None  # omitted = no load
+    poi_limit_kw: float | None = None
     exclusive_import_export: bool = False
-    counterfactual: Optional[CounterfactualConfig] = None
-    billing: Optional[BillingConfig] = None
+    counterfactual: CounterfactualConfig | None = None
+    billing: BillingConfig | None = None
 
 
 # --- feeder (multi-premise) scenarios ------------------------------------------------
@@ -91,9 +85,9 @@ class ScenarioConfig(BaseModel):
 
 class NetworkElementConfig(BaseModel):
     name: str
-    rating_kw: Optional[float] = None
-    overload_cost_per_kwh: Optional[float] = None  # omitted = hard limit
-    parent: Optional[str] = None
+    rating_kw: float | None = None
+    overload_cost_per_kwh: float | None = None  # omitted = hard limit
+    parent: str | None = None
 
 
 class NetworkValueStreamConfig(BaseModel):
@@ -113,9 +107,9 @@ class HouseDefaultsConfig(BaseModel):
     are keyed by device name and apply to each house that has that device."""
 
     value_streams: list[ValueStreamConfig] = Field(default_factory=list)
-    poi_limit_kw: Optional[float] = None
+    poi_limit_kw: float | None = None
     exclusive_import_export: bool = False
-    counterfactual: Optional[CounterfactualConfig] = None
+    counterfactual: CounterfactualConfig | None = None
 
 
 class HouseConfig(BaseModel):
@@ -125,11 +119,11 @@ class HouseConfig(BaseModel):
     name: str
     element: str
     devices: list[DeviceConfig] = Field(default_factory=list)
-    external_load: Union[list[float], dict[str, Any]]
-    value_streams: Optional[list[ValueStreamConfig]] = None
-    poi_limit_kw: Optional[float] = None
-    exclusive_import_export: Optional[bool] = None
-    counterfactual: Optional[CounterfactualConfig] = None
+    external_load: list[float] | dict[str, Any]
+    value_streams: list[ValueStreamConfig] | None = None
+    poi_limit_kw: float | None = None
+    exclusive_import_export: bool | None = None
+    counterfactual: CounterfactualConfig | None = None
 
 
 class SyntheticHousesConfig(BaseModel):
@@ -139,7 +133,7 @@ class SyntheticHousesConfig(BaseModel):
     element: str
     count: int
     seed: int = 0
-    name_prefix: Optional[str] = None  # default "<element>_h"
+    name_prefix: str | None = None  # default "<element>_h"
     solar_share: float = 0.4
     battery_share: float = 0.3  # of the solar homes
     ev_share: float = 0.4
@@ -155,4 +149,4 @@ class FeederScenarioConfig(BaseModel):
     house_defaults: HouseDefaultsConfig = Field(default_factory=HouseDefaultsConfig)
     houses: list[HouseConfig] = Field(default_factory=list)
     synthetic_houses: list[SyntheticHousesConfig] = Field(default_factory=list)
-    billing: Optional[BillingConfig] = None
+    billing: BillingConfig | None = None

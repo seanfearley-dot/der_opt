@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 import typer
 
@@ -87,17 +86,16 @@ def _money(value: float) -> str:
     return f"-${-value:,.2f}" if value < 0 else f"${value:,.2f}"
 
 
-def _run_feeder(scenario: Path, output_dir: Optional[Path], no_counterfactual: bool) -> None:
+def _run_feeder(scenario: Path, output_dir: Path | None, no_counterfactual: bool) -> None:
     import pandas as pd
 
+    from der_opt.diagnostics import CheckReport, collect_data_warnings
     from der_opt.network import loading_summary
     from der_opt.scenarios import (
         build_feeder_scenario,
         load_feeder_config,
         run_feeder_study,
     )
-
-    from der_opt.diagnostics import CheckReport, collect_data_warnings
 
     report = CheckReport()
     config = load_feeder_config(scenario)
@@ -203,13 +201,16 @@ def _run_feeder(scenario: Path, output_dir: Optional[Path], no_counterfactual: b
             for label, run in runs.items()
         }
         _write_checks(output_dir, scenario, config, report, results)
+        import matplotlib.pyplot as plt
+
+        plt.close("all")  # charts are saved; free them (matters when runs are scripted in a loop)
         typer.echo(f"\nWrote CSVs, charts and run_record.json to {output_dir}")
 
 
 @app.command()
 def run(
     scenario: Path = typer.Argument(..., help="Path to a scenario YAML file"),
-    output_dir: Optional[Path] = typer.Option(
+    output_dir: Path | None = typer.Option(
         None, "--output-dir", "-o", help="Directory to write dispatch CSVs and charts to"
     ),
     duals: bool = typer.Option(False, "--duals", help="Print (and with -o, write) dual/shadow prices"),
@@ -364,6 +365,9 @@ def run(
                    "counterfactual": cf_breakdown,
                    "bills": {label: bill.summary["net_cost"] for label, bill in bills.items()}}
         _write_checks(output_dir, scenario, config, report, results)
+        import matplotlib.pyplot as plt
+
+        plt.close("all")  # charts are saved; free them (matters when runs are scripted in a loop)
         typer.echo(f"\nWrote CSVs, charts and run_record.json to {output_dir}")
 
 
@@ -381,7 +385,11 @@ def fetch_lmp(
     {type: csv, path: <output>, column: lmp_per_kwh}."""
     from datetime import date
 
-    from der_opt.integrations.caiso_lmp import fetch_caiso_lmp, lmp_price_table, write_lmp_csv
+    from der_opt.integrations.caiso_lmp import (
+        fetch_caiso_lmp,
+        lmp_price_table,
+        write_lmp_csv,
+    )
 
     first, stop = date.fromisoformat(start), date.fromisoformat(end)
     raw = fetch_caiso_lmp(node, first, stop, market=market)

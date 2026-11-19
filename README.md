@@ -9,11 +9,15 @@ premises on a distribution network with transformer limits and price the congest
 
 ## Setup
 
+Needs Python 3.11 or newer; developed and tested on 3.13. The Mac's built-in
+`python3` is 3.9, too old, so make the environment with [uv](https://docs.astral.sh/uv/)
+(installed here at `~/Library/Python/3.9/bin/uv`), which fetches Python itself:
+
 ```bash
 cd "/Users/seanearley/optimization tools"
-python3 -m venv .venv
+uv venv --python 3.13 .venv
 source .venv/bin/activate
-pip install -e ".[dev]"
+uv pip install -e ".[dev]"
 ```
 
 Optional extras: `.[pdf]` (re-parse PG&E NBT price-sheet PDFs), `.[validation]`
@@ -23,12 +27,12 @@ Check it works: `pytest -q` (should be all green).
 
 ### On Windows
 
-Same steps in PowerShell (Python 3.11+ from python.org; HiGHS, the default solver,
-installs from pip with nothing extra):
+Same steps in PowerShell (Python 3.11+ from python.org, 3.13 recommended; HiGHS, the
+default solver, installs from pip with nothing extra):
 
 ```powershell
 cd "C:\path\to\optimization tools"
-py -3.12 -m venv .venv
+py -3.13 -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
 pytest -q
@@ -50,8 +54,8 @@ pytest -q
 * Scenario and tariff files are read as UTF-8 on every platform, so save them as
   UTF-8 (Notepad and VS Code do by default).
 
-So far this has only been tested on macOS with Python 3.9. A current Python on
-Windows pulls newer pandas and numpy, so run the tests there before trusting results.
+Tested on macOS with Python 3.13 (pandas 3.1, numpy 2.5, Pyomo 6.10, HiGHS 1.16), not
+yet on Windows: run the tests there before trusting results.
 
 ## Running a scenario
 
