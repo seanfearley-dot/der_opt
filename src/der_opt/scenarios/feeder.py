@@ -19,6 +19,7 @@ from pathlib import Path
 import pandas as pd
 import yaml
 
+from der_opt.diagnostics import CheckReport, Finding
 from der_opt.network import (
     CapacityDeferral,
     Feeder,
@@ -152,7 +153,7 @@ class FeederStudy:
     runs: dict[str, RunSummary]
     congestion_prices: pd.DataFrame
     prices_exact: bool
-    notes: list[str] = field(default_factory=list)
+    checks: CheckReport = field(default_factory=CheckReport)
 
 
 def _house_costs(premises: list[Premise], dispatches: dict[str, DispatchResult]) -> pd.DataFrame:
@@ -180,24 +181,53 @@ def run_feeder_study(scenario: FeederScenario, independent: bool = True, counter
     if independent:
         runs["independent"] = _summarize("independent", scenario, network, solve_independently(scenario.premises))
 
-    notes = []
     if counterfactual:
         policies = {
             premise.name: build_counterfactual_policies(house_config, premise)
             for house_config, premise in zip(scenario.house_configs, scenario.premises)
         }
         if any(p is not None for p in policies.values()):
-            dispatches = {}
-            for premise in scenario.premises:
-                simulator = CounterfactualSimulator(premise, policies[premise.name] or {})
-                dispatches[premise.name] = simulator.run()
-                for device in premise.devices:
-                    end = simulator.final_device_states.get(device.name, {}).get("soc")
-                    floor = getattr(device, "soc_final_min", None)
-                    if end is not None and floor is not None and end < floor - 1e-6:
-                        notes.append(
-                            f"{premise.name} {device.name} ends the counterfactual at {end:.1f} kWh, below the "
-                            f"{floor:.1f} kWh the optimized runs must end with, which favors the counterfactual."
-                        )
+            dispatches = {
+                premise.name: CounterfactualSimulator(premise, policies[premise.name] or {}).run()
+                for premise in scenario.premises
+            }
             runs["counterfactual"] = _summarize("counterfactual", scenario, network, dispatches)
-    return FeederStudy(scenario, runs, prices, exact, notes)
+    return FeederStudy(scenario, runs, prices, exact, check_feeder_study(scenario, runs))
+
+
+def check_feeder_study(scenario: FeederScenario, runs: dict[str, RunSummary]) -> CheckReport:
+    """The single-premise checks on every house in every run, plus the network's own:
+    hard ratings must hold in the coordinated run."""
+    from der_opt.diagnostics import (
+        check_dispatch,
+        check_end_states,
+        check_load,
+        check_prices,
+        check_tariff_dates,
+    )
+
+    report = CheckReport()
+    for premise in scenario.premises:
+        report.extend(check_prices(premise, name=premise.name))
+        report.extend(check_load(premise, name=premise.name))
+        for label, run in runs.items():
+            report.extend(check_dispatch(premise, run.dispatches[premise.name], run=label, name=premise.name))
+        report.extend(check_end_states(premise, {label: run.dispatches[premise.name] for label, run in runs.items()},
+                                       name=premise.name))
+    found = []
+    if "coordinated" in runs:
+        flows = runs["coordinated"].flows
+        for element in scenario.feeder.elements:
+            if element.rating_kw is None or element.overload_cost_per_kwh is not None:
+                continue
+            over = float(flows[element.name].abs().max()) - element.rating_kw
+            if over > 1e-3:
+                found.append(Finding("error", "hard ratings hold", f"{element.name} exceeds its {element.rating_kw:g} kW "
+                                     f"hard rating by {over:.3f} kW", "coordinated"))
+    report.ran("hard ratings hold", found)
+    billing = scenario.house_configs[0].billing if scenario.house_configs else None
+    if billing is not None:
+        from der_opt.billing import load_retail_tariff
+
+        report.extend(check_tariff_dates(load_retail_tariff(billing.tariff), scenario.premises[0].time_grid))
+    return report

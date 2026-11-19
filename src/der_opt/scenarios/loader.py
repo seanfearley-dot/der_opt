@@ -91,7 +91,7 @@ def _build_price_series(config: dict) -> PriceSeries:
     if kind == "constant":
         return ConstantPriceSeries(config["price"])
     if kind == "csv":
-        return CSVPriceSeries(_read_csv_series(CSVSeriesConfig(**config)))
+        return CSVPriceSeries(_read_csv_series(CSVSeriesConfig(**config)), label=f"{config['path']} [{config['column']}]")
     if kind == "daily_tou":
         return DailyTOUPriceSeries(config["hourly_pattern"])
     if kind == "nbt_export":
@@ -175,7 +175,7 @@ def _resolve_external_load(config, time_grid: TimeGrid) -> np.ndarray:
         # because a load profile is a price -- same mechanics (a timestamp-indexed
         # column aligned onto a TimeGrid), no need for a second implementation.
         series = _read_csv_series(CSVSeriesConfig(**config))
-        return CSVPriceSeries(series).values(time_grid)
+        return CSVPriceSeries(series, label=f"{config['path']} [{config['column']}]").values(time_grid)
     raise ValueError(
         f"external_load dict must have 'source' (a data-source resolver) or "
         f"type: csv; got keys {list(config.keys())}"

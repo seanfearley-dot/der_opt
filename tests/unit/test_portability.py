@@ -7,7 +7,15 @@ import re
 from pathlib import Path
 
 SRC = Path(__file__).parent.parent.parent / "src" / "der_opt"
-UNSPECIFIED = re.compile(r"\.(read_text|write_text)\((?![^)]*encoding=)|(?<![\w.])open\((?![^)]*encoding=)(?![^)]*['\"]\w*b)")
+TEXT_IO = re.compile(r"\.(read_text|write_text)\(|(?<![\w.])open\(")
+BINARY_MODE = re.compile(r"open\([^)]*['\"][rwax+]*b")
+
+
+def _unspecified(line: str) -> bool:
+    """A text read or write on this line with no encoding= after it (binary opens and
+    archive/pdf .open() calls are exempt)."""
+    match = TEXT_IO.search(line)
+    return bool(match) and "encoding=" not in line[match.start():] and not BINARY_MODE.search(line)
 
 
 def test_every_text_read_names_its_encoding():
@@ -15,7 +23,7 @@ def test_every_text_read_names_its_encoding():
         f"{path.relative_to(SRC)}:{number}: {line.strip()}"
         for path in SRC.rglob("*.py")
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
-        if UNSPECIFIED.search(line)
+        if _unspecified(line)
     ]
     assert not offenders, "add encoding=\"utf-8\":\n" + "\n".join(offenders)
 

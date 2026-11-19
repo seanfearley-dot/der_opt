@@ -105,4 +105,5 @@ class CounterfactualSimulator:
             grid_export=pd.Series(grid_export, index=index),
             objective_value=total_device_cost,
             solver_status="simulated",
+            final_state={name: dict(state) for name, state in self.final_device_states.items() if state},
         )

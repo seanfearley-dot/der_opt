@@ -16,6 +16,9 @@ class DispatchResult:
     grid_export: pd.Series
     objective_value: float
     solver_status: str
+    # each storage device's state after the last period, e.g. {"battery": {"soc": 6.2}}
+    # (the dispatch columns hold start-of-period values, so they stop one step short)
+    final_state: dict = field(default_factory=dict)
 
 
 @dataclass

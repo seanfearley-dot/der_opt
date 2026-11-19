@@ -66,9 +66,7 @@ der-opt run examples/scenarios/battery_caiso_lmp.yaml                           
 
 It prints the optimal dispatch's cost broken down by source. If the scenario has a
 `counterfactual` section, it also simulates that rule-based baseline and prints its
-cost and the **value of optimization** (counterfactual cost minus optimal cost), plus
-a note if a battery/EV ends the horizon with a different charge in the two runs (see
-Modeling caveats — that difference isn't priced, so it tilts the comparison).
+cost and the **value of optimization** (counterfactual cost minus optimal cost).
 
 If the scenario has a `billing` section, it then bills both runs the way the utility
 would (see Billing below) and prints each bill, the **bill savings from optimization**,
@@ -76,6 +74,25 @@ and the export credit each run leaves unused. With the `nbt_bill` value stream t
 objective *is* this bill (plus device costs), so "value of optimization" and "bill
 savings" differ only by battery/EV wear. With `energy_arbitrage` they can disagree in
 sign — see Modeling caveats.
+
+Every run ends with **checks** (feeder runs too, on every house in every run):
+
+| Check | Level | Catches |
+|---|---|---|
+| energy balance | error | grid + devices don't add up to the load |
+| meter limit, storage limits | error | flow above `poi_limit_kw`; charge outside its min/max |
+| objective matches re-pricing | error | the solver's objective differs from re-pricing the same dispatch (e.g. a rate missing its x period length) |
+| hard ratings hold | error | a feeder element over a hard rating in the coordinated run |
+| import and export at once | warning | the same step both imports and exports, which a bill credits as real export |
+| charge and discharge at once | warning | storage doing both in one step (pure loss) |
+| end state | warning | runs ending with different stored energy, or a lone run ending below its start; that energy isn't valued |
+| price units | warning | a $/kWh price above $5 or never above $0.002 (a $/MWh or cents slip) |
+| load vs meter limit | warning | load the meter alone can't serve |
+| tariff dates | warning | the run starts before the tariff took effect, or ends over a year after |
+| input data | warning | CSV inputs with gaps (filled with the last value) or duplicate timestamps |
+
+An error means the result is internally inconsistent: treat it as a bug, not a
+finding. A warning means the result is consistent but could mislead.
 
 | Flag | Effect |
 |---|---|
@@ -94,6 +111,9 @@ Files written with `-o`:
 | `comparison.png` | optimal vs. counterfactual grid flows and value breakdown |
 | `duals.csv`, `duals.png` | all dual families (long format), and a chart of the marginal value of energy at the meter (with `--duals`) |
 | `bill_cycles.csv`, `counterfactual_bill_cycles.csv` | per billing cycle: kWh, charges by bucket, credits earned and applied, amount due, credit balances (with `billing`) |
+| `checks.csv` | every check finding: level, check, run, house, message |
+| `run_record.json` | what produced the result: the scenario as resolved, a SHA-256 of every input file it names, the git commit (and whether there were uncommitted changes), Python and package versions, headline results, and the checks |
+| `scenario.yaml` | a copy of the scenario file as run |
 
 State columns (`soc`, `temp`) are the value at the **start** of each period in both
 the optimal and counterfactual CSVs.
@@ -164,13 +184,19 @@ Price series (`import_price` / `export_price`):
 ```yaml
 {type: constant, price: 0.25}
 {type: daily_tou, hourly_pattern: [24 values, $/kWh by hour of day]}
-{type: csv, path: prices.csv, column: price}          # first column = timestamps
+{type: csv, path: prices.csv, column: price}          # first column = timestamps (see below)
 {type: retail_tariff, path: examples/data/tariffs/pge_e_elec_2026-06.yaml}  # total $/kWh of a billing tariff
 {type: nbt_export, csv_path: examples/data/pge_nbt_eec_2026.csv, adder_per_kwh: 0.0088}
     # real PG&E NBT export rate; adder_per_kwh = ACC Plus for the customer's application
     # year (residential: 2023 0.022, 2024 0.0176, 2025 0.0132, 2026 0.0088, 2027 0.0044);
     # include_produced: false drops the generation half, for CCA/DA customers
 ```
+
+**CSV timestamps** are fitted to the run's steps: data finer than a step is averaged
+over it (15-minute load in an hourly run), data coarser is held across it (an hourly
+price in a 15-minute run), and steps with no data repeat the last value before them
+with an `input data` warning saying how many. Timestamps must be on the scenario's
+local clock with no time zone. The same applies to `external_load: {type: csv, ...}`.
 
 **Wholesale prices (LMP)** come in as a `csv` price series. The CSV must have a
 `timestamp` column on the scenario's local clock (no time zone), one row per step at
@@ -460,7 +486,7 @@ wrong answer before it was understood:
 
 - **Terminal SOC and fair comparisons.** Energy left in a battery/EV at the end of the
   horizon isn't valued, so whichever dispatch ends with *less* stored energy looks
-  better by roughly that energy's worth. `der-opt run` prints a note when the optimal
+  better by roughly that energy's worth. `der-opt run` warns (`end state` check) when the optimal
   and counterfactual end states differ. Both shipped examples trigger it: the optimal
   battery drains to 0 kWh vs. 3.8 kWh for self-consumption, and the optimal EV ends at
   60 kWh vs. 75 kWh for rule-based charging — so their reported value of optimization

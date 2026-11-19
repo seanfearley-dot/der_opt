@@ -34,6 +34,13 @@ def build_dispatch_result(premise, model: pyo.ConcreteModel, solver_result, obje
     grid_import = pd.Series([pyo.value(premise.grid_import[t]) for t in periods], index=index)
     grid_export = pd.Series([pyo.value(premise.grid_export[t]) for t in periods], index=index)
 
+    end = premise.time_grid.horizon_steps
+    final_state = {
+        device.name: {"soc": float(pyo.value(device.soc[end]))}
+        for device in premise.devices
+        if isinstance(getattr(device, "soc", None), pyo.Var)
+    }
+
     return DispatchResult(
         premise_name=premise.name,
         time_index=time_index,
@@ -42,4 +49,5 @@ def build_dispatch_result(premise, model: pyo.ConcreteModel, solver_result, obje
         grid_export=grid_export,
         objective_value=pyo.value(model.obj) if objective_value is None else objective_value,
         solver_status=_solver_status(solver_result),
+        final_state=final_state,
     )

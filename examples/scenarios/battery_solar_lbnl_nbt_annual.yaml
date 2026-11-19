@@ -43,7 +43,7 @@ devices:
       degradation_cost_per_kwh: 0.015
       # no soc_final_min_frac: the self-consumption counterfactual can't be held to a
       # terminal floor, so neither run gets one -- same starting charge, end state
-      # free (der-opt run notes if they end differently).
+      # free (der-opt run warns if they end differently).
       # (charge_sources: [solar] would restrict this battery to charging only from
       # concurrent solar generation; see the README's device reference.)
 

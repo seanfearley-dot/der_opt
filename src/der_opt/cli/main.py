@@ -17,30 +17,17 @@ def _main() -> None:
     return
 
 
-def _end_state_warnings(premise, simulator, tolerance_frac: float = 0.01) -> list[str]:
-    """Storage devices that finish the horizon with a different SOC under the optimal
-    and counterfactual dispatches. Neither side values energy left in storage at the
-    end, so a difference silently tilts the comparison -- the trap that once made a
-    self-consumption counterfactual score *better* than the optimum."""
-    import pyomo.environ as pyo
+def _print_checks(report) -> None:
+    typer.echo(f"\nChecks: {report.summary()}")
+    for line in report.lines():
+        typer.echo(f"  {line}")
 
-    warnings = []
-    end = premise.time_grid.horizon_steps
-    for device in premise.devices:
-        if not hasattr(device, "soc") or "soc" not in simulator.final_device_states.get(device.name, {}):
-            continue
-        optimal_end = pyo.value(device.soc[end])
-        counterfactual_end = simulator.final_device_states[device.name]["soc"]
-        difference = counterfactual_end - optimal_end
-        if abs(difference) <= tolerance_frac * getattr(device, "capacity_kwh", 1.0):
-            continue
-        favors = "optimal" if difference > 0 else "counterfactual"
-        warnings.append(
-            f"{device.name} ends at {optimal_end:.1f} kWh (optimal) vs {counterfactual_end:.1f} kWh "
-            f"(counterfactual). Energy left in storage isn't valued by either side, so this "
-            f"{abs(difference):.1f} kWh difference tilts the comparison toward the {favors} dispatch."
-        )
-    return warnings
+
+def _write_checks(output_dir: Path, scenario: Path, config, report, results: dict) -> Path:
+    from der_opt.run_record import write_run_record
+
+    report.to_frame().to_csv(output_dir / "checks.csv", index=False)
+    return write_run_record(output_dir, scenario, config.model_dump(mode="json"), report, results)
 
 
 def _print_bills(bills: dict, tariff, program) -> None:
@@ -110,8 +97,14 @@ def _run_feeder(scenario: Path, output_dir: Optional[Path], no_counterfactual: b
         run_feeder_study,
     )
 
-    built = build_feeder_scenario(load_feeder_config(scenario))
+    from der_opt.diagnostics import CheckReport, collect_data_warnings
+
+    report = CheckReport()
+    config = load_feeder_config(scenario)
+    with collect_data_warnings(report):
+        built = build_feeder_scenario(config)
     study = run_feeder_study(built, counterfactual=not no_counterfactual)
+    report.extend(study.checks)
     runs = study.runs
     time_grid = built.premises[0].time_grid
 
@@ -179,8 +172,7 @@ def _run_feeder(scenario: Path, output_dir: Optional[Path], no_counterfactual: b
                 f"at most {_money(worse.max())}, {worse.idxmax()}), for a network saving of "
                 f"{_money(sum(runs['independent'].network_costs.values()) - sum(runs['coordinated'].network_costs.values()))}"
             )
-    for note in study.notes:
-        typer.echo(f"  Note: {note}")
+    _print_checks(report)
 
     if output_dir is not None:
         from der_opt.viz import feeder_loading_plot
@@ -204,7 +196,14 @@ def _run_feeder(scenario: Path, output_dir: Optional[Path], no_counterfactual: b
         feeder_loading_plot({label: run.flows for label, run in runs.items()}, built.feeder, title=built.config.name).savefig(
             output_dir / "feeder_loading.png", dpi=120
         )
-        typer.echo(f"\nWrote CSVs and charts to {output_dir}")
+        results = {
+            label: {"total": run.total, "customer_bills": float(run.house_costs["bill"].sum()),
+                    "network_costs": run.network_costs,
+                    "peak_kw": {e.name: float(run.flows[e.name].max()) for e in built.feeder.elements}}
+            for label, run in runs.items()
+        }
+        _write_checks(output_dir, scenario, config, report, results)
+        typer.echo(f"\nWrote CSVs, charts and run_record.json to {output_dir}")
 
 
 @app.command()
@@ -241,8 +240,20 @@ def run(
         _run_feeder(scenario, output_dir, no_counterfactual)
         return
 
+    from der_opt.diagnostics import (
+        CheckReport,
+        check_dispatch,
+        check_end_states,
+        check_load,
+        check_prices,
+        check_tariff_dates,
+        collect_data_warnings,
+    )
+
+    report = CheckReport()
     config = load_scenario_config(scenario)
-    premise = build_premise(config)
+    with collect_data_warnings(report):
+        premise = build_premise(config)
     dispatch, model, backend = premise.solve()
 
     typer.echo(f"Scenario: {premise.name}")
@@ -270,8 +281,6 @@ def run(
 
         value_of_optimization = sum(cf_breakdown.values()) - sum(breakdown.values())
         typer.echo(f"\nValue of optimization: ${value_of_optimization:.2f}")
-        for warning in _end_state_warnings(premise, simulator):
-            typer.echo(f"  Note: {warning}")
 
     bills = {}
     billing = build_billing(config)
@@ -293,6 +302,16 @@ def run(
         for name, dual in dual_results.items():
             note = " (fix-and-resolve approximation, not exact)" if not dual.is_exact else ""
             typer.echo(f"  {name}: is_exact={dual.is_exact}{note}")
+
+    report.extend(check_prices(premise))
+    report.extend(check_load(premise))
+    runs_checked = {"optimal": dispatch} | ({"counterfactual": counterfactual} if counterfactual is not None else {})
+    for label, result in runs_checked.items():
+        report.extend(check_dispatch(premise, result, run=label))
+    report.extend(check_end_states(premise, runs_checked))
+    if billing is not None:
+        report.extend(check_tariff_dates(billing[0], premise.time_grid))
+    _print_checks(report)
 
     if output_dir is not None:
         from der_opt.viz import comparison_plot, dispatch_plot, duals_plot, value_stack
@@ -341,7 +360,11 @@ def run(
                     dual_results, names=[poi_family], title=f"{premise.name}: marginal value of energy at the meter"
                 ).savefig(output_dir / "duals.png")
 
-        typer.echo(f"\nWrote CSVs and charts to {output_dir}")
+        results = {"status": dispatch.solver_status, "optimal": breakdown,
+                   "counterfactual": cf_breakdown,
+                   "bills": {label: bill.summary["net_cost"] for label, bill in bills.items()}}
+        _write_checks(output_dir, scenario, config, report, results)
+        typer.echo(f"\nWrote CSVs, charts and run_record.json to {output_dir}")
 
 
 @app.command("fetch-lmp")

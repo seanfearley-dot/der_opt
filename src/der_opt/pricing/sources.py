@@ -31,24 +31,31 @@ class ConstantPriceSeries(PriceSeries):
         return np.full(time_grid.horizon_steps, self.price, dtype=float)
 
 
+class DataGapWarning(UserWarning):
+    """Input data had to be filled or reshaped to fit the run's time steps. Raised as a
+    Python warning so it surfaces wherever the data is read; der-opt run collects these
+    into its checks."""
+
+
 class CSVPriceSeries(PriceSeries):
     """Wraps a user-provided series: a plain array already aligned to the TimeGrid, or a
-    pandas Series indexed by timestamp (resampled/forward-filled onto the TimeGrid)."""
+    pandas Series indexed by timestamp, fitted onto the TimeGrid:
 
-    def __init__(self, series):
+      - data finer than the step (15-min load, hourly run) is averaged over each step
+      - data coarser than the step is held across it (hourly price, 15-min run)
+      - steps the data skips take the last value before them, with a DataGapWarning
+        saying how much was filled, so a missing week never passes silently
+      - duplicate timestamps are averaged, with a warning
+
+    `label` names the data in warnings (the loader passes "path [column]")."""
+
+    def __init__(self, series, label: str = "CSV series"):
         self._series = series
+        self.label = label
 
     def values(self, time_grid: TimeGrid) -> np.ndarray:
         if isinstance(self._series, pd.Series):
-            if time_grid.start is None:
-                raise ValueError(
-                    "TimeGrid.start is required to align a timestamp-indexed CSVPriceSeries"
-                )
-            timestamps = pd.DatetimeIndex(time_grid.timestamps())
-            resampled = self._series.reindex(timestamps, method="ffill")
-            if resampled.isna().any():
-                raise ValueError("CSVPriceSeries does not cover the full TimeGrid horizon")
-            return resampled.to_numpy(dtype=float)
+            return self._fit_timestamped(time_grid)
 
         arr = np.asarray(self._series, dtype=float)
         if arr.shape[0] != time_grid.horizon_steps:
@@ -57,6 +64,49 @@ class CSVPriceSeries(PriceSeries):
                 f"time_grid.horizon_steps {time_grid.horizon_steps}"
             )
         return arr
+
+    def _fit_timestamped(self, time_grid: TimeGrid) -> np.ndarray:
+        import warnings
+
+        if time_grid.start is None:
+            raise ValueError("TimeGrid.start is required to align a timestamp-indexed CSVPriceSeries")
+        series = self._series.astype(float).sort_index()
+        if getattr(series.index, "tz", None) is not None:
+            raise ValueError(
+                f"{self.label}: timestamps carry a time zone; convert them to the scenario's local "
+                "clock and drop the zone (see der_opt.integrations.caiso_lmp for an example)"
+            )
+        if series.index.has_duplicates:
+            count = int(series.index.duplicated().sum())
+            warnings.warn(DataGapWarning(f"{self.label}: {count} duplicate timestamps, averaged"), stacklevel=3)
+            series = series.groupby(level=0).mean()
+
+        grid = pd.DatetimeIndex(time_grid.timestamps())
+        step = pd.Timedelta(minutes=time_grid.resolution_minutes)
+        native = series.index.to_series().diff().median() if len(series) > 1 else step
+        if native < step:
+            # average each step's worth of finer data; empty steps stay missing
+            series = series.resample(step, origin=grid[0]).mean().dropna()
+            native = step
+
+        fitted = series.reindex(grid, method="ffill")
+        if fitted.isna().any():
+            raise ValueError(f"{self.label} does not cover the full TimeGrid horizon (starts {series.index[0]})")
+
+        # how old is the value each step got? A present sample is younger than one
+        # source interval (0 when aligned); a full interval or more means the data
+        # skipped that step and the previous value was repeated.
+        used = series.index[series.index.searchsorted(grid, side="right") - 1]
+        age = grid - used
+        stale = np.asarray(age >= native * 0.999)
+        if stale.any():
+            hours = stale.sum() * time_grid.dt_hours
+            first = grid[stale.argmax()]
+            warnings.warn(DataGapWarning(
+                f"{self.label}: {int(stale.sum())} of {len(grid)} steps ({hours:g} h) have no data and "
+                f"repeat the last value before them (first at {first}, longest gap {age.max()})"
+            ), stacklevel=3)
+        return fitted.to_numpy(dtype=float)
 
 
 class DailyTOUPriceSeries(PriceSeries):

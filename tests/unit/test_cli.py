@@ -44,12 +44,12 @@ def test_counterfactual_never_beats_optimal_when_feasible_for_the_optimizer(tmp_
     assert float(line.split("$")[1]) >= -1e-6
 
 
-def test_run_with_end_state_mismatch_prints_note(tmp_path):
+def test_run_with_end_state_mismatch_warns(tmp_path):
     # battery starts at 50% and is idle in the counterfactual, so it ends at 5 kWh;
     # the optimizer drains it for revenue -- the comparison should flag that.
     scenario = _with_counterfactual(tmp_path, "    battery: {type: no_flexibility}\n")
     result = runner.invoke(app, ["run", str(scenario)])
-    assert "Note: battery ends at" in result.stdout
+    assert "WARNING end state: battery ends at" in result.stdout
 
 
 def test_no_counterfactual_flag_skips_the_comparison(tmp_path):
