@@ -414,7 +414,7 @@ None of this has been checked against a real bill yet — that's the real test.
 ## Input data: the spec format
 
 Real premises come in as CSV files in one format, defined in
-[docs/INPUT_DATA_SPEC.md](docs/INPUT_DATA_SPEC.md) (v1.0, approved). Produce that format
+[docs/INPUT_DATA_SPEC.md](docs/INPUT_DATA_SPEC.md) (v1.1, approved). Produce that format
 from your own pipeline; nothing else needs configuring per file. In short:
 
 * **Time series:** `timestamp, premise_id, <values>`, one row per premise per interval.
@@ -427,7 +427,8 @@ from your own pipeline; nothing else needs configuring per file. In short:
   empty cell, never 0. The interval is 5, 15, 30 or 60 minutes, with every interval
   present.
 * **`premises.csv`:** one row per premise: `element_id`, `tariff`, `export_program`,
-  `baseline_territory`, solar/battery/EV sizes, `import_limit_kw`, `export_limit_kw`.
+  `customer_class`, `baseline_territory`, solar/battery/EV sizes, `import_limit_kw`,
+  `export_limit_kw`.
 * **`network.csv`:** one row per transformer or section: `element_id`, `parent_id`,
   `rating_kw`, `overload_cost_per_kwh`.
 
@@ -635,7 +636,7 @@ src/der_opt/
   pricing/       price series, dual extraction, value breakdown
   simulation/    counterfactual control policies + simulator
   billing/       retail tariffs, PG&E holidays, bill engine (NBT, NEM2), bill objectives
-  inputs/        input data spec v1.0: readers, validation, quality checks
+  inputs/        input data spec v1.1: readers, validation, quality checks
   integrations/  LBNL load, EV model, PVWatts, PG&E NBT export rates, CAISO LMP
   network/       feeder topology, multi-premise dispatch, congestion prices, synthetic houses
   scenarios/     YAML schema, loader, data-source resolvers, feeder scenarios

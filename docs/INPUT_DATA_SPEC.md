@@ -1,6 +1,7 @@
 # der-opt input data specification
 
-**Version 1.0 — approved 2026-11-19.** `der-opt check-data` validates files against it,
+**Version 1.1 — approved 2026-11-19** (1.1 adds `customer_class` to premises, for DR
+settlement baselines; see docs/DR_CAPACITY_SPEC.md). `der-opt check-data` validates files against it,
 and scenarios read these files directly (see the README's Input data section). Change
 it only by a new version, approved the same way.
 
@@ -102,6 +103,7 @@ One row per premise. `premises.csv`:
 |---|---|---|
 | `premise_id` | yes | unique |
 | `element_id` | feeder runs | the transformer or section it's served from (network file) |
+| `customer_class` | for DR settlement | `residential` or `commercial` (sets 5-in-10 or 10-in-10) |
 | `tariff` | for billing | tariff file name, e.g. `pge_e_elec_2026-06` |
 | `export_program` | for billing | `nbt`, `nem2` or empty |
 | `baseline_territory` | if the tariff has a baseline | PG&E letter, e.g. `R` |

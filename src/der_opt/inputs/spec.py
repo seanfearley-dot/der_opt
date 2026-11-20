@@ -1,4 +1,4 @@
-"""Readers and validators for the input data spec, version 1.0
+"""Readers and validators for the input data spec, version 1.1
 (docs/INPUT_DATA_SPEC.md): time series, premises and network files.
 
 Each reader checks every rule and returns the data plus a CheckReport. Rule breaks
@@ -20,7 +20,8 @@ import pandas as pd
 from der_opt.diagnostics import CheckReport, Finding
 from der_opt.inputs.quality import check_series
 
-SPEC_VERSION = "1.0"
+SPEC_VERSION = "1.1"
+CUSTOMER_CLASSES = ("residential", "commercial")
 LOCAL_TZ = "America/Los_Angeles"
 
 POWER_COLUMNS = ("load_kw", "pv_kw", "import_kw", "export_kw")
@@ -311,7 +312,8 @@ class PremisesFile:
 def read_premises(path: str | Path, network: NetworkFile | None = None, strict: bool = True) -> PremisesFile:
     path = Path(path)
     report = CheckReport()
-    known = ("premise_id", "element_id", "tariff", "export_program", "baseline_territory", "ev_v2x") + PREMISE_NUMERIC
+    known = ("premise_id", "element_id", "customer_class", "tariff", "export_program", "baseline_territory",
+             "ev_v2x") + PREMISE_NUMERIC
     frame = _read_csv(path, report)
     if frame is None or not _check_names(frame, known, ("premise_id",), report):
         if strict:
@@ -339,6 +341,10 @@ def read_premises(path: str | Path, network: NetworkFile | None = None, strict: 
         odd = ~table["ev_v2x"].isin(["", "0", "1"])
         for premise in table.loc[odd, "premise_id"]:
             found.append(_err("device sizes", "ev_v2x must be 0, 1 or empty", premise))
+    if "customer_class" in table:
+        odd = ~table["customer_class"].isin(("",) + CUSTOMER_CLASSES)
+        for premise in table.loc[odd, "premise_id"]:
+            found.append(_err("billing", f"customer_class must be {' or '.join(CUSTOMER_CLASSES)} (or empty)", premise))
     if "export_program" in table:
         odd = ~table["export_program"].isin(["", "nbt", "nem2"])
         for premise in table.loc[odd, "premise_id"]:

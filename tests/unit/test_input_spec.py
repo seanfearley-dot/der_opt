@@ -153,13 +153,13 @@ poi_limit_kw: 20
 def test_premises_rules(tmp_path):
     network = read_network(SAMPLE / "network.csv")
     path = _write(tmp_path, """
-premise_id,element_id,battery_kwh,battery_kw,ev_v2x,export_program
-a,tx_1,13.5,,0,nbt
-a,tx_9,,,2,net_metering
+premise_id,element_id,battery_kwh,battery_kw,ev_v2x,export_program,customer_class
+a,tx_1,13.5,,0,nbt,residential
+a,tx_9,,,2,net_metering,industrial
 """, "premises.csv")
     messages = " | ".join(f.message for f in read_premises(path, network, strict=False).report.errors)
     for expected in ("repeated premise_id", "battery_kwh and battery_kw go together", "ev_v2x must be",
-                     "export_program must be", "isn't in network.csv"):
+                     "export_program must be", "isn't in network.csv", "customer_class must be"):
         assert expected in messages, expected
 
 
