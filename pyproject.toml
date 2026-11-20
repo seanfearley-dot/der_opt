@@ -31,6 +31,11 @@ validation = [
 pdf = [
     "pdfplumber",
 ]
+# reading loadcast forecast files (NetCDF): der_opt.integrations.load_forecast
+forecast = [
+    "xarray",
+    "netCDF4",
+]
 
 [project.scripts]
 der-opt = "der_opt.cli.main:app"

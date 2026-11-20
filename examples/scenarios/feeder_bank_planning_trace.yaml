@@ -1,0 +1,90 @@
+# A new 40-home subdivision joins a primary bank during the bank's 1-in-10-year peak week.
+# Run with:
+#   der-opt run examples/scenarios/feeder_bank_planning_trace.yaml -o out/bank_trace
+#
+# The bank's existing load comes from loadcast (the load-forecasting package), through the
+# `loadcast` data source (der_opt.integrations.load_forecast; needs the forecast extra:
+# pip install -e ".[forecast]"). examples/data/loadcast/bank_a_2026_planning.nc holds three of
+# the 200 years loadcast simulated for its synthetic bank in 2026 (`loadcast simulate-year`): the
+# years whose annual peak is closest to POE90, POE50 and POE10, plus hourly quantiles over all
+# 200. `trace: poe10` picks the 1-in-10 design year, which peaks at 1,990 kW on 4 Aug 2026 at
+# 16:00 -- inside this window. `net` is what the bank sees: after the existing customers'
+# rooftop PV, with losses and unmetered load. Its customers are fixed load here (no devices).
+#
+# The new homes are der_opt's own synthetic houses, generated for a heat wave of similar
+# strength; their weather is not the loadcast trace's weather, so treat this as a sizing study,
+# not one consistent day. Compare: coordinated dispatch (one optimization over every home and
+# the bank rating), each home optimizing its own bill, and today's rule-based behavior (EVs
+# charge on plug-in, batteries self-consume).
+
+name: bank_1_in_10_new_subdivision
+
+time_grid:
+  resolution_minutes: 60
+  horizon_steps: 72 # three days, noon to noon, around the design-year peak on 4 Aug
+  start: "2026-08-03T12:00:00"
+
+feeder:
+  elements:
+    - name: bank
+      rating_kw: 2000 # existing 1-in-10 peak is 1,990 kW: the new homes push it over
+      # soft limit, standing in for loss of life (illustrative, not a sourced value)
+      overload_cost_per_kwh: 1.0
+    - name: tx_new_a
+      parent: bank
+      rating_kw: 75
+      overload_cost_per_kwh: 1.0
+    - name: tx_new_b
+      parent: bank
+      rating_kw: 75
+      overload_cost_per_kwh: 1.0
+
+houses:
+  - name: existing_bank_load
+    element: bank
+    devices: []
+    value_streams: [] # not billed here; it only loads the bank
+    poi_limit_kw: 5000 # overrides the homes' 30 kW service limit from house_defaults
+    external_load:
+      source: loadcast
+      path: examples/data/loadcast/bank_a_2026_planning.nc
+      trace: poe10 # or poe50 / poe90 / max, a trace index, or quantile: 0.9 (an hourly envelope)
+      var: net
+
+synthetic_houses:
+  - element: tx_new_a
+    count: 20
+    seed: 11
+    ev_share: 0.8
+    solar_share: 0.6
+    battery_share: 0.5 # of the solar homes
+    t_min_c: 24
+    t_max_c: 42
+  - element: tx_new_b
+    count: 20
+    seed: 12
+    ev_share: 0.8
+    solar_share: 0.6
+    battery_share: 0.5
+    t_min_c: 24
+    t_max_c: 42
+
+house_defaults:
+  value_streams:
+    - type: nbt_bill
+  poi_limit_kw: 30
+  # on these August evenings the NBT export credit is above the import price, and an LP would
+  # import and export at once to collect it (up to the 30 kW service limit); forbidding that
+  # makes the run a MILP, so congestion prices come from fix-and-resolve
+  exclusive_import_export: true
+  counterfactual:
+    policies:
+      ev: {type: rule_based_ev}
+      battery: {type: self_consumption}
+
+billing:
+  tariff: examples/data/tariffs/pge_e_elec_2026-06.yaml
+  program:
+    type: nbt
+    export_rates_csv: examples/data/pge_nbt_eec_2026.csv
+    acc_plus_per_kwh: 0.0088

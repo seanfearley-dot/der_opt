@@ -1,7 +1,7 @@
 """Named data-source resolvers for scenario YAML: any array-valued device/stream
 parameter can be a literal list OR a `{source: "<name>", ...kwargs}` dict, resolved
 here against this toolkit's real integrations (LBNL load data, the EV charging model,
-PG&E NBT export rates, PVWatts) at scenario-load time. This is what lets a YAML
+PG&E NBT export rates, PVWatts, loadcast forecasts) at scenario-load time. This is what lets a YAML
 scenario reach real data without writing Python -- see examples/scenarios/ for
 reproductions of the Python-API examples using this.
 """
@@ -102,6 +102,17 @@ def _resolve_timeseries(time_grid: TimeGrid, **kwargs) -> np.ndarray:
                          f"{series.index[0]} to {last_step}, not the whole run ({time_grid.start} to {end})")
     label = f"{kwargs['path']} [{kwargs['column']}{', ' + premise if premise else ''}]"
     return CSVPriceSeries(series, label=label).values(time_grid)
+
+
+@_register("loadcast")
+def _resolve_loadcast(time_grid: TimeGrid, **kwargs) -> np.ndarray:
+    """A profile from a loadcast forecast file -- see integrations/load_forecast.py. Keys: path,
+    and optionally entity, var (net|gross|pv), trace (index or poe10/poe50/poe90/max) or
+    quantile, per_customer, scale, tz, align_year."""
+    from der_opt.integrations.load_forecast import forecast_profile_kw
+
+    path = kwargs.pop("path")
+    return forecast_profile_kw(path, time_grid, **kwargs)
 
 
 def resolve_array_param(value: Any, time_grid: TimeGrid) -> Any:

@@ -21,7 +21,7 @@ uv pip install -e ".[dev]"
 ```
 
 Optional extras: `.[pdf]` (re-parse PG&E NBT price-sheet PDFs), `.[validation]`
-(PySAM bill cross-check).
+(PySAM bill cross-check), `.[forecast]` (read loadcast forecast files: xarray, netCDF4).
 
 Check it works: `pytest -q` (should be all green).
 
@@ -65,6 +65,7 @@ der-opt run examples/scenarios/v2x_lbnl_nbt.yaml --duals -o out/v2x
 der-opt run examples/scenarios/battery_solar_lbnl_nbt_annual.yaml -o out/annual   # ~1 min
 der-opt run examples/scenarios/battery_solar_lbnl_nem2_annual.yaml -o out/nem2     # same house on NEM 2.0
 der-opt run examples/scenarios/feeder_ev_heat_wave.yaml -o out/feeder             # 20 houses, 2 transformers
+der-opt run examples/scenarios/feeder_bank_planning_trace.yaml -o out/bank_trace  # bank 1-in-10 year + 40 new homes (.[forecast])
 der-opt run examples/scenarios/battery_caiso_lmp.yaml                             # battery on CAISO LMP
 der-opt run examples/scenarios/feeder_from_files.yaml                             # 6 homes from spec files
 ```
@@ -246,6 +247,8 @@ is a 1 MW battery arbitraging a week of NP15 day-ahead prices.
 {source: lbnl_pv,         scenario_dir: ..., cluster_name: ..., start_hour_ending: 4681}
 {source: ev_connected_schedule, arrivals_csv: ..., departures_csv: ..., percentile: 50}
 {source: pvwatts, lat: 37.77, lon: -122.42, system_capacity_kw: 6.0, start_hour: 4680}
+{source: loadcast, path: bank_traces.nc, trace: poe10, var: net}   # needs .[forecast]
+{source: loadcast, path: class_quantiles.nc, entity: res_nopv, quantile: 0.5, var: gross, per_customer: true}
 ```
 
 - **LBNL** (`~/Documents/LBNL_Phase_4`): per-customer profiles from a cluster in one
@@ -258,6 +261,22 @@ is a 1 MW battery arbitraging a week of NP15 day-ahead prices.
   project's empirical PSRC arrival/departure data (median ≈ home 5pm–9am).
 - **PVWatts**: live NREL API. Set `NREL_API_KEY` in your environment; otherwise it
   uses NREL's rate-limited `DEMO_KEY`.
+- **loadcast** (`~/loadcast`, the load-forecasting package): profiles from its NetCDF output
+  (`loadcast simulate-year` writes `bank_traces.nc` and `class_quantiles.nc`). The coupling is
+  the file format only; der_opt never imports loadcast.
+  - `trace`: one simulated weather year, by index or by annual peak: `poe10` (the 1-in-10 design
+    year), `poe50`, `poe90`, `max`. A trace is a year that can happen, so use it for energy,
+    storage and timing. `quantile` (e.g. 0.9) is each hour's own percentile across years: an
+    envelope, not a year, so it overstates sustained stress.
+  - `var`: `net` (what the grid sees; for a bank, after customers' PV and with losses and
+    unmetered load), `gross` (before PV; use with a `solar` device, as with LBNL), `pv`.
+  - `entity`: needed when the file holds several (classes); `per_customer: true` divides a
+    class total by its customer count; `scale` multiplies.
+  - Timestamps: loadcast stores UTC; the grid's local times are converted with the file's time
+    zone (`tz` to override), and sub-hourly steps hold the hourly value. `align_year: true` maps
+    the grid's dates onto the forecast's year (Feb 29 -> Feb 28).
+  - To pick a trace and window: `python -c "from der_opt.integrations.load_forecast import
+    describe_forecast; print(describe_forecast('<file>'))"` lists each trace's peak and when.
 
 ### Counterfactuals
 
@@ -524,6 +543,23 @@ Two modeling choices matter here:
 * **The coordinated run is a planner's optimum.** It minimizes everyone's costs
   together. It reports which houses pay more, but doesn't compensate them; that's for
   a settlement mechanism (not built yet).
+
+`feeder_bank_planning_trace.yaml` puts the same machinery under a whole primary bank: the
+bank's existing load is one device-less house whose `external_load` is loadcast's 1-in-10
+design year (`trace: poe10`, peak 1,990 kW on 4 Aug 2026 at 16:00), and a new 40-home
+subdivision (80% EVs) joins on two 75 kW transformers. Over 3-6 Aug:
+
+| | coordinated | independent | plug-in charging |
+|---|---|---|---|
+| Bank peak (2,000 kW rating) | 2,069 kW (1 h over) | 2,086 kW (1 h over) | 2,102 kW (2 h over) |
+| New transformer A peak (75 kW) | 105 kW | 209 kW | 167 kW |
+| Customer bills, 40 new homes | $3,330 | $3,290 | $3,631 |
+
+The bank's own 4 pm peak leaves the new homes little room, but what binds first is their
+service transformers. Coordination costs 13 homes $40 in total for a $1,282 network saving.
+The existing load is fixed here (no controllable devices), the new homes' synthetic weather is
+not the trace's weather, and loadcast's bank load includes its losses while the new homes'
+doesn't -- a sizing study, not a single consistent day.
 
 Flow is a power balance only: no losses, voltage, or reactive power, so convert kVA
 nameplates to kW yourself. Every house shares one time grid.
