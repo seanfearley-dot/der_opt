@@ -66,6 +66,7 @@ der-opt run examples/scenarios/battery_solar_lbnl_nbt_annual.yaml -o out/annual 
 der-opt run examples/scenarios/battery_solar_lbnl_nem2_annual.yaml -o out/nem2     # same house on NEM 2.0
 der-opt run examples/scenarios/feeder_ev_heat_wave.yaml -o out/feeder             # 20 houses, 2 transformers
 der-opt run examples/scenarios/battery_caiso_lmp.yaml                             # battery on CAISO LMP
+der-opt run examples/scenarios/feeder_from_files.yaml                             # 6 homes from spec files
 ```
 
 It prints the optimal dispatch's cost broken down by source. If the scenario has a
@@ -391,43 +392,62 @@ NEM2 load aggregation and multiple-tariff facilities, the California Climate Cre
 and demand charges.
 None of this has been checked against a real bill yet — that's the real test.
 
-## Meter data: `der-opt ingest` and `der-opt check-data`
+## Input data: the spec format
 
-To run a scenario on a real customer's load, turn their interval data into the CSV a
-scenario reads (`timestamp, import_kw, export_kw, net_kw`, local clock, kW):
+Real premises come in as CSV files in one format, defined in
+[docs/INPUT_DATA_SPEC.md](docs/INPUT_DATA_SPEC.md) (v1.0, approved). Produce that format
+from your own pipeline; nothing else needs configuring per file. In short:
+
+* **Time series:** `timestamp, premise_id, <values>`, one row per premise per interval.
+  `timestamp` is the interval start in ISO 8601 with a UTC offset
+  (`2026-07-13T00:00:00-07:00`). Values are average kW (`load_kw`, `pv_kw`,
+  `import_kw`, `export_kw`), plus `ev_connected` (0/1), `ev_driving_kwh`, and
+  `import_price_per_kwh` / `export_price_per_kwh` (prices go in a file without
+  `premise_id`). Each premise is either **gross** (`load_kw`, plus `pv_kw` if it has
+  solar) or **metered** (`import_kw`/`export_kw`), never both. A missing value is an
+  empty cell, never 0. The interval is 5, 15, 30 or 60 minutes, with every interval
+  present.
+* **`premises.csv`:** one row per premise: `element_id`, `tariff`, `export_program`,
+  `baseline_territory`, solar/battery/EV sizes, `import_limit_kw`, `export_limit_kw`.
+* **`network.csv`:** one row per transformer or section: `element_id`, `parent_id`,
+  `rating_kw`, `overload_cost_per_kwh`.
 
 ```bash
-der-opt ingest pge_download.csv --pge -o data/house.csv --resolution-minutes 60       # PG&E Download My Data
-der-opt ingest examples/ingest/meter_interval.yaml -o data/house.csv --resolution-minutes 60  # any other extract
-der-opt check-data data/house.csv --column net_kw                                    # check any prepared CSV
+der-opt check-data data/timeseries.csv --premises data/premises.csv --network data/network.csv
 ```
+
+`check-data` names every rule a file breaks (exit code 1) and warns about suspect
+data: empty cells, a day or more without consumption, 12 h unchanged, spikes, a home
+over 100 kW. It also reports the period covered and each premise's kWh.
+
+**Using the files.** For a single premise, any array or price can come from a file:
 
 ```yaml
-external_load: {type: csv, path: data/house.csv, column: net_kw}
+external_load: {source: timeseries, path: data/timeseries.csv, premise_id: home_01, column: load_kw}
+import_price: {type: timeseries, path: data/prices.csv, column: import_price_per_kwh}
 ```
 
-* **PG&E files** (`--pge`): the account preamble is skipped and never copied into the
-  output or report. The reader uses separate import/export columns if the file has
-  them, and otherwise reads the usage column as net (negative = export); it says which.
-  It was built from PG&E's published layout, not a real solar customer's file, so
-  check the first file's totals against that customer's bill.
-* **Other extracts** take a config, `examples/ingest/meter_interval.yaml` (commented, with
-  a synthetic sample file): long or wide (HE1..HE25) layout, one timestamp column or
-  date + time, interval beginning or ending, local or UTC labels, W/kW/MW or
-  Wh/kWh/MWh, delivered/received channels or one signed net channel, one meter out of
-  many. The options follow loadcast's ingestion config.
-* **Every repair is reported**, in the printout and in `<output>_report.json`: gaps of up
-  to `max_fill_intervals` (default 2) are interpolated and longer ones left empty
-  (a scenario then warns about them); November's repeated hour is averaged into one
-  and March's skipped hour interpolated, so each day has 24 hours; duplicate readings
-  are averaged; negative delivered/received values are flagged.
-* **`check-data`** checks any prepared CSV for irregular steps, duplicates, empty
-  steps, 24 h or more with no import (outage, vacancy or failed meter), 12 h or more
-  unchanged (estimated reads), spikes over 10x the 99th percentile, and values that
-  look like W or MW mistaken for kW.
+For a feeder, `premise_data` builds every house from the files.
+`examples/scenarios/feeder_from_files.yaml` runs the synthetic sample in
+`examples/data/spec_sample/`:
 
-`net_kw` is what the meter saw. For a home with solar it already has solar
-subtracted, so use it without a solar device; adding one would count solar twice.
+```yaml
+premise_data:
+  premises: data/premises.csv
+  timeseries: [data/timeseries.csv]          # a premise's columns may span several files
+  network: data/network.csv                  # instead of feeder.elements
+  tariff_dir: examples/data/tariffs          # premises.csv `tariff` names a file here
+  programs: {nbt: {export_rates_csv: ..., acc_plus_per_kwh: 0.0088}, nem2: {nsc_rate_per_kwh: 0.02781}}
+house_defaults:
+  value_streams: [{type: bill}]              # each home's own bill, nbt_bill or nem2_bill by its program
+  device_params: {battery: {eta_charge: 0.96, degradation_cost_per_kwh: 0.015}, ev: {...}}
+```
+
+Sizes come from `premises.csv` and behavior from `device_params` (defaults: batteries
+95% efficient each way, starting and ending half full; EVs charged to 90% by every
+departure, which is read off `ev_connected`). A metered premise can't have devices
+added: its meter already includes them. On the local clock, November's repeated hour
+is averaged into one and March's skipped hour interpolated.
 
 ## Feeders: many houses on a network
 
@@ -579,7 +599,7 @@ src/der_opt/
   pricing/       price series, dual extraction, value breakdown
   simulation/    counterfactual control policies + simulator
   billing/       retail tariffs, PG&E holidays, bill engine (NBT, NEM2), bill objectives
-  ingest/        meter interval files (PG&E Download My Data, any extract) -> scenario CSVs
+  inputs/        input data spec v1.0: readers, validation, quality checks
   integrations/  LBNL load, EV model, PVWatts, PG&E NBT export rates, CAISO LMP
   network/       feeder topology, multi-premise dispatch, congestion prices, synthetic houses
   scenarios/     YAML schema, loader, data-source resolvers, feeder scenarios

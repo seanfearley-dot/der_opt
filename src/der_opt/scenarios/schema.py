@@ -18,7 +18,8 @@ class DeviceConfig(BaseModel):
 
 
 class ValueStreamConfig(BaseModel):
-    type: Literal["energy_arbitrage", "tariff_energy_charge", "demand_charge", "capacity_payment", "nbt_bill", "nem2_bill"]
+    # `bill` = nbt_bill or nem2_bill, whichever matches the billing program
+    type: Literal["energy_arbitrage", "tariff_energy_charge", "demand_charge", "capacity_payment", "nbt_bill", "nem2_bill", "bill"]
     params: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -100,7 +101,7 @@ class NetworkValueStreamConfig(BaseModel):
 
 
 class FeederConfig(BaseModel):
-    elements: list[NetworkElementConfig]
+    elements: list[NetworkElementConfig] = Field(default_factory=list)  # or premise_data.network
     value_streams: list[NetworkValueStreamConfig] = Field(default_factory=list)
 
 
@@ -114,6 +115,10 @@ class HouseDefaultsConfig(BaseModel):
     export_limit_kw: float | None = None  # overrides poi_limit_kw for export (0 = no export)
     exclusive_import_export: bool = False
     counterfactual: CounterfactualConfig | None = None
+    # device behavior for houses built from premise_data, by device: battery, ev, solar
+    # (e.g. {battery: {eta_charge: 0.96, degradation_cost_per_kwh: 0.015}}); sizes come
+    # from the premises file
+    device_params: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 class HouseConfig(BaseModel):
@@ -130,6 +135,20 @@ class HouseConfig(BaseModel):
     export_limit_kw: float | None = None  # overrides poi_limit_kw for export (0 = no export)
     exclusive_import_export: bool | None = None
     counterfactual: CounterfactualConfig | None = None
+    billing: BillingConfig | None = None  # this house's own; default the scenario's
+
+
+class PremiseDataConfig(BaseModel):
+    """Houses and network from files in the input data spec (docs/INPUT_DATA_SPEC.md)."""
+
+    premises: str  # premises.csv
+    timeseries: list[str]  # one or more time series files; a premise's columns can span files
+    network: str | None = None  # network.csv, instead of feeder.elements
+    tz: str = "America/Los_Angeles"  # the local clock the run works on
+    tariff_dir: str = "examples/data/tariffs"  # where premises' `tariff` names are looked up
+    programs: dict[str, dict[str, Any]] = Field(default_factory=dict)  # nbt: {...}, nem2: {...}
+    income_tier: int = 3
+    baseline_code: str = "basic"
 
 
 class SyntheticHousesConfig(BaseModel):
@@ -155,4 +174,5 @@ class FeederScenarioConfig(BaseModel):
     house_defaults: HouseDefaultsConfig = Field(default_factory=HouseDefaultsConfig)
     houses: list[HouseConfig] = Field(default_factory=list)
     synthetic_houses: list[SyntheticHousesConfig] = Field(default_factory=list)
+    premise_data: PremiseDataConfig | None = None
     billing: BillingConfig | None = None

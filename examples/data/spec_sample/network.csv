@@ -1,0 +1,4 @@
+element_id,parent_id,rating_kw,overload_cost_per_kwh
+lateral,,100,
+tx_1,lateral,25,1.0
+tx_2,lateral,25,1.0

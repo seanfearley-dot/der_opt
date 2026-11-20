@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 from der_opt.time_grid import TimeGrid
 
@@ -82,6 +83,25 @@ def _resolve_ev_connected_schedule(time_grid: TimeGrid, **kwargs) -> np.ndarray:
         kwargs["arrivals_csv"], kwargs["departures_csv"], kwargs.get("percentile", 50.0)
     )
     return connected_schedule(time_grid, arrival_hour, departure_hour)
+
+
+@_register("timeseries")
+def _resolve_timeseries(time_grid: TimeGrid, **kwargs) -> np.ndarray:
+    """A column of an input-spec time series file (docs/INPUT_DATA_SPEC.md), for one
+    premise, fitted to the run's steps. `column` may also be net_kw."""
+    from der_opt.inputs import read_timeseries
+    from der_opt.pricing.sources import CSVPriceSeries
+
+    data = read_timeseries(kwargs["path"])
+    premise = kwargs.get("premise_id")
+    series = data.local_series(kwargs["column"], premise, kwargs.get("tz", "America/Los_Angeles"))
+    end = time_grid.start + (time_grid.horizon_steps * time_grid.dt_hours) * pd.Timedelta(hours=1)
+    last_step = series.index[-1] + pd.Timedelta(minutes=data.interval_minutes)
+    if series.index[0] > pd.Timestamp(time_grid.start) or last_step < end:
+        raise ValueError(f"{kwargs['path']} [{kwargs['column']}{', ' + premise if premise else ''}] covers "
+                         f"{series.index[0]} to {last_step}, not the whole run ({time_grid.start} to {end})")
+    label = f"{kwargs['path']} [{kwargs['column']}{', ' + premise if premise else ''}]"
+    return CSVPriceSeries(series, label=label).values(time_grid)
 
 
 def resolve_array_param(value: Any, time_grid: TimeGrid) -> Any:

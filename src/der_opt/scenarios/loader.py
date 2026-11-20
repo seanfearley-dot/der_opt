@@ -102,12 +102,19 @@ def _build_price_series(config: dict) -> PriceSeries:
             include_produced=config.get("include_produced", True),
             adder_per_kwh=config.get("adder_per_kwh", 0.0),
         )
+    if kind == "timeseries":
+        from der_opt.inputs import read_timeseries
+
+        series = read_timeseries(config["path"]).local_series(config["column"], config.get("premise_id"),
+                                                              config.get("tz", "America/Los_Angeles"))
+        label = f"{config['path']} [{config['column']}{', ' + config['premise_id'] if config.get('premise_id') else ''}]"
+        return CSVPriceSeries(series, label=label)
     if kind == "retail_tariff":
         from der_opt.billing import RetailTariffPriceSeries, load_retail_tariff
 
         return RetailTariffPriceSeries(load_retail_tariff(config["path"]))
     raise ValueError(
-        f"Unknown price series type {kind!r}; expected 'constant', 'csv', 'daily_tou', "
+        f"Unknown price series type {kind!r}; expected 'constant', 'csv', 'timeseries', 'daily_tou', "
         "'nbt_export', or 'retail_tariff'"
     )
 
@@ -123,6 +130,18 @@ def _build_tariff(config: dict) -> TariffSchedule:
 
 def _build_value_stream(config: ValueStreamConfig, time_grid: TimeGrid, scenario: ScenarioConfig) -> ValueStream:
     params = config.params
+    if config.type == "bill":
+        billing = build_billing(scenario)
+        if billing is None:
+            raise ValueError("value stream bill optimizes the bill, so the scenario needs a billing section")
+        from der_opt.billing import NEM2Program
+
+        tariff, program, _ = billing
+        if program is None and tariff.baseline is not None:
+            raise ValueError(f"{tariff.name} has a baseline credit, which nbt_bill doesn't handle; set an export "
+                             "program (nem2 bills a no-export premise correctly)")
+        kind = "nem2_bill" if isinstance(program, NEM2Program) else "nbt_bill"
+        return _build_value_stream(config.model_copy(update={"type": kind}), time_grid, scenario)
     if config.type in ("nbt_bill", "nem2_bill"):
         billing = build_billing(scenario)
         if billing is None:

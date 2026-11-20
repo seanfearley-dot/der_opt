@@ -7,6 +7,8 @@ about it likely to mislead?
   warning  the result is consistent but could mislead (importing and exporting in the
            same hour, runs ending with different stored energy, a tariff out of date,
            input data with gaps, prices that look like $/MWh)
+  info     an expected conversion worth knowing about (daylight-saving days moved
+           onto the local clock); doesn't count against a check
 
 Every check works on a DispatchResult, optimized or simulated, so the same checks
 apply to the optimal run, the counterfactual, and every house on a feeder.
@@ -30,7 +32,7 @@ TOLERANCE_KW = 1e-3
 
 @dataclass(frozen=True)
 class Finding:
-    level: str  # "error" or "warning"
+    level: str  # "error", "warning" or "info"
     check: str
     message: str
     run: str | None = None
@@ -63,7 +65,7 @@ class CheckReport:
         return [f for f in self.findings if f.level == "warning"]
 
     def summary(self) -> str:
-        failed = {f.check for f in self.findings}
+        failed = {f.check for f in self.findings if f.level != "info"}
         passed = [c for c in self.checks_run if c not in failed]
         return f"{len(passed)} of {len(self.checks_run)} checks clean, {len(self.warnings)} warnings, {len(self.errors)} errors"
 
@@ -74,7 +76,8 @@ class CheckReport:
         for finding in self.findings:
             grouped.setdefault((finding.level, finding.check, finding.run, finding.premise is None), []).append(finding)
         out = []
-        for (level, check, run, _), group in sorted(grouped.items(), key=lambda kv: (kv[0][0] != "error", kv[0][1])):
+        order = {"error": 0, "warning": 1, "info": 2}
+        for (level, check, run, _), group in sorted(grouped.items(), key=lambda kv: (order.get(kv[0][0], 3), kv[0][1])):
             where = f" ({run})" if run else ""
             if len(group) == 1 or group[0].premise is None:
                 for finding in group:
