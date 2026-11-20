@@ -1,0 +1,95 @@
+# Run example scenarios on a GitHub runner and keep the outputs (CSVs, charts,
+# run_record.json) as a downloadable artifact. Start it from the Actions tab:
+# "Run scenario" -> "Run workflow", then pick a scenario.
+#
+# Only scenarios whose data is committed to this repo can run here. The LBNL and
+# EV-model scenarios (battery_solar_lbnl_*, v2x_lbnl_nbt) read files from a local
+# machine and are not offered.
+name: Run scenario
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: Scenario to run
+        type: choice
+        default: all
+        options:
+          - all
+          - battery_caiso_lmp
+          - dr_battery_annual
+          - feeder_bank_planning_trace
+          - feeder_ev_heat_wave
+          - feeder_from_files
+      custom_path:
+        description: "Or: path to any other scenario YAML committed to the repo (overrides the choice)"
+        type: string
+        required: false
+      duals:
+        description: Also write dual/shadow prices
+        type: boolean
+        default: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      MPLBACKEND: Agg
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install der-opt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[forecast]"
+
+      - name: Run
+        env:
+          SCENARIO: ${{ inputs.scenario }}
+          CUSTOM_PATH: ${{ inputs.custom_path }}
+          DUALS: ${{ inputs.duals }}
+        run: |
+          set -o pipefail
+          if [ -n "$CUSTOM_PATH" ]; then
+            files=("$CUSTOM_PATH")
+          elif [ "$SCENARIO" = "all" ]; then
+            files=(battery_caiso_lmp dr_battery_annual feeder_bank_planning_trace feeder_ev_heat_wave feeder_from_files)
+            files=("${files[@]/#/examples/scenarios/}"); files=("${files[@]/%/.yaml}")
+          else
+            files=("examples/scenarios/$SCENARIO.yaml")
+          fi
+          extra=(); [ "$DUALS" = "true" ] && extra=(--duals)
+          status=0
+          for f in "${files[@]}"; do
+            name=$(basename "$f" .yaml)
+            echo "::group::$name"
+            {
+              echo "## $name"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            if der-opt run "$f" -o "outputs/$name" "${extra[@]}" 2>&1 | tee "outputs-$name.log"; then
+              :
+            else
+              status=1
+              echo "::error title=$name failed::see the log for $name"
+            fi
+            cat "outputs-$name.log" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            mkdir -p "outputs/$name" && mv "outputs-$name.log" "outputs/$name/console.log"
+            echo "::endgroup::"
+          done
+          exit $status
+
+      - name: Upload outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: der-opt-outputs-${{ github.run_number }}
+          path: outputs/
+          if-no-files-found: warn
