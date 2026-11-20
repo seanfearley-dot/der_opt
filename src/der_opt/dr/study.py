@@ -135,7 +135,9 @@ def run_dr_study(config: ScenarioConfig, r2: DispatchResult | None = None, r2_pr
         mask = np.zeros(len(index), dtype=bool)
         for e in events:
             mask |= (index >= e.start) & (index < e.end)
-        expected = baseline_series(settlement_baselines(nets["R2"], events, dr.customer_class), events, index)
+        basis = program.settlement_basis
+        # the expected baseline the optimization settles against: R2 on the program's basis
+        expected = baseline_series(settlement_baselines(loads[basis]["R2"], events, dr.customer_class), events, index)
         premise = build_premise(config)
         premise.value_streams.append(DREventResponse(program, mask, expected.to_numpy(), time_grid))
         result = premise.solve()[0]
@@ -157,21 +159,22 @@ def run_dr_study(config: ScenarioConfig, r2: DispatchResult | None = None, r2_pr
                     row[f"{pre}reduction_vs_{name}_kw"] = theirs - ours
                 row[f"S_{pre}kw"] = float(s_series[basis][rows].mean())
                 row[f"{pre}reduction_vs_S_kw"] = row[f"S_{pre}kw"] - ours
+            row["settlement_basis"] = basis
             row["S_expected_kw"] = float(expected[rows].mean())
-            row["S_adjustment"] = settled["net"][e.event_id].adjustment
-            row["S_days"] = len(settled["net"][e.event_id].days_used)
-            s_net = s_series["net"]
+            row["S_adjustment"] = settled[basis][e.event_id].adjustment
+            row["S_days"] = len(settled[basis][e.event_id].days_used)
+            s_settle, settle_load = s_series[basis], mine[basis]
             if program.response == "incentive":
-                kwh = float(((s_net[rows] - net[rows]) * dt).sum())
+                kwh = float(((s_settle[rows] - settle_load[rows]) * dt).sum())
                 row["incentive_earned"] = program.incentive_per_kwh * max(0.0, kwh)
             elif program.response == "commitment":
-                target = s_net[rows] - program.committed_kw
-                row["shortfall_kwh"] = float((np.clip(net[rows] - target, 0, None) * dt).sum())
+                target = s_settle[rows] - program.committed_kw
+                row["shortfall_kwh"] = float((np.clip(settle_load[rows] - target, 0, None) * dt).sum())
             else:
                 row["shortfall_kwh"] = float((np.clip(result.grid_import[rows] - program.cap_kw, 0, None) * dt).sum())
             after = (index >= e.end) & (index.date == e.day)
             row["rebound_kwh"] = float(((net[after] - nets["R2"][after]) * dt).sum())
-            row["settlement_note"] = settled["net"][e.event_id].note
+            row["settlement_note"] = settled[basis][e.event_id].note
             perf_rows.append(row)
         event_rows.append(cal.calendar_frame(events).assign(replicate=replicate))
     performance = pd.DataFrame(perf_rows)
@@ -320,7 +323,8 @@ def run_dr_study(config: ScenarioConfig, r2: DispatchResult | None = None, r2_pr
     checks.ran("dr accounted vs counted", found)
 
     summary = {
-        "program": program.program_id, "response": program.response, "customer_class": dr.customer_class,
+        "program": program.program_id, "response": program.response, "settlement_basis": program.settlement_basis,
+        "customer_class": dr.customer_class,
         "capacity_reference": program.capacity_reference, "calendars": len(calendars),
         "constructor": next(n for n in ("file", "price", "random", "schedule") if getattr(dr.events, n) is not None),
         "events_per_calendar": [len(c) for c in calendars], "weather_case": config.weather_case,

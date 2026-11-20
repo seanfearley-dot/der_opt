@@ -1,8 +1,9 @@
 # der-opt demand response events and capacity specification
 
-**Version 1.1 — approved 2026-11-20.** Implemented in `der_opt.dr`. Change it only by a
-new version, approved the same way. Open threads are listed at the end. (1.1 adds the
-two reduction bases, section 5; 1.0 approved 2026-11-19.)
+**Version 1.2 — approved 2026-11-20.** Implemented in `der_opt.dr`. Change it only by a
+new version, approved the same way. Open threads are listed at the end. (1.2 adds the
+program's `settlement_basis`; 1.1 the two reduction bases, section 5; 1.0 approved
+2026-11-19.)
 
 ## Purpose
 
@@ -125,6 +126,7 @@ Defined in the scenario YAML:
 | `response` | how the measure responds (section 3); default `incentive`, and every output names the one used | `incentive` |
 | `incentive_per_kwh`, `committed_kw`, `cap_kw` | the response's parameter | `2.00` |
 | `settlement` | baseline rule (section 4) | `by_class` |
+| `settlement_basis` | what incentive and commitment settle on: `net` (default; exports count) or `import` (grid import only) (v1.2) | `net` |
 | `capacity_reference` | which reference capacity is valued against (section 4): `R2`, `R3`, `S`, or `all` (default; each one output) | `all` |
 
 ## 3. How the measure responds
@@ -176,7 +178,9 @@ counted and accounted, is reported twice:
   don't count. The settlement baseline S on this basis is computed from import-only
   history.
 
-The incentive in the optimization is paid on the net basis (section 3).
+The incentive and commitment settle on the program's `settlement_basis` (v1.2): `net`
+by default, or `import`, where reduction stops at zero import and exporting earns
+nothing. Both bases are reported either way.
 
 ### Counting: what the measure could deliver, in every month
 
@@ -231,7 +235,7 @@ Checks added to every run:
   - settlement payment more than 25% away from the R2 load impact;
   - an accounted month more than 25% away from that month's counted capacity.
 
-## Decisions (1-6 approved with version 1.0, 7 with 1.1)
+## Decisions (1-6 approved with version 1.0, 7 with 1.1, 8 with 1.2)
 
 1. **Capacity reference:** selectable per program (`capacity_reference`): R2, R3, S, or
    `all` (the default), each output side by side.
@@ -244,6 +248,8 @@ Checks added to every run:
 6. **Randomized constructor:** as proposed in 1c.
 
 7. **Exports (v1.1):** reported on both bases; neither is dropped.
+8. **Settlement basis (v1.2):** a program setting, `net` (default) or `import`, for
+   incentive and commitment.
 
 ## Threads to pull
 
@@ -251,6 +257,9 @@ Approved as placeholders; expect revisions, each as a new spec version:
 
 - **T1. Settlement day-of adjustment.** The window and the ±20% cap for both 5-in-10
   (residential) and 10-in-10 (commercial) are provisional, not verified against the
-  CAISO PDR baseline rules in use. Revise to the rules the program follows.
+  CAISO PDR baseline rules in use. Revise to the rules the program follows. Note when
+  revising: a battery recharging inside the adjustment window raises the event day's
+  load and can push the adjustment to its cap, so settlement pays for more than the
+  load impact (seen in testing: +20%, $9.00 paid for $7.50 of avoided import).
 - **T2. Weekend and holiday settlement.** The fallback (the same rule over recent weekend
   and holiday days, 4-in-4 when fewer than 10 exist) is provisional. Revise with T1.

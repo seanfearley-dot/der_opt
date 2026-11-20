@@ -74,6 +74,8 @@ class DRProgramConfig(BaseModel):
     committed_kw: float | None = None
     cap_kw: float | None = None
     shortfall_penalty_per_kwh: float = 5.0  # commitment / import_cap: keeps the run feasible
+    # what incentive and commitment settle on: net load (exports count) or grid import only
+    settlement_basis: Literal["net", "import"] = "net"
     settlement: Literal["by_class"] = "by_class"
     capacity_reference: Literal["R2", "R3", "S", "all"] = "all"
 

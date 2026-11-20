@@ -212,7 +212,8 @@ def _run_feeder(scenario: Path, output_dir: Path | None, no_counterfactual: bool
 def _print_dr(study, config, r2_bill) -> None:
     """The DR section of `der-opt run`."""
     s, perf, cap = study.summary, study.performance, study.capacity
-    typer.echo(f"\nDemand response: program {s['program']} (response {s['response']}, {s['customer_class']}, "
+    typer.echo(f"\nDemand response: program {s['program']} (response {s['response']} settled on {s['settlement_basis']}, "
+               f"{s['customer_class']}, "
                f"events from {s['constructor']}, {len(study.calendars)} calendar(s))")
     if config.dr.program.capacity_reference == "all":
         chosen = ["R2", "R3", "S"]
@@ -239,7 +240,7 @@ def _print_dr(study, config, r2_bill) -> None:
                      for r in chosen if f"counted_{r}_kw" in row and pd.notna(row[f"counted_{r}_kw"])]
             typer.echo(f"    month {int(row['month']):>2}: {int(row['shadow_days'])} days, " + "; ".join(parts))
     if s.get("incentive_earned") is not None:
-        typer.echo(f"  Incentive earned at settlement: ${s['incentive_earned']:,.2f} per calendar")
+        typer.echo(f"  Incentive earned at settlement ({s['settlement_basis']} basis): ${s['incentive_earned']:,.2f} per calendar")
     if r2_bill is not None and study.responding:
         from der_opt.billing import bill_from_dispatch
         from der_opt.scenarios import build_billing

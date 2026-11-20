@@ -298,3 +298,19 @@ def test_shadow_events_cover_load_before_exporting():
     assert cap.loc[7, "counted_R2_kw"] == pytest.approx(2.0)
     assert cap.loc[7, "counted_import_R2_kw"] == pytest.approx(2.0)
     assert set(study.slice_of_day["basis"]) == {"net", "import"}
+
+
+def test_settlement_on_the_import_basis_stops_at_zero_import():
+    dr = {"program": {"program_id": "p", "season": [7], "max_hours": 3, "incentive_per_kwh": 1.0,
+                      "settlement_basis": "import"},
+          "events": {"schedule": [{"start": "17:00", "hours": 3, "dates": ["2026-07-21", "2026-07-28"]}]},
+          "shadow_events": False}
+    study = run_dr_study(_config(dr=dr))
+    perf = study.performance
+    # paid only for avoided import, the battery covers the 2.5 kW load and exports nothing
+    assert perf["reduction_vs_R2_kw"].tolist() == pytest.approx([2.5, 2.5], abs=1e-6)
+    assert perf["import_reduction_vs_R2_kw"].tolist() == pytest.approx([2.5, 2.5], abs=1e-6)
+    assert set(perf["settlement_basis"]) == {"import"} and study.summary["settlement_basis"] == "import"
+    # at least 2.5 kW x 3 h x $1; a day-of adjustment lifted by pre-event charging can add more
+    assert (perf["incentive_earned"] >= 7.5 - 1e-6).all()
+    assert study.checks.errors == []
