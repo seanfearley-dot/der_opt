@@ -1,0 +1,65 @@
+# A home battery in a summer demand response program, for a full year -- the reference
+# for DR studies (docs/DR_CAPACITY_SPEC.md v1.0). Run with:
+#   der-opt run examples/scenarios/dr_battery_annual.yaml -o out/dr
+#
+# The home is synthetic (examples/data/spec_sample/annual_home.csv, input data spec):
+# gross load with an AC that follows an inland California climate, and rooftop solar.
+# Prices: E-ELEC import; a flat $0.05/kWh for export keeps this a fast LP (a real NBT
+# export rate can exceed import, which needs exclusive_import_export, a MILP).
+
+name: dr_battery_annual
+weather_case: synthetic typical year (illustrative)
+
+time_grid:
+  resolution_minutes: 60
+  horizon_steps: 8760
+  start: "2026-01-01T00:00:00"
+
+devices:
+  - type: solar
+    name: solar
+    params:
+      available_kw: {source: timeseries, path: examples/data/spec_sample/annual_home.csv, premise_id: home_a, column: pv_kw}
+  - type: battery
+    name: battery
+    params:
+      capacity_kwh: 13.5
+      p_max_charge_kw: 5.0
+      p_max_discharge_kw: 5.0
+      eta_charge: 0.95
+      eta_discharge: 0.95
+      soc_init_frac: 0.5
+      soc_final_min_frac: 0.5
+      degradation_cost_per_kwh: 0.015
+
+value_streams:
+  - type: energy_arbitrage
+    params:
+      import_price: {type: retail_tariff, path: examples/data/tariffs/pge_e_elec_2026-06.yaml}
+      export_price: {type: constant, price: 0.05}
+
+external_load: {source: timeseries, path: examples/data/spec_sample/annual_home.csv, premise_id: home_a, column: load_kw}
+poi_limit_kw: 20
+
+# R1, the counterfactual: what the battery does today without optimization
+counterfactual:
+  policies:
+    battery: {type: self_consumption}
+
+dr:
+  customer_class: residential # 5-in-10 settlement baseline
+  measure_devices: [battery] # R3 = this home with its solar but without the battery
+  program:
+    program_id: summer_peak
+    season: [5, 6, 7, 8, 9, 10] # counted capacity is reported for every one of these months
+    day_types: [weekday]
+    window: "16:00-21:00"
+    min_hours: 1
+    max_hours: 3 # shadow events (counted capacity) last this long
+    max_events_per_month: 4
+    max_consecutive_days: 2
+    response: incentive
+    incentive_per_kwh: 1.00 # illustrative
+    capacity_reference: all # R2, R3 and S side by side
+  events:
+    random: {events_per_month: {6: 2, 7: 3, 8: 3, 9: 2}, seed: 1, hours: 3, min_days_between: 1}

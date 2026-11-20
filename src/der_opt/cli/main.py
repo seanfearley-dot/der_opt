@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import typer
 
 app = typer.Typer(help="DER Optimization Toolkit CLI")
@@ -207,6 +209,61 @@ def _run_feeder(scenario: Path, output_dir: Path | None, no_counterfactual: bool
         typer.echo(f"\nWrote CSVs, charts and run_record.json to {output_dir}")
 
 
+def _print_dr(study, config, r2_bill) -> None:
+    """The DR section of `der-opt run`."""
+    s, perf, cap = study.summary, study.performance, study.capacity
+    typer.echo(f"\nDemand response: program {s['program']} (response {s['response']}, {s['customer_class']}, "
+               f"events from {s['constructor']}, {len(study.calendars)} calendar(s))")
+    if config.dr.program.capacity_reference == "all":
+        chosen = ["R2", "R3", "S"]
+    else:
+        chosen = [config.dr.program.capacity_reference]
+    typer.echo("  References: R1 counterfactual, R2 non-responding twin, R3 no measure, S settlement baseline")
+    if len(perf):
+        typer.echo(f"  Accounted (called events, mean kW reduction; {len(perf)} event-runs):")
+        refs = ["R1"] + chosen
+        typer.echo("    month  events  hours  " + "  ".join(f"vs {r:>3}" for r in refs))
+        for month, group in perf.groupby("month"):
+            n = len(group) / len(study.calendars)
+            values = "  ".join(f"{np.average(group[f'reduction_vs_{r}_kw'], weights=group['hours']):6.2f}" for r in refs)
+            typer.echo(f"    {month:>5}  {n:>6.1f}  {group['hours'].sum() / len(study.calendars):>5.1f}  {values}")
+    counted = cap[cap["shadow_days"] > 0]
+    if len(counted):
+        typer.echo(f"  Counted (shadow events of {config.dr.program.max_hours:g} h on every eligible day; mean kW, min-max):")
+        for _, row in counted.iterrows():
+            parts = [f"vs {r} {row[f'counted_{r}_kw']:.2f} ({row[f'counted_{r}_min_kw']:.2f}-{row[f'counted_{r}_max_kw']:.2f})"
+                     for r in chosen if f"counted_{r}_kw" in row and pd.notna(row[f"counted_{r}_kw"])]
+            typer.echo(f"    month {int(row['month']):>2}: {int(row['shadow_days'])} days, " + "; ".join(parts))
+    if s.get("incentive_earned") is not None:
+        typer.echo(f"  Incentive earned at settlement: ${s['incentive_earned']:,.2f} per calendar")
+    if r2_bill is not None and study.responding:
+        from der_opt.billing import bill_from_dispatch
+        from der_opt.scenarios import build_billing
+
+        tariff, program, kwargs = build_billing(config)
+        grid = _time_grid(config)
+        bills = [bill_from_dispatch(r, grid, tariff, program, **kwargs).summary["net_cost"] for r in study.responding]
+        typer.echo(f"  Bill: responding ${np.mean(bills):,.2f} vs non-responding ${r2_bill.summary['net_cost']:,.2f}")
+
+
+def _time_grid(config):
+    from der_opt.scenarios.loader import _build_time_grid
+
+    return _build_time_grid(config.time_grid)
+
+
+def _write_dr(study, output_dir: Path) -> None:
+    import pandas as pd
+
+    study.events.to_csv(output_dir / "dr_events.csv", index=False)
+    study.performance.to_csv(output_dir / "dr_event_performance.csv", index=False)
+    study.capacity.to_csv(output_dir / "dr_capacity.csv", index=False)
+    study.slice_of_day.to_csv(output_dir / "dr_capacity_slice_of_day.csv", index=False)
+    frames = {f"replicate_{i}": r.grid_import - r.grid_export for i, r in enumerate(study.responding)}
+    frames |= {name: r.grid_import - r.grid_export for name, r in study.references.items()}
+    pd.DataFrame(frames).to_csv(output_dir / "dr_net_load_kw.csv")
+
+
 @app.command()
 def run(
     scenario: Path = typer.Argument(..., help="Path to a scenario YAML file"),
@@ -261,7 +318,8 @@ def run(
     typer.echo(f"Status: {dispatch.solver_status}")
 
     breakdown = value_breakdown(premise, dispatch)
-    typer.echo(f"\nOptimal dispatch: ${sum(breakdown.values()):.2f}")
+    twin = " (no DR events: the non-responding twin, R2)" if config.dr is not None else ""
+    typer.echo(f"\nOptimal dispatch{twin}: ${sum(breakdown.values()):.2f}")
     for label, value in breakdown.items():
         typer.echo(f"  {label}: ${value:.2f}")
 
@@ -303,6 +361,14 @@ def run(
         for name, dual in dual_results.items():
             note = " (fix-and-resolve approximation, not exact)" if not dual.is_exact else ""
             typer.echo(f"  {name}: is_exact={dual.is_exact}{note}")
+
+    dr_study = None
+    if config.dr is not None:
+        from der_opt.dr import run_dr_study
+
+        dr_study = run_dr_study(config, r2=dispatch, r2_premise=premise)
+        _print_dr(dr_study, config, bills.get("optimal"))
+        report.extend(dr_study.checks)
 
     report.extend(check_prices(premise))
     report.extend(check_load(premise))
@@ -364,6 +430,9 @@ def run(
         results = {"status": dispatch.solver_status, "optimal": breakdown,
                    "counterfactual": cf_breakdown,
                    "bills": {label: bill.summary["net_cost"] for label, bill in bills.items()}}
+        if dr_study is not None:
+            _write_dr(dr_study, output_dir)
+            results["dr"] = dr_study.summary
         _write_checks(output_dir, scenario, config, report, results)
         import matplotlib.pyplot as plt
 

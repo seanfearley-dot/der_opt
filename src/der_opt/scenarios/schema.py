@@ -56,6 +56,79 @@ class BillingConfig(BaseModel):
     baseline_code: str = "basic"
 
 
+# --- demand response (docs/DR_CAPACITY_SPEC.md v1.0) ----------------------------------
+
+
+class DRProgramConfig(BaseModel):
+    program_id: str
+    season: list[int] = Field(default_factory=lambda: list(range(1, 13)))
+    day_types: list[Literal["weekday", "weekend", "holiday"]] = Field(default_factory=lambda: ["weekday"])
+    window: str = "16:00-21:00"  # local hours events may fall in
+    min_hours: float = 1.0
+    max_hours: float = 4.0
+    max_events_per_year: int | None = None
+    max_events_per_month: int | None = None
+    max_consecutive_days: int | None = None
+    response: Literal["incentive", "commitment", "import_cap"] = "incentive"
+    incentive_per_kwh: float | None = None
+    committed_kw: float | None = None
+    cap_kw: float | None = None
+    shortfall_penalty_per_kwh: float = 5.0  # commitment / import_cap: keeps the run feasible
+    settlement: Literal["by_class"] = "by_class"
+    capacity_reference: Literal["R2", "R3", "S", "all"] = "all"
+
+
+class DRPriceEventsConfig(BaseModel):
+    series: dict[str, Any]  # any price series: {type: timeseries, path: ..., column: ...}, retail_tariff, ...
+    events_per_year: int | None = None
+    events_per_month: int | None = None
+    duration: Literal["fixed", "variable"] = "fixed"
+    hours: float | None = None  # fixed duration; default the program's max_hours
+    alpha: float = 0.8  # variable: extend while price >= alpha x the day's window peak
+    event_type: Literal["dispatch", "test"] = "dispatch"
+
+
+class DRRandomEventsConfig(BaseModel):
+    events_per_month: int | dict[int, int]
+    seed: int = 0
+    replicates: int = 1
+    weighting: Literal["uniform", "price"] = "uniform"
+    series: dict[str, Any] | None = None  # needed for weighting: price
+    weight_power: float = 1.0
+    min_days_between: int = 0
+    hours: float | None = None  # fixed duration; omit to draw from min_hours..max_hours
+    event_type: Literal["dispatch", "test"] = "dispatch"
+
+
+class DRScheduleRule(BaseModel):
+    start: str  # "HH:MM", local
+    hours: float
+    event_type: Literal["dispatch", "test"] = "dispatch"
+    months: list[int] | Literal["all"] = "all"
+    days: list[str] | Literal["all", "weekdays", "weekends"] = "all"
+    nth_weekday: dict[str, Any] | None = None  # {n: 1, weekday: tue}
+    dates: list[str] | None = None
+
+
+class DREventsConfig(BaseModel):
+    """Exactly one constructor."""
+
+    file: str | None = None
+    price: DRPriceEventsConfig | None = None
+    random: DRRandomEventsConfig | None = None
+    schedule: list[DRScheduleRule] | None = None
+
+
+class DRConfig(BaseModel):
+    program: DRProgramConfig
+    events: DREventsConfig
+    customer_class: Literal["residential", "commercial"] = "residential"
+    measure_devices: list[str] | None = None  # the measure's devices (R3 removes them); default all
+    tz: str = "America/Los_Angeles"
+    value_series: dict[str, Any] | None = None  # places shadow events; default the price constructor's series
+    shadow_events: bool = True  # counted capacity (one small solve per eligible day)
+
+
 class ScenarioConfig(BaseModel):
     """Top-level structure of a scenario YAML file. Per-device and per-value-stream
     `params` are intentionally left as loose dicts rather than one pydantic model per
@@ -81,6 +154,8 @@ class ScenarioConfig(BaseModel):
     exclusive_import_export: bool = False
     counterfactual: CounterfactualConfig | None = None
     billing: BillingConfig | None = None
+    dr: DRConfig | None = None  # demand response program and events (single-premise runs)
+    weather_case: str | None = None  # the load forecast scenario's weather label, recorded only
 
 
 # --- feeder (multi-premise) scenarios ------------------------------------------------

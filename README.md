@@ -68,6 +68,7 @@ der-opt run examples/scenarios/feeder_ev_heat_wave.yaml -o out/feeder           
 der-opt run examples/scenarios/feeder_bank_planning_trace.yaml -o out/bank_trace  # bank 1-in-10 year + 40 new homes (.[forecast])
 der-opt run examples/scenarios/battery_caiso_lmp.yaml                             # battery on CAISO LMP
 der-opt run examples/scenarios/feeder_from_files.yaml                             # 6 homes from spec files
+der-opt run examples/scenarios/dr_battery_annual.yaml -o out/dr                   # DR program, full year
 ```
 
 It prints the optimal dispatch's cost broken down by source. If the scenario has a
@@ -469,6 +470,76 @@ departure, which is read off `ev_connected`). A metered premise can't have devic
 added: its meter already includes them. On the local clock, November's repeated hour
 is averaged into one and March's skipped hour interpolated.
 
+## Demand response: events and capacity
+
+A scenario with a `dr` section runs a demand response study for one measure, defined in
+[docs/DR_CAPACITY_SPEC.md](docs/DR_CAPACITY_SPEC.md) (v1.0, approved). The template is
+`examples/scenarios/dr_battery_annual.yaml`: a home battery in a summer program for a
+full year, which runs in about 5 seconds.
+
+```yaml
+dr:
+  customer_class: residential          # 5-in-10 settlement (commercial: 10-in-10)
+  measure_devices: [battery]           # R3 removes these; default: all devices
+  program:
+    program_id: summer_peak
+    season: [5, 6, 7, 8, 9, 10]        # counted capacity is reported for each month
+    day_types: [weekday]
+    window: "16:00-21:00"
+    min_hours: 1
+    max_hours: 3                       # also the length of shadow events
+    max_events_per_month: 4
+    max_consecutive_days: 2
+    response: incentive                # default; or commitment (committed_kw), import_cap (cap_kw)
+    incentive_per_kwh: 1.00
+    capacity_reference: all            # R2, R3, S, or all
+  events:                              # one constructor:
+    random: {events_per_month: {7: 3, 8: 3}, seed: 1, hours: 3, replicates: 1}
+    # file: data/events.csv            # event_id, start, end, program_id, event_type (ISO 8601 with offset)
+    # price: {series: {type: timeseries, ...}, events_per_year: 10, duration: variable, alpha: 0.8}
+    # schedule: [{start: "17:00", hours: 3, days: weekdays, months: [7, 8]},
+    #            {start: "16:00", hours: 1, nth_weekday: {n: 1, weekday: tue}, event_type: test}]
+```
+
+**Runs:** R1 is the counterfactual (the scenario's rule-based policies), R2 the
+non-responding twin (the same optimization, never told about events), and R3 the home
+without the measure. The responding run is the optimization with the program's
+response; with `replicates`, there's one per randomized calendar.
+
+**Reported:**
+- **Per event (accounted):** reduction against R1, R2, R3 and the settlement baseline
+  S, plus the incentive earned and same-day rebound.
+- **Per month (counted):** the average reduction of a `max_hours` shadow event on every
+  eligible day, from R2's device state that morning, in every season month whether
+  events were called or not.
+- **Slice-of-Day:** a 24-hour profile for each month.
+
+`-o` writes `dr_events.csv`, `dr_event_performance.csv`, `dr_capacity.csv`,
+`dr_capacity_slice_of_day.csv`, and `dr_net_load_kw.csv` (every run's net load).
+
+**How each response is modeled:**
+- **Payment basis:** the optimization is paid against an *expected* baseline (the
+  settlement rule applied to R2), not its own. A perfect-foresight optimizer paid
+  against its own baseline could raise it on purpose. The settlement actually earned is
+  then computed from the responding run's own history and reported.
+- **Incentive pricing:** the incentive is linear in each event step. The reported
+  settlement floors each event's payment at zero.
+- **Commitment and import cap:** shortfalls are allowed at `shortfall_penalty_per_kwh`
+  (default $5), so the run never becomes infeasible.
+- **Perfect foresight:** the optimizer sees every event in the year, so delivered
+  response is an upper bound on what a controller with day-ahead notice would achieve.
+
+**Checks:** event calendars that break the program's rules are rejected. Warnings
+flag:
+- a reduction larger than the devices could deliver;
+- same-day rebound;
+- settlement more than 25% away from the R2 load impact;
+- shortfalls;
+- accounted capacity more than 25% away from counted capacity.
+
+**Open threads in the spec:** T1 (the day-of adjustment) and T2 (weekend and holiday
+settlement) are provisional.
+
 ## Feeders: many houses on a network
 
 A scenario with a `feeder` section is a multi-house run. Every house is an ordinary
@@ -637,6 +708,7 @@ src/der_opt/
   simulation/    counterfactual control policies + simulator
   billing/       retail tariffs, PG&E holidays, bill engine (NBT, NEM2), bill objectives
   inputs/        input data spec v1.1: readers, validation, quality checks
+  dr/            demand response: event calendars, settlement, responses, capacity
   integrations/  LBNL load, EV model, PVWatts, PG&E NBT export rates, CAISO LMP
   network/       feeder topology, multi-premise dispatch, congestion prices, synthetic houses
   scenarios/     YAML schema, loader, data-source resolvers, feeder scenarios
