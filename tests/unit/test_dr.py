@@ -192,6 +192,10 @@ def test_study_references_and_capacity():
     cap = study.capacity.set_index("month")
     assert cap.loc[7, "events"] == 3 and cap.loc[7, "test_events"] == 1
     assert cap.loc[7, "accounted_R2_kw"] == pytest.approx(4.0)
+    # import basis: the 2.5 kW evening load goes to zero import; the other 1.5 kW is export
+    assert perf["import_reduction_vs_R2_kw"].tolist() == pytest.approx([2.5] * 3)
+    assert cap.loc[7, "accounted_import_R2_kw"] == pytest.approx(2.5)
+    assert cap.loc[7, "counted_import_R2_kw"] == pytest.approx(2.5)
     # counted: every eligible July weekday, from R2's state (6 kWh) with time to charge
     assert cap.loc[7, "shadow_days"] == 22 and cap.loc[7, "counted_R2_kw"] == pytest.approx(4.0)
     assert pd.isna(cap.loc[8, "counted_R2_kw"]) if "counted_R2_kw" in cap else True
@@ -281,3 +285,16 @@ def test_shadow_events_slice_evs_and_thermostats():
     r2_net = (r2.grid_import - r2.grid_export).iloc[day + 19: day + 22].to_numpy()
     assert (r2_net - shadow).mean() > 5  # V2X at 7.2 kW plus pre-cooling
     assert len(shadow) == 3
+
+
+def test_shadow_events_cover_load_before_exporting():
+    # 6 kWh over a 3 h block with a 2.5 kW load: all of it should go to the load (2 kW
+    # less import every hour), not to exports in one hour and nothing in another
+    devices = [{"type": "battery", "name": "battery", "params": {
+        "capacity_kwh": 6, "p_max_charge_kw": 5, "p_max_discharge_kw": 5, "eta_charge": 1.0, "eta_discharge": 1.0,
+        "soc_init_frac": 0.5, "soc_final_min_frac": 0.5, "degradation_cost_per_kwh": 0.001}}]
+    study = run_dr_study(_config(devices=devices))
+    cap = study.capacity.set_index("month")
+    assert cap.loc[7, "counted_R2_kw"] == pytest.approx(2.0)
+    assert cap.loc[7, "counted_import_R2_kw"] == pytest.approx(2.0)
+    assert set(study.slice_of_day["basis"]) == {"net", "import"}

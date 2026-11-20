@@ -219,19 +219,23 @@ def _print_dr(study, config, r2_bill) -> None:
     else:
         chosen = [config.dr.program.capacity_reference]
     typer.echo("  References: R1 counterfactual, R2 non-responding twin, R3 no measure, S settlement baseline")
+    typer.echo("  Each figure is net / import: net counts exports as reduction, import counts grid import only")
     if len(perf):
         typer.echo(f"  Accounted (called events, mean kW reduction; {len(perf)} event-runs):")
         refs = ["R1"] + chosen
-        typer.echo("    month  events  hours  " + "  ".join(f"vs {r:>3}" for r in refs))
+        typer.echo("    month  events  hours  " + "  ".join(f"{'vs ' + r:>13}" for r in refs))
         for month, group in perf.groupby("month"):
             n = len(group) / len(study.calendars)
-            values = "  ".join(f"{np.average(group[f'reduction_vs_{r}_kw'], weights=group['hours']):6.2f}" for r in refs)
-            typer.echo(f"    {month:>5}  {n:>6.1f}  {group['hours'].sum() / len(study.calendars):>5.1f}  {values}")
+            cells = []
+            for r in refs:
+                pair = [np.average(group[f"{pre}reduction_vs_{r}_kw"], weights=group["hours"]) for pre in ("", "import_")]
+                cells.append(f"{pair[0]:6.2f} /{pair[1]:5.2f}")
+            typer.echo(f"    {month:>5}  {n:>6.1f}  {group['hours'].sum() / len(study.calendars):>5.1f}  " + "  ".join(cells))
     counted = cap[cap["shadow_days"] > 0]
     if len(counted):
-        typer.echo(f"  Counted (shadow events of {config.dr.program.max_hours:g} h on every eligible day; mean kW, min-max):")
+        typer.echo(f"  Counted (shadow events of {config.dr.program.max_hours:g} h on every eligible day; mean kW, net / import):")
         for _, row in counted.iterrows():
-            parts = [f"vs {r} {row[f'counted_{r}_kw']:.2f} ({row[f'counted_{r}_min_kw']:.2f}-{row[f'counted_{r}_max_kw']:.2f})"
+            parts = [f"vs {r} {row[f'counted_{r}_kw']:.2f} / {row[f'counted_import_{r}_kw']:.2f}"
                      for r in chosen if f"counted_{r}_kw" in row and pd.notna(row[f"counted_{r}_kw"])]
             typer.echo(f"    month {int(row['month']):>2}: {int(row['shadow_days'])} days, " + "; ".join(parts))
     if s.get("incentive_earned") is not None:

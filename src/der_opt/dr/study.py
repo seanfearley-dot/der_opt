@@ -6,7 +6,8 @@ Runs, all on the same year:
   R3  no measure: the measure's devices removed, optimized the same way
   responding: the optimization with the program's response to the calendar
       (one per calendar: a randomized constructor with replicates makes several)
-and then per-event performance against R1, R2, R3 and the settlement baseline S,
+and then per-event performance against R1, R2, R3 and the settlement baseline S --
+every reduction on two bases, net load (exports count) and grid import (they don't) --
 accounted capacity (called events, test events included), counted capacity (shadow
 events on every eligible day), the Slice-of-Day profile, and DR checks.
 """
@@ -124,6 +125,10 @@ def run_dr_study(config: ScenarioConfig, r2: DispatchResult | None = None, r2_pr
     r3 = build_premise(_without_measure(config)).solve()[0]
     refs = {"R1": r1, "R2": r2, "R3": r3}
     nets = {name: _net(result) for name, result in refs.items()}
+    # two bases for every reduction (spec v1.1): net load, so exports count, and grid
+    # import only (each step's load floored at zero), so they don't
+    loads = {"net": nets, "import": {name: series.clip(lower=0) for name, series in nets.items()}}
+    prefix = {"net": "", "import": "import_"}
 
     responding, perf_rows, event_rows = [], [], []
     for replicate, events in enumerate(calendars):
@@ -136,32 +141,37 @@ def run_dr_study(config: ScenarioConfig, r2: DispatchResult | None = None, r2_pr
         result = premise.solve()[0]
         responding.append(result)
         net = _net(result)
-        settled = settlement_baselines(net, events, dr.customer_class)
-        s_series = baseline_series(settled, events, index)
+        mine = {"net": net, "import": net.clip(lower=0)}
+        settled = {basis: settlement_baselines(mine[basis], events, dr.customer_class) for basis in mine}
+        s_series = {basis: baseline_series(settled[basis], events, index) for basis in mine}
         for e in events:
             rows = (index >= e.start) & (index < e.end)
             row = {"replicate": replicate, "event_id": e.event_id, "event_type": e.event_type, "month": e.start.month,
-                   "start": e.start, "end": e.end, "hours": e.hours, "response": program.response,
-                   "responding_kw": float(net[rows].mean())}
-            for name in ("R1", "R2", "R3"):
-                row[f"{name}_kw"] = float(nets[name][rows].mean())
-                row[f"reduction_vs_{name}_kw"] = row[f"{name}_kw"] - row["responding_kw"]
-            row["S_kw"] = float(s_series[rows].mean())
-            row["reduction_vs_S_kw"] = row["S_kw"] - row["responding_kw"]
+                   "start": e.start, "end": e.end, "hours": e.hours, "response": program.response}
+            for basis, pre in prefix.items():
+                ours = float(mine[basis][rows].mean())
+                row[f"responding_{pre}kw"] = ours
+                for name in ("R1", "R2", "R3"):
+                    theirs = float(loads[basis][name][rows].mean())
+                    row[f"{name}_{pre}kw"] = theirs
+                    row[f"{pre}reduction_vs_{name}_kw"] = theirs - ours
+                row[f"S_{pre}kw"] = float(s_series[basis][rows].mean())
+                row[f"{pre}reduction_vs_S_kw"] = row[f"S_{pre}kw"] - ours
             row["S_expected_kw"] = float(expected[rows].mean())
-            row["S_adjustment"] = settled[e.event_id].adjustment
-            row["S_days"] = len(settled[e.event_id].days_used)
+            row["S_adjustment"] = settled["net"][e.event_id].adjustment
+            row["S_days"] = len(settled["net"][e.event_id].days_used)
+            s_net = s_series["net"]
             if program.response == "incentive":
-                kwh = float(((s_series[rows] - net[rows]) * dt).sum())
+                kwh = float(((s_net[rows] - net[rows]) * dt).sum())
                 row["incentive_earned"] = program.incentive_per_kwh * max(0.0, kwh)
             elif program.response == "commitment":
-                target = s_series[rows] - program.committed_kw
+                target = s_net[rows] - program.committed_kw
                 row["shortfall_kwh"] = float((np.clip(net[rows] - target, 0, None) * dt).sum())
             else:
                 row["shortfall_kwh"] = float((np.clip(result.grid_import[rows] - program.cap_kw, 0, None) * dt).sum())
             after = (index >= e.end) & (index.date == e.day)
             row["rebound_kwh"] = float(((net[after] - nets["R2"][after]) * dt).sum())
-            row["settlement_note"] = settled[e.event_id].note
+            row["settlement_note"] = settled["net"][e.event_id].note
             perf_rows.append(row)
         event_rows.append(cal.calendar_frame(events).assign(replicate=replicate))
     performance = pd.DataFrame(perf_rows)
@@ -183,40 +193,45 @@ def run_dr_study(config: ScenarioConfig, r2: DispatchResult | None = None, r2_pr
             day_start = int(index.get_loc(pd.Timestamp(day)))
             block_start = int(index.get_loc(block[0]))
             shadow = shadow_event(r2_premise, r2, day_start, block_start, steps)
+            shadow_load = {"net": shadow, "import": np.clip(shadow, 0, None)}
             hypothetical = cal.Event(f"shadow-{day}", program.program_id, "shadow", block[0],
                                      block[-1] + pd.Timedelta(minutes=time_grid.resolution_minutes))
-            s_hyp = settlement_baselines(nets["R2"], [hypothetical], dr.customer_class)[hypothetical.event_id].values
-            counted_rows.append({
-                "day": day, "month": day.month, "start": block[0],
-                "R2": float(nets["R2"].loc[block].mean() - shadow.mean()),
-                "R3": float(nets["R3"].loc[block].mean() - shadow.mean()),
-                "S": float(np.nanmean(s_hyp) - shadow.mean()) if np.isfinite(s_hyp).any() else np.nan,
-            })
+            row = {"day": day, "month": day.month, "start": block[0]}
+            for basis, pre in prefix.items():
+                ours = float(shadow_load[basis].mean())
+                for name in ("R2", "R3"):
+                    row[f"{pre}{name}"] = float(loads[basis][name].loc[block].mean()) - ours
+                s_hyp = settlement_baselines(loads[basis]["R2"], [hypothetical], dr.customer_class)[hypothetical.event_id].values
+                row[f"{pre}S"] = float(np.nanmean(s_hyp)) - ours if np.isfinite(s_hyp).any() else np.nan
+            counted_rows.append(row)
     counted = pd.DataFrame(counted_rows)
 
-    # --- capacity table: per month, counted and accounted, for each chosen reference
+    # --- capacity table: per month, counted and accounted, per chosen reference, both bases
     cap_rows = []
     for month in range(1, 13):
         row = {"month": month, "in_season": month in program.season}
         month_counted = counted[counted["month"] == month] if len(counted) else counted
         row["shadow_days"] = len(month_counted)
-        for name in chosen:
-            if len(month_counted):
-                row[f"counted_{name}_kw"] = month_counted[name].mean()
-                row[f"counted_{name}_min_kw"] = month_counted[name].min()
-                row[f"counted_{name}_max_kw"] = month_counted[name].max()
         month_perf = performance[performance["month"] == month] if len(performance) else performance
         row["events"] = len(month_perf) / max(len(calendars), 1)
         row["test_events"] = int((month_perf["event_type"] == "test").sum() / max(len(calendars), 1)) if len(month_perf) else 0
         row["event_hours"] = float(month_perf["hours"].sum() / max(len(calendars), 1)) if len(month_perf) else 0.0
-        for name in chosen:
-            if len(month_perf):
-                # hour-weighted, per replicate, then across replicates
-                per_rep = month_perf.groupby("replicate").apply(
-                    lambda g, n=name: np.average(g[f"reduction_vs_{n}_kw"], weights=g["hours"]), include_groups=False)
-                row[f"accounted_{name}_kw"] = float(per_rep.mean())
-                if len(calendars) > 1:
-                    row[f"accounted_{name}_min_kw"], row[f"accounted_{name}_max_kw"] = float(per_rep.min()), float(per_rep.max())
+        for pre in prefix.values():
+            for name in chosen:
+                if len(month_counted):
+                    values = month_counted[f"{pre}{name}"]
+                    row[f"counted_{pre}{name}_kw"] = values.mean()
+                    row[f"counted_{pre}{name}_min_kw"] = values.min()
+                    row[f"counted_{pre}{name}_max_kw"] = values.max()
+                if len(month_perf):
+                    # hour-weighted, per replicate, then across replicates
+                    per_rep = month_perf.groupby("replicate").apply(
+                        lambda g, c=f"{pre}reduction_vs_{name}_kw": np.average(g[c], weights=g["hours"]),
+                        include_groups=False)
+                    row[f"accounted_{pre}{name}_kw"] = float(per_rep.mean())
+                    if len(calendars) > 1:
+                        row[f"accounted_{pre}{name}_min_kw"] = float(per_rep.min())
+                        row[f"accounted_{pre}{name}_max_kw"] = float(per_rep.max())
         cap_rows.append(row)
     capacity = pd.DataFrame(cap_rows)
 
@@ -226,31 +241,36 @@ def run_dr_study(config: ScenarioConfig, r2: DispatchResult | None = None, r2_pr
     hour_of = index.hour
     for month in range(1, 13):
         month_events = [(r, e) for r, evs in enumerate(calendars) for e in evs if e.start.month == month]
-        if month_events:
-            for name in chosen:
-                profiles = []
-                for r, e in month_events:
-                    day_rows = index.date == e.day
-                    if name == "S":
-                        s = baseline_series(settlement_baselines(_net(responding[r]), calendars[r], dr.customer_class),
-                                            calendars[r], index)
-                        reduction = s[day_rows] - _net(responding[r])[day_rows]
-                    else:
-                        reduction = nets[name][day_rows] - _net(responding[r])[day_rows]
-                    profiles.append(reduction.groupby(hour_of[day_rows]).mean())
-                mean = pd.concat(profiles, axis=1).mean(axis=1)
-                sod_rows += [{"month": month, "hour": h, "reference": name, "source": "accounted", "reduction_kw": mean.get(h, np.nan)}
-                             for h in range(24)]
-        elif len(counted) and (counted["month"] == month).any():
-            month_counted = counted[counted["month"] == month]
-            for name in chosen:
-                by_hour = {}
-                for _, c in month_counted.iterrows():
-                    hours = pd.date_range(c["start"], periods=round(program.max_hours / dt), freq=f"{time_grid.resolution_minutes}min").hour
-                    for h in set(hours):
-                        by_hour.setdefault(h, []).append(c[name])
-                sod_rows += [{"month": month, "hour": h, "reference": name, "source": "counted",
-                              "reduction_kw": float(np.mean(by_hour[h])) if h in by_hour else np.nan} for h in range(24)]
+        for basis, pre in prefix.items():
+            if month_events:
+                for name in chosen:
+                    profiles = []
+                    for r, e in month_events:
+                        day_rows = index.date == e.day
+                        ours = _net(responding[r])
+                        ours = ours.clip(lower=0) if basis == "import" else ours
+                        if name == "S":
+                            theirs = baseline_series(settlement_baselines(ours, calendars[r], dr.customer_class),
+                                                     calendars[r], index)
+                        else:
+                            theirs = loads[basis][name]
+                        reduction = theirs[day_rows] - ours[day_rows]
+                        profiles.append(reduction.groupby(hour_of[day_rows]).mean())
+                    mean = pd.concat(profiles, axis=1).mean(axis=1)
+                    sod_rows += [{"month": month, "hour": h, "reference": name, "basis": basis, "source": "accounted",
+                                  "reduction_kw": mean.get(h, np.nan)} for h in range(24)]
+            elif len(counted) and (counted["month"] == month).any():
+                month_counted = counted[counted["month"] == month]
+                for name in chosen:
+                    by_hour = {}
+                    for _, c in month_counted.iterrows():
+                        hours = pd.date_range(c["start"], periods=round(program.max_hours / dt),
+                                              freq=f"{time_grid.resolution_minutes}min").hour
+                        for h in set(hours):
+                            by_hour.setdefault(h, []).append(c[f"{pre}{name}"])
+                    sod_rows += [{"month": month, "hour": h, "reference": name, "basis": basis, "source": "counted",
+                                  "reduction_kw": float(np.mean(by_hour[h])) if h in by_hour else np.nan}
+                                 for h in range(24)]
     slice_of_day = pd.DataFrame(sod_rows)
 
     # --- checks

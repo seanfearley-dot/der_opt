@@ -1,7 +1,8 @@
 # der-opt demand response events and capacity specification
 
-**Version 1.0 — approved 2026-11-19.** Not yet implemented. Change it only by a new
-version, approved the same way. Open threads are listed at the end.
+**Version 1.1 — approved 2026-11-20.** Implemented in `der_opt.dr`. Change it only by a
+new version, approved the same way. Open threads are listed at the end. (1.1 adds the
+two reduction bases, section 5; 1.0 approved 2026-11-19.)
 
 ## Purpose
 
@@ -166,6 +167,17 @@ along with this spec.
 
 ## 5. Capacity: counting and accounting
 
+**Two bases, both always reported (v1.1).** Every reduction, against every reference,
+counted and accounted, is reported twice:
+
+- **net:** the difference in net load (import - export), so energy exported beyond the
+  home's own load counts as reduction;
+- **import:** the difference in grid import, each step's load floored at zero, so exports
+  don't count. The settlement baseline S on this basis is computed from import-only
+  history.
+
+The incentive in the optimization is paid on the net basis (section 3).
+
 ### Counting: what the measure could deliver, in every month
 
 Measured whether or not any event was called.
@@ -219,7 +231,7 @@ Checks added to every run:
   - settlement payment more than 25% away from the R2 load impact;
   - an accounted month more than 25% away from that month's counted capacity.
 
-## Decisions (approved with version 1.0)
+## Decisions (1-6 approved with version 1.0, 7 with 1.1)
 
 1. **Capacity reference:** selectable per program (`capacity_reference`): R2, R3, S, or
    `all` (the default), each output side by side.
@@ -230,6 +242,8 @@ Checks added to every run:
    days exist, for now (T2).
 5. **Counted capacity:** the average over eligible days; shadow events last `max_hours`.
 6. **Randomized constructor:** as proposed in 1c.
+
+7. **Exports (v1.1):** reported on both bases; neither is dropped.
 
 ## Threads to pull
 

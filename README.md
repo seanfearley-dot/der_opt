@@ -473,7 +473,7 @@ is averaged into one and March's skipped hour interpolated.
 ## Demand response: events and capacity
 
 A scenario with a `dr` section runs a demand response study for one measure, defined in
-[docs/DR_CAPACITY_SPEC.md](docs/DR_CAPACITY_SPEC.md) (v1.0, approved). The template is
+[docs/DR_CAPACITY_SPEC.md](docs/DR_CAPACITY_SPEC.md) (v1.1, approved). The template is
 `examples/scenarios/dr_battery_annual.yaml`: a home battery in a summer program for a
 full year, which runs in about 5 seconds.
 
@@ -505,6 +505,12 @@ dr:
 non-responding twin (the same optimization, never told about events), and R3 the home
 without the measure. The responding run is the optimization with the program's
 response; with `replicates`, there's one per randomized calendar.
+
+**Two bases, always both:** every reduction is reported on a **net** basis (difference
+in net load, so exports count) and an **import** basis (difference in grid import only,
+each step floored at zero). Columns without a prefix are net; `import_` columns are the
+import basis, and the printout shows each figure as net / import. The incentive in the
+optimization pays on the net basis.
 
 **Reported:**
 - **Per event (accounted):** reduction against R1, R2, R3 and the settlement baseline

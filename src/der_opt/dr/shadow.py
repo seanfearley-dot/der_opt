@@ -1,6 +1,6 @@
 """Counted capacity from shadow events (spec section 5): for each eligible day, a
-small separate optimization asks how far the measure could cut net load over a
-standard event, starting from the non-responding twin's (R2) device state that
+small separate optimization asks how far the measure could cut load (net load and
+grid import) over a standard event, starting from the non-responding twin's (R2) device state that
 morning. Shadow events never touch the annual runs."""
 
 from __future__ import annotations
@@ -81,8 +81,11 @@ def shadow_event(premise: Premise, r2_dispatch, day_start: int, block_start: int
     dt = day.time_grid.dt_hours
     block = range(block_start - day_start, steps)
     before = range(0, block_start - day_start)
+    # minimizing net load alone is indifferent between covering the home's load and
+    # exporting; counting imports a second time makes it cover load first, so the one
+    # solve gives the most reduction on both bases (net, and import only)
     model.obj = pyo.Objective(
-        expr=sum((day.grid_import[t] - day.grid_export[t]) * dt for t in block)
+        expr=sum((2 * day.grid_import[t] - day.grid_export[t]) * dt for t in block)
         + PRE_EVENT_IMPORT_COST * sum(day.grid_import[t] * dt for t in before),
         sense=pyo.minimize,
     )
