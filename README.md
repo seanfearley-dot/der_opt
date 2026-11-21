@@ -583,11 +583,20 @@ A `cost_test` section writes `measure_impacts/` with `-o`:
 - `bills.csv`: without and with, if the scenario bills;
 - `dr_incentives.csv`.
 
-**Cost tests in OpenBCA:**
+**Cost tests in OpenBCA.** First, once:
 
 ```bash
-der-opt run examples/scenarios/dr_battery_annual.yaml -o out/dr
-der-opt openbca out/dr --openbca /path/to/openbca      # an OpenBCA checkout after `uv sync`
+der-opt setup openbca          # clones OpenBCA to ~/.der-opt/openbca (or --dir PATH), pins the tested commit, installs it
+```
+
+Setup needs [uv](https://docs.astral.sh/uv/) and takes about a minute. It remembers the
+location in `~/.der-opt/config.yaml`. `DER_OPT_OPENBCA` or `--openbca PATH` override it.
+Then, for any scenario with a `cost_test` section, one command does the run and the cost
+tests (about 40 s for the full-year example):
+
+```bash
+der-opt run examples/scenarios/dr_battery_annual.yaml --cost-tests            # output in out/dr_battery_annual
+der-opt openbca out/dr_battery_annual                                          # or: rerun only the cost tests
 ```
 
 This writes OpenBCA's input tables for each test into `out/dr/openbca/<test>/` (CSV,

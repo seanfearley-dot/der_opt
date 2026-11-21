@@ -300,6 +300,11 @@ def run(
     no_counterfactual: bool = typer.Option(
         False, "--no-counterfactual", help="Skip the scenario's counterfactual comparison"
     ),
+    cost_tests: bool = typer.Option(
+        False, "--cost-tests", help="Also run the cost tests in OpenBCA (needs a cost_test section; "
+        "output goes to -o, default out/<scenario name>)"),
+    openbca_path: Path | None = typer.Option(
+        None, "--openbca", help="OpenBCA checkout for --cost-tests (default: from `der-opt setup openbca`)"),
 ) -> None:
     """Solve a scenario and print a summary. If the scenario has a `counterfactual`
     section, also simulates that rule-based baseline and reports the value of
@@ -319,6 +324,8 @@ def run(
     from der_opt.simulation import CounterfactualSimulator
 
     if is_feeder_scenario(scenario):
+        if cost_tests:
+            raise typer.BadParameter("--cost-tests is for single-measure runs; feeder scenarios don't have cost tests yet")
         if duals:
             typer.echo("(feeder runs always report congestion prices; --duals adds nothing)")
         _run_feeder(scenario, output_dir, no_counterfactual)
@@ -336,6 +343,16 @@ def run(
 
     report = CheckReport()
     config = load_scenario_config(scenario)
+    if cost_tests:
+        if config.cost_test is None:
+            raise typer.BadParameter("--cost-tests needs a cost_test section in the scenario")
+        from der_opt.settings import openbca_dir
+
+        try:
+            openbca_dir(openbca_path)  # fail now, not after the solves
+        except FileNotFoundError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+        output_dir = output_dir or Path("out") / config.name
     with collect_data_warnings(report):
         premise = build_premise(config)
     dispatch, model, backend = premise.solve()
@@ -498,6 +515,8 @@ def run(
 
         plt.close("all")  # charts are saved; free them (matters when runs are scripted in a loop)
         typer.echo(f"\nWrote CSVs, charts and run_record.json to {output_dir}")
+        if cost_tests:
+            _cost_tests(output_dir, openbca_path)
 
 
 @app.command("fetch-lmp")
@@ -571,29 +590,39 @@ def check_data(
         raise typer.Exit(code=1)
     typer.echo("\nPasses the spec.")
 
-@app.command()
-def openbca(
-    run_dir: Path = typer.Argument(..., help="A `der-opt run -o` folder with a measure_impacts/ package"),
-    openbca_dir: Path = typer.Option(..., "--openbca", help="An OpenBCA checkout with its environment (`uv sync`)"),
-) -> None:
-    """Run the cost tests in OpenBCA from a measure impact package (docs/COST_TEST_SPEC.md):
-    writes OpenBCA's input tables for each test, runs OpenBCA's core on them, and reports
-    OpenBCA's results next to an SPM-convention re-tally of the same values."""
-    from der_opt.cost_test.openbca import OPENBCA_COMMIT, export_openbca, run_openbca, tally
+def _cost_tests(run_dir: Path, openbca_path: Path | None) -> None:
+    """Export the measure impact package in run_dir to OpenBCA, run it, print results."""
+    import json
+    import subprocess
 
+    from der_opt.cost_test.openbca import (
+        OPENBCA_COMMIT,
+        export_openbca,
+        run_openbca,
+        tally,
+    )
+    from der_opt.settings import openbca_dir
+
+    try:
+        checkout = openbca_dir(openbca_path)
+    except FileNotFoundError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    head = subprocess.run(["git", "-C", str(checkout), "rev-parse", "--short=7", "HEAD"],
+                          capture_output=True, text=True).stdout.strip()
     out = run_dir / "openbca"
     exported = export_openbca(run_dir / "measure_impacts", out)
-    typer.echo(f"Wrote OpenBCA inputs for {', '.join(e.test for e in exported)} to {out}")
-    run_openbca(exported, openbca_dir, out / "run_core.py")
+    typer.echo(f"\nCost tests: OpenBCA at {checkout} (commit {head or 'unknown'})")
+    if head and head != OPENBCA_COMMIT:
+        typer.echo(f"  Warning: the export was tested against OpenBCA {OPENBCA_COMMIT}, not {head}; "
+                   "check results, or run `der-opt setup openbca` to pin the tested commit")
+    run_openbca(exported, checkout, out / "run_core.py")
     table = tally(exported)
     table.to_csv(out / "cost_tests.csv", index=False)
-    typer.echo(f"\nCost tests (OpenBCA, mapping tested against commit {OPENBCA_COMMIT}); present values in $:")
+    typer.echo("  Present values in $:")
     typer.echo(f"  {'test':<5}{'benefits':>12}{'costs':>12}{'net':>12}{'ratio':>8}   SPM convention: {'benefits':>10}{'costs':>11}{'ratio':>8}")
     for _, r in table.iterrows():
         typer.echo(f"  {r['test']:<5}{r['openbca_benefits']:>12,.2f}{r['openbca_costs']:>12,.2f}{r['net_benefits']:>12,.2f}"
                    f"{r['openbca_ratio']:>8.2f}   {'':16}{r['spm_benefits']:>10,.2f}{r['spm_costs']:>11,.2f}{r['spm_ratio']:>8.2f}")
-    import json
-
     notes = {n for e in exported for n in json.loads((e.folder / "test.json").read_text(encoding="utf-8"))["notes"]}
     for note in sorted(notes):
         typer.echo(f"  Note: {note}")
@@ -601,8 +630,79 @@ def openbca(
     if (effect.abs() > 0.005).any():
         typer.echo("  If OpenBCA discounted annual cost fields at each test's rate, net benefits would change by: "
                    + ", ".join(f"{t} {'+' if v >= 0 else '-'}${abs(v):,.2f}" for t, v in effect.items() if abs(v) > 0.005))
-    typer.echo(f"\nWrote {out / 'cost_tests.csv'}; OpenBCA's own outputs are in {out}/<test>/output/")
+    typer.echo(f"  Wrote {out / 'cost_tests.csv'}; OpenBCA's own outputs are in {out}/<test>/output/")
 
+
+@app.command()
+def openbca(
+    run_dir: Path = typer.Argument(..., help="A `der-opt run -o` folder with a measure_impacts/ package"),
+    openbca_path: Path | None = typer.Option(
+        None, "--openbca", help="An OpenBCA checkout (default: the one `der-opt setup openbca` set up)"),
+) -> None:
+    """Run the cost tests in OpenBCA from a measure impact package (docs/COST_TEST_SPEC.md):
+    writes OpenBCA's input tables for each test, runs OpenBCA's core on them, and reports
+    OpenBCA's results next to an SPM-convention re-tally of the same values."""
+    _cost_tests(run_dir, openbca_path)
+
+
+setup_app = typer.Typer(help="One-time setup of tools der-opt works with")
+app.add_typer(setup_app, name="setup")
+
+
+@setup_app.callback()
+def _setup() -> None:
+    """One-time setup of tools der-opt works with."""
+    return
+
+
+@setup_app.command("openbca")
+def setup_openbca(
+    directory: Path | None = typer.Option(None, "--dir", help="Where to put OpenBCA (default ~/.der-opt/openbca)"),
+    commit: str | None = typer.Option(None, help="Commit to check out (default: the one the export was tested against)"),
+) -> None:
+    """Install OpenBCA for `der-opt openbca` and `der-opt run --cost-tests`: clone it, check
+    out the commit der-opt's export was tested against, install its Python environment
+    with uv, and remember where it is."""
+    import subprocess
+
+    from der_opt.settings import (
+        DEFAULT_OPENBCA_DIR,
+        OPENBCA_REPO,
+        OPENBCA_TESTED_COMMIT,
+        find_uv,
+        load_settings,
+        save_settings,
+    )
+
+    target = (directory or DEFAULT_OPENBCA_DIR).expanduser().resolve()
+    commit = commit or OPENBCA_TESTED_COMMIT
+    uv = find_uv()
+    if uv is None:
+        raise typer.BadParameter("uv isn't installed; OpenBCA uses it for its environment. Install it "
+                                 "(https://docs.astral.sh/uv/getting-started/installation/) and run this again")
+
+    def step(description: str, command: list[str], cwd: Path | None = None) -> None:
+        typer.echo(f"  {description}...")
+        result = subprocess.run(command, cwd=cwd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise typer.BadParameter(f"{description} failed:\n{(result.stderr or result.stdout)[-1500:]}")
+
+    typer.echo(f"Setting up OpenBCA in {target}")
+    if (target / ".git").is_dir():
+        step("fetching updates", ["git", "-C", str(target), "fetch", "--quiet", "origin"])
+    elif target.exists() and any(target.iterdir()):
+        raise typer.BadParameter(f"{target} exists and isn't an OpenBCA checkout; choose another --dir")
+    else:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        step("cloning OpenBCA", ["git", "clone", "--quiet", OPENBCA_REPO, str(target)])
+    step(f"checking out {commit}", ["git", "-C", str(target), "checkout", "--quiet", "--detach", commit])
+    step("installing its environment (uv sync)", [uv, "sync", "--quiet"], cwd=target)
+    settings = load_settings()
+    settings["openbca"] = {"path": str(target), "commit": commit}
+    saved = save_settings(settings)
+    typer.echo(f"Done. Remembered in {saved}; `der-opt openbca` and `der-opt run --cost-tests` use it.")
+    if commit != OPENBCA_TESTED_COMMIT:
+        typer.echo(f"Warning: der-opt's export was tested against {OPENBCA_TESTED_COMMIT}, not {commit}.")
 
 if __name__ == "__main__":
     app()
