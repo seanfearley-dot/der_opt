@@ -551,6 +551,10 @@ settlement) are provisional.
 
 ## Avoided costs and the measure impact package
 
+How the pieces run, and in what order, is drawn in two sequence diagrams in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): `der-opt run` with DR and cost tests, and
+`der-opt openbca`.
+
 **Avoided cost sets** ([docs/AVOIDED_COST_SPEC.md](docs/AVOIDED_COST_SPEC.md), v1.0) hold
 an ACC vintage or your own curves in one format. Each set is a folder:
 - `manifest.yaml`: source, dollars, years, and each component classed `energy` or
