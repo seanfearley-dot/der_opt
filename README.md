@@ -142,10 +142,12 @@ der-opt validate scenarios/home_a.yaml
 `lmp-battery` (`--price`). It fills in what the options give it, including the premise
 when the time series file has only one and the run period from the time series (or
 price) file, and writes `TODO` for the rest: incentives, costs, discount rates, a
-baseline territory. With `--library DIR` the shared parts (time grid, battery, prices
-or billing, DR program, cost-test settings) go into fragment files under `DIR` that
-the scenario extends. A second scenario made with the same library reuses those files
-as they are, edits included.
+baseline territory. With `--library DIR` the shared parts (time grid, devices,
+prices or billing, meter limits, counterfactual, DR program, cost-test settings) go
+into fragment files under `DIR` that the scenario extends. A block already in `DIR` is
+used as it is, edits included, so a second scenario made with the same library shares
+them. `--library examples/library` uses the starter library (below) and says which of
+its blocks hold illustrative values.
 
 `der-opt validate` runs every check that doesn't need a solve, in about a second:
 what the scenario extends, the schema, `TODO`s left (naming the file each is in),
@@ -166,19 +168,34 @@ extends:
 name: home_a
 devices:
   - {type: solar, name: solar, params: {available_kw: {source: timeseries, path: ../data/timeseries.csv, premise_id: home_a, column: pv_kw}}}
+  - name: battery # the block's battery, with one setting changed
+    params: {charge_sources: [solar]}
 ```
 
 Fragments are any part of a scenario, and can extend others. They merge in order, then
-the scenario's own content on top: mappings key by key, `devices` by `name` (a later
-device with the same name replaces the earlier one; new names are added), every other
-list replaced whole, and `null` removes an inherited key (`counterfactual: null`). A
-device can charge from one listed after it. Runs write `scenario.resolved.yaml`, the
+the scenario's own content on top:
+- mappings key by key;
+- `devices` by `name`, a device with an inherited name merging into it setting by
+  setting (one of another `type` replaces it), new names added;
+- every other list replaced whole;
+- `null` removes an inherited key (`counterfactual: null`,
+  `soc_final_min_frac: null`).
+
+A device can charge from one listed after it. Runs write `scenario.resolved.yaml`, the
 merged scenario with every path absolute (it runs as it is), and `run_record.json`
 records a SHA-256 of every fragment. Spec:
 [docs/SCENARIO_COMPOSITION_SPEC.md](docs/SCENARIO_COMPOSITION_SPEC.md).
 
 Paths written the old way (relative to the folder you run from) still work in this
 release, with a warning naming the file, key and the path to write instead.
+
+**The starter library**, [examples/library/](examples/library/README.md), has 32
+blocks: time grids, batteries, a commuter EV (V2X or charge-only), a thermostat, a
+flexible load, retail, demand-charge and LMP prices, the bill objective, meter limits,
+counterfactuals, NBT and NEM2 billing, DR programs and test events, avoided costs, cost
+tests, and feeder house defaults. Every example scenario is built from it, and the
+tests run every block. Its `# illustrative` values are placeholders: copy the folder
+and set your own.
 
 Or copy one of the files in `examples/scenarios/` and edit it.
 
@@ -895,6 +912,6 @@ src/der_opt/
   scenarios/     YAML schema, loader, extends and paths, validate, templates (der-opt new), feeder scenarios
   viz/           heatmap, dispatch, value stack, duals, comparison, feeder loading charts
   cli/           der-opt CLI
-examples/        Python-API scripts, scenarios/ (YAML), data/ (NBT rates, sample tariff)
+examples/        Python-API scripts, scenarios/ (YAML), library/ (scenario building blocks), data/
 tests/           unit + golden-file integration tests
 ```

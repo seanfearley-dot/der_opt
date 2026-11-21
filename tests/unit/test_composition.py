@@ -62,6 +62,12 @@ def test_merge_rules():
     merged = merge(base, over)
     assert merged["a"] == {"x": 1, "y": 3}  # mappings merge key by key
     assert merged["devices"] == [{"name": "battery", "p": 9}, {"name": "ev", "p": 2}, {"name": "solar", "p": 0}]
+    # a device with an inherited name merges into it setting by setting; null removes one
+    block = {"devices": [{"type": "battery", "name": "battery", "params": {"eta_charge": 0.95, "soc_final_min_frac": 0.5}}]}
+    tweak = {"devices": [{"name": "battery", "params": {"eta_charge": 0.96, "soc_final_min_frac": None}}]}
+    assert merge(block, tweak)["devices"] == [{"type": "battery", "name": "battery", "params": {"eta_charge": 0.96}}]
+    other = {"devices": [{"type": "ev_v2x", "name": "battery", "params": {}}]}
+    assert merge(block, other)["devices"] == other["devices"]  # another type replaces it
     assert merged["value_streams"] == [{"type": "two"}]  # other lists replace
     assert "counterfactual" not in merged  # null removes an inherited key
     assert merge({}, {"poi_limit_kw": None}) == {"poi_limit_kw": None}  # nothing inherited: passed through
@@ -247,7 +253,7 @@ def test_new_dr_battery_with_a_library_validates_once_filled_in(tmp_path):
             "--avoided-costs", str(project / "data/synthetic_2026"), "--library", str(project / "library")]
     first = runner.invoke(app, ["new", "dr-battery", str(project / "scen" / "home_a.yaml"), *args])
     assert first.exit_code == 0, first.output
-    assert "5 TODOs to fill in" in first.output and first.output.count("new fragment") == 5
+    assert "5 TODOs to fill in" in first.output and first.output.count("new fragment") == 7
     scenario = project / "scen" / "home_a.yaml"
     text = scenario.read_text(encoding="utf-8")
     assert "path: ../data/spec_sample/annual_home.csv, premise_id: home_a" in text  # relative, premise found
@@ -267,7 +273,7 @@ def test_new_dr_battery_with_a_library_validates_once_filled_in(tmp_path):
 
     # a second home reuses the library as it is
     second = runner.invoke(app, ["new", "dr-battery", str(project / "scen" / "home_b.yaml"), *args])
-    assert second.output.count("uses existing fragment") == 5 and "new fragment" not in second.output
+    assert second.output.count("uses existing fragment") == 7 and "new fragment" not in second.output
     assert "incentive_per_kwh: 1.0" in program.read_text(encoding="utf-8")
     again = runner.invoke(app, ["new", "dr-battery", str(scenario), *args])
     assert again.exit_code != 0 and "--force" in _flat(again.output)

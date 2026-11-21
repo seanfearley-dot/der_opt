@@ -1,0 +1,20 @@
+# der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# A summer peak DR program paying per kWh of reduction, with randomized events
+# (docs/DR_CAPACITY_SPEC.md).
+dr:
+  customer_class: residential # 5-in-10 settlement baseline
+  measure_devices: [battery] # R3 = the home without the battery
+  program:
+    program_id: summer_peak
+    season: [5, 6, 7, 8, 9, 10] # counted capacity is reported for every one of these months
+    day_types: [weekday]
+    window: "16:00-21:00"
+    min_hours: 1
+    max_hours: 3 # shadow events (counted capacity) last this long
+    max_events_per_month: 4
+    max_consecutive_days: 2
+    response: incentive
+    incentive_per_kwh: 1.00 # illustrative
+    capacity_reference: all # R2, R3 and S side by side
+  events:
+    random: {events_per_month: {6: 2, 7: 3, 8: 3, 9: 2}, seed: 1, hours: 3, min_days_between: 1}

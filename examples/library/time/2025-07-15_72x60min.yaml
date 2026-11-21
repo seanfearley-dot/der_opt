@@ -1,0 +1,5 @@
+# der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+time_grid:
+  resolution_minutes: 60
+  horizon_steps: 72
+  start: "2025-07-15T00:00:00"

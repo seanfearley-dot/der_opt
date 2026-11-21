@@ -1,25 +1,36 @@
 # Battery + solar for a full year on real LBNL load/PV, real E-ELEC import rates, and
 # real NBT export rates, billed through a 12-cycle Relevant Period with true-up.
 #   der-opt run examples/scenarios/battery_solar_lbnl_nbt_annual.yaml -o out/annual
-# Takes about a minute (exclusive_import_export adds a yes/no per hour; without it
-# the solve is ~4 s, but the bill objective then imports and exports in the same
-# hour on some summer evenings, when the delivery export credit beats the delivery
+# Takes about a minute (no simultaneous import and export adds a yes/no per hour;
+# without it the solve is ~4 s, but the bill objective then imports and exports in the
+# same hour on some summer evenings, when the delivery export credit beats the delivery
 # import rate). Needs /Users/seanearley/Documents/LBNL_Phase_4.
 #
 # This household exports more than it uses. Optimizing export value (energy_arbitrage)
 # chases generation credit that has nothing left to offset and makes the bill worse
-# than a plain self-consumption battery; optimizing the bill (nbt_bill, below) doesn't.
-# See the README's "Billing" section.
+# than a plain self-consumption battery; optimizing the bill doesn't. See the README's
+# "Billing" section.
 #
 # Net Surplus Compensation isn't computed here: add nsc_rate_per_kwh and
 # nsc_debit_rate_per_kwh to billing.program (PG&E publishes both monthly).
+# The naive alternative to optimizing the bill values every exported kWh at the full
+# export rate; to see it, replace extends' value_streams/bill.yaml with:
+#   value_streams:
+#     - type: energy_arbitrage
+#       params:
+#         import_price: {type: retail_tariff, path: ../data/tariffs/pge_e_elec_2026-06.yaml}
+#         export_price: {type: nbt_export, csv_path: ../data/pge_nbt_eec_2026.csv, adder_per_kwh: 0.0088}
+
+extends:
+  - ../library/time/year_2026.yaml
+  - ../library/devices/battery_13kwh.yaml
+  - ../library/value_streams/bill.yaml
+  - ../library/meter/panel_15kw.yaml
+  - ../library/meter/no_simultaneous_import_export.yaml
+  - ../library/counterfactual/battery_self_consumption.yaml
+  - ../library/billing/pge_e_elec_2026-06_nbt.yaml
 
 name: lbnl_reference_house_annual
-
-time_grid:
-  resolution_minutes: 60
-  horizon_steps: 8760 # one year
-  start: "2026-01-01T00:00:00"
 
 devices:
   - type: solar
@@ -29,57 +40,18 @@ devices:
         source: lbnl_pv
         scenario_dir: /Users/seanearley/Documents/LBNL_Phase_4/anonymized-1in2-midDemand-with_EE_FS-2025
         cluster_name: res-pge-res_unknown-allSize-hot_dry-nonCare-NoLCA-AllDay-0_50pct
-        start_hour_ending: 1 # Jan 1
-
-  - type: battery
-    name: battery
+        start_hour_ending: 1
+  - name: battery # library battery_13kwh, changed:
     params:
-      capacity_kwh: 13.5
-      p_max_charge_kw: 5.0
-      p_max_discharge_kw: 5.0
       eta_charge: 0.96
       eta_discharge: 0.96
-      soc_init_frac: 0.5
-      degradation_cost_per_kwh: 0.015
-      # no soc_final_min_frac: the self-consumption counterfactual can't be held to a
-      # terminal floor, so neither run gets one -- same starting charge, end state
-      # free (der-opt run warns if they end differently).
-      # (charge_sources: [solar] would restrict this battery to charging only from
-      # concurrent solar generation; see the README's device reference.)
-
-value_streams:
-  # Optimize the bill itself (the billing section below), not export value: NBT's
-  # credit limits are in the objective, so stranded credit isn't counted as value.
-  # To see what the naive objective does instead, swap this for:
-  #   - type: energy_arbitrage
-  #     params:
-  #       import_price: {type: retail_tariff, path: ../data/tariffs/pge_e_elec_2026-06.yaml}
-  #       export_price: {type: nbt_export, csv_path: ../data/pge_nbt_eec_2026.csv, adder_per_kwh: 0.0088}
-  - type: nbt_bill
+      # no terminal floor: the self-consumption counterfactual can't be held to one, so
+      # neither run gets one -- same starting charge, end state free (der-opt run warns
+      # if they end differently)
+      soc_final_min_frac: null
 
 external_load:
   source: lbnl_gross_load
   scenario_dir: /Users/seanearley/Documents/LBNL_Phase_4/anonymized-1in2-midDemand-with_EE_FS-2025
   cluster_name: res-pge-res_unknown-allSize-hot_dry-nonCare-NoLCA-AllDay-0_50pct
   start_hour_ending: 1
-
-poi_limit_kw: 15.0
-exclusive_import_export: true
-
-# The baseline to compare against: a battery running plain self-consumption (charge
-# from solar surplus, discharge to cover load, no price awareness) -- roughly what an
-# off-the-shelf home battery does. Solar isn't listed, so it generates everything
-# available, as it would in reality.
-counterfactual:
-  policies:
-    battery: {type: self_consumption}
-
-# Bill both runs the way PG&E would: E-ELEC charges, NBT export credits (generation and
-# delivery halves offsetting only their own charges), ACC Plus, base services charge.
-billing:
-  tariff: ../data/tariffs/pge_e_elec_2026-06.yaml
-  income_tier: 3
-  program:
-    type: nbt
-    export_rates_csv: ../data/pge_nbt_eec_2026.csv
-    acc_plus_per_kwh: 0.0088

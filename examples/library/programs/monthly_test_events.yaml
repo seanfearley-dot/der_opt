@@ -1,0 +1,10 @@
+# der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# Add after a program block: makes the program year-round and replaces its events with
+# one 2-hour test event on the first Tuesday of every month.
+dr:
+  program:
+    season: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+  events:
+    random: null # removes the program block's events
+    schedule:
+      - {start: "17:00", hours: 2, event_type: test, nth_weekday: {n: 1, weekday: tue}}

@@ -46,6 +46,7 @@ class Written:
     scenario: Path
     fragments_written: list[Path] = field(default_factory=list)
     fragments_kept: list[Path] = field(default_factory=list)
+    illustrative: list[Path] = field(default_factory=list)  # reused blocks with illustrative values
     todos: int = 0
 
 
@@ -109,6 +110,8 @@ def _year_grid(year: int) -> dict:
 
 
 # --- the templates -------------------------------------------------------------------
+# Fragment names match the blocks in examples/library/, so `--library examples/library`
+# reuses those blocks (examples/library/README.md).
 
 TIME = Section("""\
 time_grid:
@@ -140,25 +143,34 @@ devices:
       available_kw: {source: timeseries, path: $timeseries, premise_id: $premise, column: pv_kw}
 
 external_load: {source: timeseries, path: $timeseries, premise_id: $premise, column: load_kw}
-poi_limit_kw: 20
 """)
 
+PANEL_20KW = Section("""\
+poi_limit_kw: 20 # both directions
+""", "meter/panel_20kw.yaml")
+
+NO_SIMULTANEOUS = Section("""\
+# No importing and exporting in the same step: needed whenever export can pay more than
+# import (NBT, LMP). Adds a yes/no per step (a MILP).
+exclusive_import_export: true
+""", "meter/no_simultaneous_import_export.yaml")
+
 SELF_CONSUMPTION = Section("""\
-# R1, the counterfactual: what the battery does without optimization
+# R1 for a battery: charge from solar surplus, discharge to cover load, no price awareness
 counterfactual:
   policies:
     battery: {type: self_consumption}
-""")
+""", "counterfactual/battery_self_consumption.yaml")
 
 RETAIL_PRICES = Section("""\
-# E-ELEC-style retail import; a flat export price keeps this a fast LP (an NBT export
-# rate above import needs exclusive_import_export, a MILP)
+# Retail import; a flat export price keeps this a fast LP (an NBT export rate above
+# import needs exclusive_import_export, a MILP)
 value_streams:
   - type: energy_arbitrage
     params:
       import_price: {type: retail_tariff, path: $tariff}
       export_price: {type: constant, price: 0.05}
-""", "prices/${tariff_name}_import.yaml")
+""", "value_streams/${tariff_name}_import.yaml")
 
 DR_PROGRAM = Section("""\
 # docs/DR_CAPACITY_SPEC.md
@@ -198,10 +210,10 @@ cost_test:
 """, "cost_tests/$cost_name.yaml")
 
 BILL_OBJECTIVE = Section("""\
+# Optimize the bill itself (the billing section): nbt_bill or nem2_bill, by its program.
 value_streams:
-  - type: bill # the bill itself: nbt_bill or nem2_bill, by the billing program
-exclusive_import_export: true # no importing and exporting in the same hour (a MILP)
-""")
+  - type: bill
+""", "value_streams/bill.yaml")
 
 BILLING = Section("""\
 billing:
@@ -224,21 +236,29 @@ premise_data:
 feeder:
   value_streams:
     - {type: capacity_deferral, element: $root_element, value_per_kw: $TODO} # $$/kW of peak avoided
+
+house_defaults:
+  exclusive_import_export: true # no importing and exporting in the same hour
 """)
 
-FEEDER_DEFAULTS = Section("""\
+HOMES_BILL = Section("""\
+# Every house optimizes its own bill, against rule-based EVs and self-consuming batteries.
 house_defaults:
   value_streams:
     - type: bill
-  exclusive_import_export: true
-  device_params:
-    battery: {eta_charge: 0.96, eta_discharge: 0.96, degradation_cost_per_kwh: 0.015, charge_sources: [solar]}
-    ev: {degradation_cost_per_kwh: 0.0}
   counterfactual:
     policies:
       ev: {type: rule_based_ev}
       battery: {type: self_consumption}
-""", "defaults/homes_bill.yaml")
+""", "feeder/homes_bill.yaml")
+
+DEVICE_PARAMS = Section("""\
+# Device behavior for houses built from premise_data (sizes come from premises.csv)
+house_defaults:
+  device_params:
+    battery: {eta_charge: 0.96, eta_discharge: 0.96, degradation_cost_per_kwh: 0.015, charge_sources: [solar]}
+    ev: {degradation_cost_per_kwh: 0.0}
+""", "feeder/device_params.yaml")
 
 GRID_BATTERY = Section("""\
 devices:
@@ -256,20 +276,25 @@ devices:
 """, "devices/battery_1mw_4mwh.yaml")
 
 LMP_PRICES = Section("""\
+# a price CSV from `der-opt fetch-lmp` (timestamp, lmp_per_kwh), both directions
 value_streams:
   - type: energy_arbitrage
-    params: # a price CSV from `der-opt fetch-lmp` (timestamp, lmp_per_kwh)
+    params:
       import_price: {type: csv, path: $price, column: lmp_per_kwh}
       export_price: {type: csv, path: $price, column: lmp_per_kwh}
+""", "value_streams/${price_name}.yaml")
 
+INTERCONNECTION_1MW = Section("""\
 poi_limit_kw: 1000 # no external_load: a standalone battery serves no load
-""")
+""", "meter/interconnection_1mw.yaml")
 
 SECTIONS = {
-    "dr-battery": [TIME, HOME_BATTERY, HOME_SOLAR_AND_LOAD, RETAIL_PRICES, SELF_CONSUMPTION, DR_PROGRAM, COST_TEST],
-    "home-bill": [TIME, HOME_BATTERY, HOME_SOLAR_AND_LOAD, BILL_OBJECTIVE, SELF_CONSUMPTION, BILLING],
-    "feeder-from-files": [TIME, FEEDER_DATA, FEEDER_DEFAULTS],
-    "lmp-battery": [TIME, GRID_BATTERY, LMP_PRICES],
+    "dr-battery": [TIME, HOME_BATTERY, HOME_SOLAR_AND_LOAD, RETAIL_PRICES, PANEL_20KW, SELF_CONSUMPTION,
+                   DR_PROGRAM, COST_TEST],
+    "home-bill": [TIME, HOME_BATTERY, HOME_SOLAR_AND_LOAD, BILL_OBJECTIVE, PANEL_20KW, NO_SIMULTANEOUS,
+                  SELF_CONSUMPTION, BILLING],
+    "feeder-from-files": [TIME, FEEDER_DATA, HOMES_BILL, DEVICE_PARAMS],
+    "lmp-battery": [TIME, GRID_BATTERY, LMP_PRICES, INTERCONNECTION_1MW],
 }
 PATH_VALUES = ("timeseries", "tariff", "export_rates", "avoided_costs", "price", "premises", "network", "tariff_dir")
 
@@ -283,7 +308,8 @@ def _values(template: str, opts: Options) -> tuple[dict[str, str], dict[str, Pat
         grid = None  # a whole year: named as one
     if grid is not None:
         start, resolution, steps = grid
-        time_name = f"{start[:10]}_{steps}x{resolution}min"
+        hour = "" if start[11:] == "00:00:00" else f"T{start[11:13]}"
+        time_name = f"{start[:10]}{hour}_{steps}x{resolution}min"
     else:
         g = _year_grid(year)
         start, resolution, steps = g["start"], g["resolution"], g["steps"]
@@ -308,6 +334,7 @@ def _values(template: str, opts: Options) -> tuple[dict[str, str], dict[str, Pat
         "program_block": program_block, "baseline_line": baseline_line,
         "tariff_name": opts.tariff.stem if opts.tariff else "tariff",
         "cost_name": opts.avoided_costs.name if opts.avoided_costs else "cost_test",
+        "price_name": opts.price.stem if opts.price else "lmp",
         "root_element": _root_element(opts.network) or TODO,
     }
     paths = {"timeseries": opts.timeseries, "tariff": opts.tariff, "export_rates": opts.export_rates,
@@ -345,21 +372,48 @@ def _fill(text: str, plain: dict, paths: dict, folder: Path) -> str:
     return Template(once).safe_substitute(values)  # program_block carries a path of its own
 
 
+def _blocks(text: str) -> list[tuple[str, list[str]]]:
+    """A section's top-level keys, each with its lines. A comment at the margin belongs
+    to the key below it; indented lines and blank lines to the key above."""
+    blocks: list[tuple[str, list[str]]] = []
+    pending: list[str] = []
+    for line in text.rstrip("\n").splitlines():
+        if line.startswith("#"):
+            pending.append(line)
+        elif line and not line[0].isspace():
+            blocks.append((line.split(":")[0], [*pending, line]))
+            pending = []
+        elif pending:
+            pending.append(line)
+        elif blocks:
+            blocks[-1][1].append(line)
+    if pending and blocks:
+        blocks[-1][1].extend(pending)
+    return blocks
+
+
 def _merge_texts(sections: list[str]) -> str:
-    """Sections as one file; two `devices:` lists become one."""
-    out: list[str] = []
-    seen_devices = False
+    """Sections as one file. A key in several sections (`devices:`, `house_defaults:`)
+    becomes one, with each section's entries under it."""
+    order: list[str] = []
+    merged: dict[str, list[str]] = {}
     for text in sections:
-        lines = text.rstrip("\n").splitlines()
-        if lines and lines[0] == "devices:" and seen_devices:
-            lines = lines[1:]
-            while out and out[-1] == "":
-                out.pop()
-        elif any(line == "devices:" for line in lines):
-            seen_devices = True
-        out.extend(lines)
-        out.append("")
-    return "\n".join(out)
+        for key, lines in _blocks(text):
+            while lines and lines[-1] == "":
+                lines = lines[:-1]
+            if key in merged:
+                body = [f"  {line}" if line.startswith("#") else line for line in lines if line.strip() != f"{key}:"]
+                merged[key].extend(body)
+            else:
+                order.append(key)
+                merged[key] = list(lines)
+    return "\n\n".join("\n".join(merged[key]) for key in order) + "\n"
+
+
+def _has_illustrative_values(path: Path) -> bool:
+    """A value commented `# illustrative` (the starter library marks its placeholders so)."""
+    return any("illustrative" in line.split("#", 1)[1] for line in path.read_text(encoding="utf-8").splitlines()
+               if "#" in line and not line.lstrip().startswith("#"))
 
 
 def write_template(template: str, target: Path, opts: Options, library: Path | None = None,
@@ -379,14 +433,18 @@ def write_template(template: str, target: Path, opts: Options, library: Path | N
     extends: list[str] = []
     for section in SECTIONS[template]:
         if library is not None and section.fragment is not None:
-            fragment = library / Template(section.fragment).substitute(plain)
-            text = _fill(section.text, plain, paths, fragment.parent)
+            values = plain
+            if section is BILLING and plain["baseline_line"]:
+                # the territory is the customer's: it goes in the scenario, not the block
+                values = plain | {"baseline_line": ""}
+                own.append("billing:\n" + plain["baseline_line"])
+            fragment = library / Template(section.fragment).substitute(values)
             if fragment.exists():
                 written.fragments_kept.append(fragment)
             else:
                 fragment.parent.mkdir(parents=True, exist_ok=True)
                 note = f"# A der-opt scenario fragment (`der-opt new {template}`); scenarios use it with `extends`.\n"
-                fragment.write_text(note + text, encoding="utf-8")
+                fragment.write_text(note + _fill(section.text, values, paths, fragment.parent), encoding="utf-8")
                 written.fragments_written.append(fragment)
             extends.append(_relative(fragment, target.parent))
         else:
@@ -397,6 +455,12 @@ def write_template(template: str, target: Path, opts: Options, library: Path | N
     text = header + body + _merge_texts(own)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(text, encoding="utf-8")
-    everything = [text] + [f.read_text(encoding="utf-8") for f in written.fragments_written + written.fragments_kept]
-    written.todos = sum(t.count(TODO) for t in everything) - text.count(f"Replace every {TODO}")
+    written.illustrative = [f for f in written.fragments_kept if _has_illustrative_values(f)]
+    from der_opt.scenarios.compose import CompositionError, compose_scenario
+    from der_opt.scenarios.validate import _placeholders
+
+    try:
+        written.todos = len(_placeholders(compose_scenario(target)))
+    except CompositionError:
+        written.todos = text.count(TODO) - 1
     return written

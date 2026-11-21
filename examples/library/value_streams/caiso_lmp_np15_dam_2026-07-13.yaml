@@ -1,0 +1,8 @@
+# der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# Buying and selling at the CAISO NP15 day-ahead price (from `der-opt fetch-lmp`), for
+# the week in ../time/2026-07-13_168x60min.yaml.
+value_streams:
+  - type: energy_arbitrage
+    params:
+      import_price: {type: csv, path: ../../data/caiso_lmp_np15_dam_2026-07-13.csv, column: lmp_per_kwh}
+      export_price: {type: csv, path: ../../data/caiso_lmp_np15_dam_2026-07-13.csv, column: lmp_per_kwh}

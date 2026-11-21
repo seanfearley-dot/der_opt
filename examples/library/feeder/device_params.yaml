@@ -1,0 +1,6 @@
+# der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# Device behavior for houses built from premise_data (sizes come from premises.csv)
+house_defaults:
+  device_params:
+    battery: {eta_charge: 0.96, eta_discharge: 0.96, degradation_cost_per_kwh: 0.015, charge_sources: [solar]}
+    ev: {degradation_cost_per_kwh: 0.0}

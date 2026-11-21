@@ -9,12 +9,12 @@
 # battery or an EV as premises.csv sizes them. Tariffs and export programs are per
 # premise; device behavior is set here, under house_defaults.device_params.
 
-name: feeder_from_files
+extends:
+  - ../library/time/2026-07-13T12_72x60min.yaml
+  - ../library/feeder/homes_bill.yaml # each home's own bill: nbt_bill or nem2_bill by its export program
+  - ../library/feeder/device_params.yaml # battery and EV behavior; sizes come from premises.csv
 
-time_grid:
-  resolution_minutes: 60
-  horizon_steps: 72 # three days, noon to noon
-  start: "2026-07-13T12:00:00"
+name: feeder_from_files
 
 premise_data:
   premises: ../data/spec_sample/premises.csv
@@ -31,13 +31,4 @@ feeder:
     - {type: capacity_deferral, element: tx_1, value_per_kw: 40.0}
 
 house_defaults:
-  value_streams:
-    - type: bill # each home's own bill: nbt_bill or nem2_bill by its export program
   exclusive_import_export: true # no importing and exporting in the same hour (each home needs both limits)
-  device_params:
-    battery: {eta_charge: 0.96, eta_discharge: 0.96, degradation_cost_per_kwh: 0.015, charge_sources: [solar]}
-    ev: {degradation_cost_per_kwh: 0.0}
-  counterfactual:
-    policies:
-      ev: {type: rule_based_ev}
-      battery: {type: self_consumption}

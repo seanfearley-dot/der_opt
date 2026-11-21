@@ -1,0 +1,4 @@
+# der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# No importing and exporting in the same step: needed whenever export can pay more than
+# import (NBT, LMP). Adds a yes/no per step (a MILP).
+exclusive_import_export: true

@@ -1,0 +1,5 @@
+# der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# First-year screening values from the synthetic set (not ACC values), without a
+# cost_test section (docs/AVOIDED_COST_SPEC.md)
+avoided_costs:
+  set: ../../data/avoided_costs/synthetic_2026

@@ -1,0 +1,15 @@
+# der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# Cost-test settings and the synthetic avoided cost set (docs/COST_TEST_SPEC.md).
+# Costs and rates are illustrative.
+cost_test:
+  scope: control # measure = optimization + DR participation, against R1
+  start_year: 2027
+  measure_life_years: 10
+  avoided_costs: {set: ../../data/avoided_costs/synthetic_2026}
+  capacity_value: {reference: R2, basis: import, measure: counted}
+  net_to_gross: 1.0
+  bill_escalation: 0.03
+  cost_escalation: 0.025
+  participant_costs: {upfront: 300, annual_om: 0} # illustrative
+  program_costs: {admin_upfront: 75, admin_annual: 15, upfront_incentive: 0} # illustrative
+  discount_rates: {utility: 0.075, participant: 0.10, societal: 0.03} # illustrative

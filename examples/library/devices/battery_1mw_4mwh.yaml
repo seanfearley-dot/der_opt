@@ -1,0 +1,13 @@
+# der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+devices:
+  - type: battery
+    name: battery
+    params:
+      capacity_kwh: 4000 # 1 MW / 4 MWh
+      p_max_charge_kw: 1000
+      p_max_discharge_kw: 1000
+      eta_charge: 0.94
+      eta_discharge: 0.94
+      soc_init_frac: 0.5
+      soc_final_min_frac: 0.5 # end where it started, so the profit is real
+      degradation_cost_per_kwh: 0.005 # illustrative

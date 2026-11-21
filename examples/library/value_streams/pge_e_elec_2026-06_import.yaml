@@ -1,0 +1,8 @@
+# der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# E-ELEC retail import; a flat export price keeps the run a fast LP (an NBT export rate
+# above import needs exclusive_import_export, a MILP).
+value_streams:
+  - type: energy_arbitrage
+    params:
+      import_price: {type: retail_tariff, path: ../../data/tariffs/pge_e_elec_2026-06.yaml}
+      export_price: {type: constant, price: 0.05} # illustrative

@@ -645,6 +645,9 @@ def new(
         typer.echo(f"  new fragment {fragment}")
     for fragment in written.fragments_kept:
         typer.echo(f"  uses existing fragment {fragment} (left as it is)")
+    if written.illustrative:
+        typer.echo(f"Note: {len(written.illustrative)} of the fragments it uses have values marked illustrative "
+                   "(e.g. the starter library's); check them before trusting results")
     if written.todos:
         typer.echo(f"{written.todos} TODO{'s' if written.todos != 1 else ''} to fill in; then: der-opt validate {target}")
     else:

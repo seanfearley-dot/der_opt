@@ -3,13 +3,31 @@
 #
 # Needs /Users/seanearley/Documents/LBNL_Phase_4 and
 # /Users/seanearley/claude runs/ev-daily-charging-model (neither is part of this repo).
+# For an EV described by a daily pattern instead, see ev_commuter_annual.yaml.
+#
+# The baseline: charge at full power the moment it's plugged in until full, never
+# discharge -- what a plug-and-forget Level 2 charger does.
+#
+# NOTE: this home has no solar. NBT is for customers with renewable generation, so
+# whether V2X exports from a no-solar home would be compensated at NBT rates at all is an
+# open question -- treat the export side of this example as an assumption.
+# The naive alternative to optimizing the bill values every exported kWh at the full
+# export rate; to see it, replace extends' value_streams/bill.yaml with:
+#   value_streams:
+#     - type: energy_arbitrage
+#       params:
+#         import_price: {type: retail_tariff, path: ../data/tariffs/pge_e_elec_2026-06.yaml}
+#         export_price: {type: nbt_export, csv_path: ../data/pge_nbt_eec_2026.csv, adder_per_kwh: 0.0088}
+
+extends:
+  - ../library/time/2025-07-15_72x60min.yaml
+  - ../library/value_streams/bill.yaml
+  - ../library/meter/panel_15kw.yaml
+  - ../library/meter/no_simultaneous_import_export.yaml
+  - ../library/counterfactual/ev_plug_and_charge.yaml
+  - ../library/billing/pge_e_elec_2026-06_nbt.yaml
 
 name: v2x_reference_house
-
-time_grid:
-  resolution_minutes: 60
-  horizon_steps: 72 # 3 days
-  start: "2025-07-15T00:00:00"
 
 devices:
   - type: ev_v2x
@@ -25,8 +43,8 @@ devices:
         source: ev_connected_schedule
         arrivals_csv: /Users/seanearley/claude runs/ev-daily-charging-model/excel_build/raw_arrivals.csv
         departures_csv: /Users/seanearley/claude runs/ev-daily-charging-model/excel_build/raw_departures.csv
-      # one departure per day (3 days = 3 mornings); each needs its own entry -- see
-      # V2XVehicle's docstring on why a single value would silently only protect day 1.
+      # one departure per day (3 days = 3 mornings); written out so they match the EV
+      # model's departure hour (left out, they'd be found from `connected` the same way)
       departure_period: [9, 33, 57]
       # 0.8 = the realistic customer-expectation target (see
       # integrations/ev_profile.charging_device_params), not the bare statistical
@@ -36,45 +54,8 @@ devices:
       soc_final_min_frac: 0.8
       degradation_cost_per_kwh: 0.02 # illustrative, not sourced from the EV model project
 
-value_streams:
-  # Optimize the bill in the billing section below, NBT credit limits included.
-  # The naive alternative, which values every exported kWh at the full export rate:
-  #   - type: energy_arbitrage
-  #     params:
-  #       import_price:
-  #         type: retail_tariff # PG&E E-ELEC, the rate NBT customers are required to be on
-  #         path: ../data/tariffs/pge_e_elec_2026-06.yaml
-  #       export_price:
-  #         type: nbt_export
-  #         csv_path: ../data/pge_nbt_eec_2026.csv
-  #         adder_per_kwh: 0.0088 # ACC Plus, 2026 residential applicants
-  - type: nbt_bill
-
 external_load:
   source: lbnl_net_load # no solar device in this scenario -- net, not gross
   scenario_dir: /Users/seanearley/Documents/LBNL_Phase_4/anonymized-1in2-midDemand-with_EE_FS-2025
   cluster_name: res-pge-res_unknown-allSize-hot_dry-nonCare-NoLCA-Flat-80_100pct # pv_penetration=0.0
   start_hour_ending: 4681
-
-poi_limit_kw: 15.0
-exclusive_import_export: true
-
-# The baseline to compare against: charge at full power the moment it's plugged in
-# until full, never discharge -- what a plug-and-forget Level 2 charger does.
-counterfactual:
-  policies:
-    ev: {type: rule_based_ev}
-
-# NOTE: this home has no solar. NBT is for customers with renewable generation, so
-# whether V2X exports from a no-solar home would be compensated at NBT rates at all is an
-# open question -- treat the export side of this example as an assumption.
-#
-# Bill both runs the way PG&E would: E-ELEC charges, NBT export credits (generation and
-# delivery halves offsetting only their own charges), ACC Plus, base services charge.
-billing:
-  tariff: ../data/tariffs/pge_e_elec_2026-06.yaml
-  income_tier: 3
-  program:
-    type: nbt
-    export_rates_csv: ../data/pge_nbt_eec_2026.csv
-    acc_plus_per_kwh: 0.0088

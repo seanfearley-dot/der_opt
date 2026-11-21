@@ -1,6 +1,7 @@
 # der-opt scenario building blocks specification
 
-**Version 1.0**, approved 2026-11-20 with the recommended choice on each decision (section 5).
+**Version 1.1** (2026-11-20). v1.0 was approved with the recommended choice on each decision
+(section 5); v1.1 revises decision 2 so same-name devices merge setting by setting.
 Implemented in `der_opt.scenarios.compose`, `.validate` and `.templates`.
 
 ## Purpose
@@ -40,8 +41,10 @@ devices:
   on top. Later always wins.
 - **Merging:**
   - mappings merge key by key, at every depth;
-  - `devices` merge **by `name`**: a later device with the same name replaces the
-    earlier one, and new names are added (decision 2);
+  - `devices` merge **by `name`**: a later device with the same name merges into the
+    earlier one key by key, so a scenario writes only what differs
+    (`{name: battery, params: {charge_sources: [solar]}}`); a later device of another
+    `type` replaces it; new names are added (decision 2, revised in v1.1);
   - every other list replaces the earlier list whole;
   - a value of `null` removes an inherited key, for example `counterfactual: null`;
     with nothing inherited, it's passed to the schema as before.
@@ -121,6 +124,10 @@ overwritten, so the next scenario made with the same library shares it. Without
 `--library`, the scenario is written as one file. The scenario file itself is only
 overwritten with `--force`.
 
+Fragment names match the blocks in the starter library, `examples/library/`, so
+`--library examples/library` reuses them. `new` then notes how many of the blocks it
+used hold values marked `# illustrative`.
+
 What `new` fills in:
 - **Paths**, relative to the file they're written in when both are in one project
   folder; absolute when they only share the root or home folder.
@@ -179,8 +186,11 @@ Approved 2026-11-20: the recommended choice on each.
    - the folder the command runs from (today's behavior);
    - a project root marked by a file.
 2. **Merging lists:**
-   - **devices by name, every other list replaced (recommended):** a scenario can add a
-     battery fragment to its own solar device;
+   - **devices by name, every other list replaced (approved in v1.0):** a scenario can add a
+     battery fragment to its own solar device. **Revised in v1.1:** a same-name device
+     merges into the inherited one setting by setting instead of replacing it, so blocks
+     can leave per-home data (a thermostat's outdoor temperature, a flexible load's
+     baseline) for the scenario to add, and one battery block serves small variations;
    - every list replaced whole: simpler, but devices can't be combined from fragments;
    - lists appended: devices and value streams could be duplicated by accident.
 3. **Old-style paths:**

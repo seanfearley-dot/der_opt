@@ -1,0 +1,15 @@
+# der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# A 13.5 kWh / 5 kW home battery. A scenario changes any setting by naming the device:
+#   devices: [{name: battery, params: {charge_sources: [solar], soc_final_min_frac: null}}]
+devices:
+  - type: battery
+    name: battery
+    params:
+      capacity_kwh: 13.5
+      p_max_charge_kw: 5.0
+      p_max_discharge_kw: 5.0
+      eta_charge: 0.95
+      eta_discharge: 0.95
+      soc_init_frac: 0.5
+      soc_final_min_frac: 0.5 # ends where it started, so the run's value is real
+      degradation_cost_per_kwh: 0.015 # $/kWh of throughput, from the warranty

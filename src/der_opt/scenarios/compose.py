@@ -97,8 +97,10 @@ def resolve_paths(data, base: Path, source: Path, notes: list[str], trail: str =
 
 
 def merge(base, over, key: str | None = None):
-    """`over` on top of `base`: mappings key by key at every depth, `devices` by name,
-    every other list (and value) replaced. `null` removes an inherited key."""
+    """`over` on top of `base`: mappings key by key at every depth; `devices` by name,
+    a device with an inherited name merging into it key by key (unless it's another
+    type, which replaces it); every other list (and value) replaced. `null` removes an
+    inherited key."""
     if isinstance(base, dict) and isinstance(over, dict):
         out = dict(base)
         for k, v in over.items():
@@ -115,7 +117,9 @@ def merge(base, over, key: str | None = None):
         for device in over:
             name = device.get("name") if isinstance(device, dict) else None
             if name is not None and name in position:
-                out[position[name]] = device
+                inherited = out[position[name]]
+                same_type = device.get("type") in (None, inherited.get("type"))
+                out[position[name]] = merge(inherited, device) if same_type else device
             else:
                 position[name] = len(out)
                 out.append(device)

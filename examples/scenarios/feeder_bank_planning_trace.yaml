@@ -17,12 +17,12 @@
 # the bank rating), each home optimizing its own bill, and today's rule-based behavior (EVs
 # charge on plug-in, batteries self-consume).
 
-name: bank_1_in_10_new_subdivision
+extends:
+  - ../library/time/2026-08-03T12_72x60min.yaml # three days, noon to noon, around the design-year peak
+  - ../library/feeder/homes_bill.yaml
+  - ../library/billing/pge_e_elec_2026-06_nbt.yaml
 
-time_grid:
-  resolution_minutes: 60
-  horizon_steps: 72 # three days, noon to noon, around the design-year peak on 4 Aug
-  start: "2026-08-03T12:00:00"
+name: bank_1_in_10_new_subdivision
 
 feeder:
   elements:
@@ -70,21 +70,8 @@ synthetic_houses:
     t_max_c: 42
 
 house_defaults:
-  value_streams:
-    - type: nbt_bill
   poi_limit_kw: 30
   # on these August evenings the NBT export credit is above the import price, and an LP would
   # import and export at once to collect it (up to the 30 kW service limit); forbidding that
   # makes the run a MILP, so congestion prices come from fix-and-resolve
   exclusive_import_export: true
-  counterfactual:
-    policies:
-      ev: {type: rule_based_ev}
-      battery: {type: self_consumption}
-
-billing:
-  tariff: ../data/tariffs/pge_e_elec_2026-06.yaml
-  program:
-    type: nbt
-    export_rates_csv: ../data/pge_nbt_eec_2026.csv
-    acc_plus_per_kwh: 0.0088
