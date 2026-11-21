@@ -1,6 +1,6 @@
 # der-opt avoided cost specification
 
-**Version 1.0 — approved 2026-11-20.** Not yet implemented. Change it only by a new
+**Version 1.0 — approved 2026-11-20.** Implemented in `der_opt.avoided_costs` (thread A1, the ACC importer, open). Change it only by a new
 version, approved the same way.
 
 ## Purpose

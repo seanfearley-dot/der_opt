@@ -1,0 +1,36 @@
+# Synthetic, illustrative avoided costs in the avoided cost spec's format
+# (docs/AVOIDED_COST_SPEC.md). Not ACC values. Years beyond 2028 escalate at 2%/yr.
+set_id: synthetic_2026
+source: 'internal: synthetic illustrative curves for examples and tests (not ACC values)'
+location:
+  utility: PGE
+  climate_zone: illustrative
+dollars:
+  basis: nominal
+  base_year: 2026
+at: meter
+years:
+- 2026
+- 2028
+components:
+  energy:
+    class: energy
+  ancillary_services:
+    class: energy
+  cap_and_trade:
+    class: energy
+  ghg_adder:
+    class: energy
+  generation_capacity:
+    class: capacity
+    capacity_component: generation
+  transmission:
+    class: capacity
+    capacity_component: transmission
+  distribution:
+    class: capacity
+    capacity_component: distribution
+emissions: marginal_emissions_tco2_per_mwh
+extend:
+  method: escalate
+  rate_per_year: 0.02

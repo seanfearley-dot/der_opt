@@ -63,3 +63,17 @@ dr:
     capacity_reference: all # R2, R3 and S side by side
   events:
     random: {events_per_month: {6: 2, 7: 3, 8: 3, 9: 2}, seed: 1, hours: 3, min_days_between: 1}
+
+# First-year screening values (not cost-test results) and the measure impact package
+# for OpenBCA (docs/COST_TEST_SPEC.md). Costs and rates are illustrative.
+cost_test:
+  scope: control # measure = optimization + DR participation, against R1 (self-consumption)
+  start_year: 2027
+  measure_life_years: 10
+  avoided_costs: {set: examples/data/avoided_costs/synthetic_2026}
+  capacity_value: {reference: R2, basis: import, measure: counted}
+  net_to_gross: 1.0
+  bill_escalation: 0.03
+  cost_escalation: 0.025
+  participant_costs: {upfront: 300, annual_om: 0}
+  program_costs: {admin_upfront: 75, admin_annual: 15, upfront_incentive: 0}

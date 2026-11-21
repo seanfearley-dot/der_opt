@@ -314,3 +314,16 @@ def test_settlement_on_the_import_basis_stops_at_zero_import():
     # at least 2.5 kW x 3 h x $1; a day-of adjustment lifted by pre-event charging can add more
     assert (perf["incentive_earned"] >= 7.5 - 1e-6).all()
     assert study.checks.errors == []
+
+
+def test_net_basis_settles_on_net_load():
+    # regression: the both-bases reporting loop once overwrote the program's basis
+    study = run_dr_study(_config(dr={"program": {"program_id": "p", "season": [7], "max_hours": 3,
+                                                 "incentive_per_kwh": 1.0},
+                                     "events": {"schedule": [{"start": "17:00", "hours": 3, "dates": ["2026-07-21"]}]},
+                                     "shadow_events": False}))
+    row = study.performance.iloc[0]
+    assert row["settlement_basis"] == "net"
+    # paid on net: the full 4 kW reduction below the 2.5 kW net baseline, 3 h, $1
+    assert row["incentive_earned"] == pytest.approx(row["reduction_vs_S_kw"] * 3 * 1.0)
+    assert row["incentive_earned"] > row["import_reduction_vs_S_kw"] * 3 * 1.0

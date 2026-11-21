@@ -549,6 +549,50 @@ flag:
 **Open threads in the spec:** T1 (the day-of adjustment) and T2 (weekend and holiday
 settlement) are provisional.
 
+## Avoided costs and the measure impact package
+
+**Avoided cost sets** ([docs/AVOIDED_COST_SPEC.md](docs/AVOIDED_COST_SPEC.md), v1.0) hold
+an ACC vintage or your own curves in one format. Each set is a folder:
+- `manifest.yaml`: source, dollars, years, and each component classed `energy` or
+  `capacity`;
+- `hourly.csv`: every hour of every year, ISO 8601 with offset;
+- `capacity.csv`: $/kW-year with monthly shares.
+
+`der-opt check-data <folder>` validates a set. `examples/data/avoided_costs/synthetic_2026`
+is an illustrative set (2026-2028, escalating 2%/yr beyond).
+
+**Screening values.** A scenario with `avoided_costs: {set: ...}` or a `cost_test`
+section prints first-year screening values (`avoided_costs.csv` with `-o`):
+- **Energy:** split into where the measure lowers load and where it raises it.
+- **DR capacity:** for every reference, basis and measure, priced from `capacity.csv`
+  only.
+- **Full hourly:** every component, as a comparison figure only.
+- **Emissions.**
+
+They're for sweeps and quick comparisons, **not cost-test results**.
+
+**The measure impact package** ([docs/COST_TEST_SPEC.md](docs/COST_TEST_SPEC.md), v1.0).
+A `cost_test` section writes `measure_impacts/` with `-o`:
+- `measure.yaml`: scope, life, costs and escalation;
+- `energy_impact.csv`: every hour of the year in standard time;
+- `capacity.csv`: the valued kW and every variant;
+- `bills.csv`: without and with, if the scenario bills;
+- `dr_incentives.csv`.
+
+The cost tests themselves are OpenBCA's job. `examples/scenarios/dr_battery_annual.yaml`
+has a `cost_test` section.
+
+```yaml
+cost_test:
+  scope: control                       # control (vs R1) or device (vs R3)
+  start_year: 2027
+  measure_life_years: 10
+  avoided_costs: {set: examples/data/avoided_costs/synthetic_2026}
+  capacity_value: {reference: R2, basis: import, measure: counted}
+  participant_costs: {upfront: 300, annual_om: 0}
+  program_costs: {admin_upfront: 75, admin_annual: 15}
+```
+
 ## Feeders: many houses on a network
 
 A scenario with a `feeder` section is a multi-house run. Every house is an ordinary
@@ -718,6 +762,8 @@ src/der_opt/
   billing/       retail tariffs, PG&E holidays, bill engine (NBT, NEM2), bill objectives
   inputs/        input data spec v1.1: readers, validation, quality checks
   dr/            demand response: event calendars, settlement, responses, capacity
+  avoided_costs/ avoided cost sets and first-year screening values
+  cost_test/     the measure impact package for cost tests (OpenBCA)
   integrations/  LBNL load, EV model, PVWatts, PG&E NBT export rates, CAISO LMP
   network/       feeder topology, multi-premise dispatch, congestion prices, synthetic houses
   scenarios/     YAML schema, loader, data-source resolvers, feeder scenarios

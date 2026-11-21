@@ -150,14 +150,14 @@ def run_dr_study(config: ScenarioConfig, r2: DispatchResult | None = None, r2_pr
             rows = (index >= e.start) & (index < e.end)
             row = {"replicate": replicate, "event_id": e.event_id, "event_type": e.event_type, "month": e.start.month,
                    "start": e.start, "end": e.end, "hours": e.hours, "response": program.response}
-            for basis, pre in prefix.items():
-                ours = float(mine[basis][rows].mean())
+            for each_basis, pre in prefix.items():  # not `basis`: that's the program's settlement basis
+                ours = float(mine[each_basis][rows].mean())
                 row[f"responding_{pre}kw"] = ours
                 for name in ("R1", "R2", "R3"):
-                    theirs = float(loads[basis][name][rows].mean())
+                    theirs = float(loads[each_basis][name][rows].mean())
                     row[f"{name}_{pre}kw"] = theirs
                     row[f"{pre}reduction_vs_{name}_kw"] = theirs - ours
-                row[f"S_{pre}kw"] = float(s_series[basis][rows].mean())
+                row[f"S_{pre}kw"] = float(s_series[each_basis][rows].mean())
                 row[f"{pre}reduction_vs_S_kw"] = row[f"S_{pre}kw"] - ours
             row["settlement_basis"] = basis
             row["S_expected_kw"] = float(expected[rows].mean())

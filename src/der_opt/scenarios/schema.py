@@ -131,6 +131,51 @@ class DRConfig(BaseModel):
     shadow_events: bool = True  # counted capacity (one small solve per eligible day)
 
 
+# --- avoided costs and cost tests (docs/AVOIDED_COST_SPEC.md, docs/COST_TEST_SPEC.md) --
+
+
+class AvoidedCostsConfig(BaseModel):
+    set: str  # an avoided cost set folder
+
+
+class CapacityValueConfig(BaseModel):
+    reference: Literal["R2", "R3", "S"] = "R2"
+    basis: Literal["net", "import"] = "import"
+    measure: Literal["counted", "accounted"] = "counted"
+
+    @property
+    def label(self) -> str:
+        return f"{self.reference}/{self.basis}/{self.measure}"
+
+
+class ParticipantCostsConfig(BaseModel):
+    upfront: float = 0.0
+    annual_om: float = 0.0
+    replacements: list[dict[str, float]] = Field(default_factory=list)  # [{year: 2032, cost: 300}]
+
+
+class ProgramCostsConfig(BaseModel):
+    admin_upfront: float = 0.0
+    admin_annual: float = 0.0
+    upfront_incentive: float = 0.0
+
+
+class CostTestConfig(BaseModel):
+    scope: Literal["control", "device"] = "control"
+    measure_devices: list[str] | None = None  # device scope: removed for R3; default dr.measure_devices or all
+    start_year: int
+    measure_life_years: int
+    avoided_costs: AvoidedCostsConfig
+    capacity_value: CapacityValueConfig = Field(default_factory=CapacityValueConfig)
+    net_to_gross: float = 1.0
+    impact_degradation: float = 0.0  # approved: 0 for now (OpenBCA holds a shape constant)
+    bill_escalation: float = 0.0
+    cost_escalation: float = 0.0
+    participant_costs: ParticipantCostsConfig = Field(default_factory=ParticipantCostsConfig)
+    program_costs: ProgramCostsConfig = Field(default_factory=ProgramCostsConfig)
+    tax_credits: float = 0.0
+
+
 class ScenarioConfig(BaseModel):
     """Top-level structure of a scenario YAML file. Per-device and per-value-stream
     `params` are intentionally left as loose dicts rather than one pydantic model per
@@ -158,6 +203,8 @@ class ScenarioConfig(BaseModel):
     billing: BillingConfig | None = None
     dr: DRConfig | None = None  # demand response program and events (single-premise runs)
     weather_case: str | None = None  # the load forecast scenario's weather label, recorded only
+    avoided_costs: AvoidedCostsConfig | None = None  # first-year screening values
+    cost_test: CostTestConfig | None = None  # measure impact package and OpenBCA export
 
 
 # --- feeder (multi-premise) scenarios ------------------------------------------------

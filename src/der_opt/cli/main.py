@@ -251,6 +251,27 @@ def _print_dr(study, config, r2_bill) -> None:
         typer.echo(f"  Bill: responding ${np.mean(bills):,.2f} vs non-responding ${r2_bill.summary['net_cost']:,.2f}")
 
 
+def _print_screening(frame, acs, without_label: str, chosen: str) -> None:
+    typer.echo(f"\nScreening values, first year ({acs.manifest.set_id}, {acs.manifest.dollars.basis} $): "
+               "not cost-test results")
+    typer.echo(f"  Measure vs {without_label}")
+    energy = frame[frame["category"] == "energy"]
+    lowered = energy.loc[energy["part"] == "load lowered", "value"].sum()
+    raised = energy.loc[energy["part"] == "load raised", "value"].sum()
+    typer.echo(f"  Energy: ${lowered:,.2f} avoided where load is lowered, ${raised:,.2f} where it's raised, "
+               f"net ${lowered + raised:,.2f}")
+    full = frame.loc[frame["category"] == "full_hourly", "value"].sum()
+    typer.echo(f"  Full hourly (every component, for comparison only): ${full:,.2f}")
+    capacity = frame[frame["category"] == "dr_capacity"]
+    if len(capacity):
+        for label, group in capacity.groupby("part"):
+            marker = "  <- valued" if label == chosen else ""
+            typer.echo(f"  DR capacity {label}: ${group['value'].sum():,.2f}{marker}")
+    emissions = frame.loc[frame["category"] == "emissions", "value"]
+    if len(emissions):
+        typer.echo(f"  Emissions avoided: {emissions.sum():,.3f} tCO2")
+
+
 def _time_grid(config):
     from der_opt.scenarios.loader import _build_time_grid
 
@@ -375,6 +396,24 @@ def run(
         _print_dr(dr_study, config, bills.get("optimal"))
         report.extend(dr_study.checks)
 
+    screening, impact_runs = None, None
+    set_path = (config.cost_test.avoided_costs.set if config.cost_test is not None
+                else config.avoided_costs.set if config.avoided_costs is not None else None)
+    if set_path is not None:
+        from der_opt.avoided_costs import read_set
+        from der_opt.avoided_costs.screening import capacity_measures, screening_values
+        from der_opt.cost_test import resolve_runs
+
+        acs = read_set(set_path)
+        without, with_, without_label = resolve_runs(config, premise, dispatch, counterfactual, dr_study)
+        impact_runs = (without, with_, without_label)
+        capacity_kw = capacity_measures(dr_study.capacity) if dr_study is not None else {}
+        screening = screening_values(acs, without.grid_import - without.grid_export,
+                                     with_.grid_import - with_.grid_export, premise.time_grid.dt_hours, capacity_kw)
+        chosen = config.cost_test.capacity_value.label if config.cost_test else "R2/import/counted"
+        _print_screening(screening, acs, without_label, chosen)
+        report.ran("avoided cost set")
+
     report.extend(check_prices(premise))
     report.extend(check_load(premise))
     runs_checked = {"optimal": dispatch} | ({"counterfactual": counterfactual} if counterfactual is not None else {})
@@ -438,6 +477,22 @@ def run(
         if dr_study is not None:
             _write_dr(dr_study, output_dir)
             results["dr"] = dr_study.summary
+        if screening is not None:
+            screening.to_csv(output_dir / "avoided_costs.csv", index=False)
+            results["screening"] = screening.groupby(["category", "part"])["value"].sum().round(2).to_dict()
+            results["screening"] = {f"{k[0]}: {k[1]}": v for k, v in results["screening"].items()}
+        if config.cost_test is not None:
+            from der_opt.billing import bill_from_dispatch
+            from der_opt.cost_test import write_impact_package
+
+            without, with_, without_label = impact_runs
+            package_bills = None
+            if billing is not None:
+                tariff, program, bill_kwargs = billing
+                package_bills = {label: bill_from_dispatch(r, premise.time_grid, tariff, program, **bill_kwargs)
+                                 for label, r in (("without", without), ("with", with_))}
+            write_impact_package(output_dir, config, without_label, without, with_, premise.time_grid,
+                                 dr_study, package_bills, tz=config.dr.tz if config.dr else "America/Los_Angeles")
         _write_checks(output_dir, scenario, config, report, results)
         import matplotlib.pyplot as plt
 
@@ -493,7 +548,7 @@ def _print_data_report(summary: dict, report) -> None:
 
 @app.command("check-data")
 def check_data(
-    path: Path = typer.Argument(..., help="A time series, premises or network CSV"),
+    path: Path = typer.Argument(..., help="A time series, premises or network CSV, or an avoided cost set folder"),
     premises: Path | None = typer.Option(None, "--premises", help="premises.csv, to cross-check premise IDs"),
     network: Path | None = typer.Option(None, "--network", help="network.csv, to cross-check element IDs"),
 ) -> None:
@@ -501,8 +556,15 @@ def check_data(
     the file won't load; warnings mean look before trusting it. Exits 1 on errors."""
     from der_opt.inputs import SPEC_VERSION, check_file
 
-    kind, report, summary = check_file(path, premises=premises, network=network)
-    typer.echo(f"{path}: {kind} file, input data spec v{SPEC_VERSION}")
+    if path.is_dir():  # an avoided cost set (docs/AVOIDED_COST_SPEC.md)
+        from der_opt.avoided_costs import describe, read_set
+
+        acs = read_set(path, strict=False)
+        report, summary = acs.report, describe(acs)
+        typer.echo(f"{path}: avoided cost set, avoided cost spec v1.0")
+    else:
+        kind, report, summary = check_file(path, premises=premises, network=network)
+        typer.echo(f"{path}: {kind} file, input data spec v{SPEC_VERSION}")
     _print_data_report({k: v for k, v in summary.items() if k not in ("kind", "spec_version")}, report)
     if report.errors:
         typer.echo("\nRejected: fix the errors above; the file won't load until then.")
