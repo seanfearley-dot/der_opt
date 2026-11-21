@@ -167,6 +167,16 @@ def _check_billing(v: Validation) -> None:
     v.report.extend(check_tariff_dates(tariff, v.premise.time_grid))
 
 
+def _check_ev_patterns(v: Validation) -> None:
+    from der_opt.devices.ev_pattern import scenario_patterns
+
+    found = [Finding(level, "ev pattern", message)
+             for _, _, expanded in scenario_patterns(v.config.devices, v.premise.time_grid)
+             for level, message in expanded.notes]
+    if found or any("pattern" in d.params for d in v.config.devices):
+        v.report.ran("ev pattern", found)
+
+
 def _check_dr(v: Validation) -> None:
     from der_opt.dr.calendar import CalendarError
     from der_opt.dr.study import _calendars, _without_measure
@@ -268,6 +278,7 @@ def validate_scenario(path: str | Path, cost_tests: bool = False, build: bool = 
         return v
     v.report.extend(check_prices(v.premise))
     v.report.extend(check_load(v.premise))
+    _check_ev_patterns(v)
     _check_billing(v)
     _check_dr(v)
     _check_cost_test(v, cost_tests, check_openbca=cost_tests or not before_run)

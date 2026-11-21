@@ -69,6 +69,7 @@ der-opt run examples/scenarios/feeder_bank_planning_trace.yaml -o out/bank_trace
 der-opt run examples/scenarios/battery_caiso_lmp.yaml                             # battery on CAISO LMP
 der-opt run examples/scenarios/feeder_from_files.yaml                             # 6 homes from spec files
 der-opt run examples/scenarios/dr_battery_annual.yaml -o out/dr                   # DR program, full year
+der-opt run examples/scenarios/ev_commuter_annual.yaml -o out/ev                  # V2X EV from a daily pattern, full year
 ```
 
 It prints the optimal dispatch's cost broken down by source. If the scenario has a
@@ -224,7 +225,7 @@ Every device has `type`, a unique `name`, and `params`. Any array-valued param
 |---|---|---|
 | `solar` | `available_kw` *array* | — |
 | `battery` | `capacity_kwh`, `p_max_charge_kw`, `p_max_discharge_kw` | `eta_charge` (0.95), `eta_discharge` (0.95), `soc_min_frac` (0), `soc_max_frac` (1), `soc_init_frac` (0.5), `soc_final_min_frac`, `degradation_cost_per_kwh` (0), `charge_sources` |
-| `ev_v2x` | `capacity_kwh`, `p_max_charge_kw`, `p_max_discharge_kw`, `connected` *array* (0/1 plug-in schedule) | same SOC/efficiency/degradation params as battery, plus `departure_period` (int or list), `soc_departure_min_frac` (float or list), `charge_sources`, `driving_kwh` *array* (kWh used driving each period; without it SOC is frozen while away) |
+| `ev_v2x` | `capacity_kwh`, `p_max_charge_kw`, `p_max_discharge_kw`, and either `pattern` (a daily pattern, below) or `connected` *array* (0/1 plug-in schedule) | same SOC/efficiency/degradation params as battery, plus `departure_period` (int or list; default: every step where `connected` goes from 1 to 0), `soc_departure_min_frac` (float or list), `charge_sources`, `driving_kwh` *array* (kWh used driving each period; without it SOC is frozen while away) |
 | `thermostat` | `thermal_resistance_r`, `thermal_capacitance_c`, `ambient_temp_c` *array*, `comfort_min_c`, `comfort_max_c`, `cop`, `p_max_kw`, `initial_temp_c` | `mode` (`cooling` / `heating`) |
 | `curtailable_load` | `baseline_load_kw` *array*, `block_size_kw`, `max_blocks` | — |
 
@@ -239,6 +240,34 @@ Every device has `type`, a unique `name`, and `params`. Any array-valued param
 - **`departure_period`** — period index (0-based, from `start`) of each departure.
   For a multi-day run, list one per morning: `[9, 33, 57]` for 3 days at 9am.
   A single value only protects that one departure.
+
+#### An EV's daily pattern
+
+Instead of per-step `connected`, `departure_period` and `driving_kwh`, an EV can take a
+daily pattern ([docs/EV_PATTERN_SPEC.md](docs/EV_PATTERN_SPEC.md)):
+
+```yaml
+- type: ev_v2x
+  name: ev
+  params:
+    capacity_kwh: 75
+    p_max_charge_kw: 7.2
+    p_max_discharge_kw: 7.2
+    soc_departure_min_frac: 0.8            # required at every departure
+    pattern:
+      weekday: {depart: "07:30", arrive: "18:30", miles: 38}
+      weekend: {depart: "10:00", arrive: "15:00", miles: 20}   # or: weekend: home
+      kwh_per_mile: 0.30                   # drawn from the battery
+      holidays: weekend                    # PG&E holidays: weekend (default) or weekday
+```
+
+A trip runs from `depart` to the next `arrive` (the next day if `arrive` is earlier,
+as for a night shift), and the day it departs picks the pattern. Its energy,
+`miles × kwh_per_mile`, is spread over the steps the car is away. A step the car is
+away for any part of counts as away, so on an hourly run 07:30 counts as 07:00 and
+18:30 as 19:00. `validate` and `run` note it when that happens, and warn when the car
+isn't home long enough to charge back a trip. `run` prints the departures, miles,
+driving kWh and hours plugged in.
 
 ### Value streams
 

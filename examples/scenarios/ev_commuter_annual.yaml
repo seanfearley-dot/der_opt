@@ -1,0 +1,48 @@
+# A home with a commuter's V2X EV for a full year, described by a daily pattern instead
+# of a per-hour plug-in schedule (docs/EV_PATTERN_SPEC.md). Run with:
+#   der-opt run examples/scenarios/ev_commuter_annual.yaml -o out/ev
+#
+# The home is the synthetic one in ../data/spec_sample/annual_home.csv (its solar
+# isn't used here). Prices: E-ELEC import; a flat $0.05/kWh for export, as in
+# dr_battery_annual.yaml, keeps this a fast LP.
+
+name: ev_commuter_annual
+
+time_grid:
+  resolution_minutes: 60
+  horizon_steps: 8760
+  start: "2026-01-01T00:00:00"
+
+devices:
+  - type: ev_v2x
+    name: ev
+    params:
+      capacity_kwh: 75.0
+      p_max_charge_kw: 7.2
+      p_max_discharge_kw: 7.2 # V2X; 0 for a car that can't discharge
+      eta_charge: 0.92
+      eta_discharge: 0.92
+      soc_init_frac: 0.8
+      soc_min_frac: 0.2 # never below 20%, whatever export pays
+      soc_departure_min_frac: 0.8 # at every departure the pattern makes
+      soc_final_min_frac: 0.8
+      degradation_cost_per_kwh: 0.02 # illustrative
+      pattern:
+        weekday: {depart: "07:30", arrive: "18:30", miles: 38}
+        weekend: {depart: "10:00", arrive: "15:00", miles: 20}
+        kwh_per_mile: 0.30 # drawn from the battery
+        holidays: weekend
+
+value_streams:
+  - type: energy_arbitrage
+    params:
+      import_price: {type: retail_tariff, path: ../data/tariffs/pge_e_elec_2026-06.yaml}
+      export_price: {type: constant, price: 0.05}
+
+external_load: {source: timeseries, path: ../data/spec_sample/annual_home.csv, premise_id: home_a, column: load_kw}
+poi_limit_kw: 20
+
+# R1: plug in and charge at full power until full, never discharge
+counterfactual:
+  policies:
+    ev: {type: rule_based_ev}

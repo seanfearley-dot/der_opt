@@ -37,6 +37,9 @@ class V2XVehicle(Device):
     `charge_sources`: optional list of SolarPV devices this vehicle may charge from --
     same instantaneous-cap mechanism and caveats as BatteryStorage's.
 
+    `departure_period` left out: departures are each step where `connected` goes from
+    1 to 0, and `soc_departure_min_frac` applies at every one.
+
     `driving_kwh`: optional kWh drawn from the battery by driving in each period (an
     array, normally nonzero only while disconnected). Without it, SOC is frozen while
     the car is away, so over several days it never comes home needing a charge."""
@@ -79,9 +82,15 @@ class V2XVehicle(Device):
         self.soc_max = soc_max_frac * capacity_kwh
         self.soc_init = soc_init_frac * capacity_kwh
 
+        if departure_period is None:
+            # found from the plug-in schedule: each step where it goes from 1 to 0
+            # (docs/EV_PATTERN_SPEC.md section 4)
+            if isinstance(soc_departure_min_frac, (list, tuple)):
+                raise ValueError("a list of soc_departure_min_frac needs departure_period to match it; "
+                                 "give one value to apply it at every departure")
+            departure_period = [t for t in range(1, len(conn)) if conn[t - 1] > 0.5 and conn[t] <= 0.5]
         departure_periods = (
-            [] if departure_period is None
-            else list(departure_period) if isinstance(departure_period, (list, tuple))
+            list(departure_period) if isinstance(departure_period, (list, tuple, np.ndarray))
             else [departure_period]
         )
         if soc_departure_min_frac is None:

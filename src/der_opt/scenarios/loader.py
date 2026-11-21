@@ -64,8 +64,15 @@ def _build_device(config: DeviceConfig, time_grid: TimeGrid, built_devices: dict
     LBNL PV profile, connected from the real EV arrival/departure data) and
     `charge_sources` (device *names*, already built: see _dependency_order)."""
     cls = DEVICE_REGISTRY[config.type]
+    raw = config.params
+    if "pattern" in raw:
+        if config.type != "ev_v2x":
+            raise ValueError(f"{config.name}: `pattern` is for ev_v2x devices (docs/EV_PATTERN_SPEC.md)")
+        from der_opt.devices.ev_pattern import pattern_device_params
+
+        raw, _ = pattern_device_params(config.name, raw, time_grid)
     params = {}
-    for key, value in config.params.items():
+    for key, value in raw.items():
         if key == "charge_sources":
             params[key] = [built_devices[name] for name in value]
         else:

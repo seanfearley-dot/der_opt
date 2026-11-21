@@ -401,6 +401,10 @@ def run(
 
     typer.echo(f"Scenario: {premise.name}")
     typer.echo(f"Status: {dispatch.solver_status}")
+    from der_opt.devices.ev_pattern import scenario_patterns
+
+    for name, pattern, expanded in scenario_patterns(config.devices, premise.time_grid):
+        typer.echo(f"EV {name} (daily pattern): {expanded.summary(premise.time_grid, pattern.kwh_per_mile)}")
 
     breakdown = value_breakdown(premise, dispatch)
     twin = " (no DR events: the non-responding twin, R2)" if config.dr is not None else ""
