@@ -130,6 +130,25 @@ the optimal and counterfactual CSVs.
 
 ### Starting a scenario, and checking it before a long solve
 
+The quickest start is to pick blocks from a library:
+
+```bash
+der-opt blocks                                    # the library's blocks, by kind
+der-opt new scenarios/home_a.yaml --pick --timeseries data/home_a.csv
+```
+
+`--pick` shows a menu for each kind of block (time grid, devices, prices, meter,
+counterfactual, billing, DR program, add-ons, avoided costs, cost tests). It writes a
+scenario that extends your picks, with solar and load from the time series file. It
+ends by printing the same choice as a `--use` command, to repeat it without menus.
+Picks that don't fit together are refused and nothing is written: a counterfactual for
+a device you didn't pick, two batteries, the bill objective without billing, and so on.
+Per-home values a block needs (a thermostat's outdoor temperature, a baseline
+territory) are written into the scenario as `TODO`s. The library is `--library DIR`,
+the one `der-opt setup library DIR` remembered, or the starter library.
+
+Or start from a template:
+
 ```bash
 der-opt new --list
 der-opt new dr-battery scenarios/home_a.yaml --timeseries data/timeseries.csv \

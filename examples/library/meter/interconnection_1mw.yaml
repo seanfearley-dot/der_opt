@@ -1,2 +1,3 @@
 # der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# 1 MW limit, for a grid battery
 poi_limit_kw: 1000

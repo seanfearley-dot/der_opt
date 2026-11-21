@@ -1,2 +1,3 @@
 # der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# nothing back to the grid
 export_limit_kw: 0 # nothing back to the grid (overrides poi_limit_kw for export)

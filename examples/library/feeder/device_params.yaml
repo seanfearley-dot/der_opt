@@ -1,4 +1,5 @@
 # der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# battery and EV behavior for premise_data houses
 # Device behavior for houses built from premise_data (sizes come from premises.csv)
 house_defaults:
   device_params:

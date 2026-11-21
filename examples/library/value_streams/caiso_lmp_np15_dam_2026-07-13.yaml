@@ -1,4 +1,5 @@
 # der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# buy and sell at CAISO NP15 day-ahead
 # Buying and selling at the CAISO NP15 day-ahead price (from `der-opt fetch-lmp`), for
 # the week in ../time/2026-07-13_168x60min.yaml.
 value_streams:

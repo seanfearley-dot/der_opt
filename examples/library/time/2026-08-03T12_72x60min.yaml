@@ -1,4 +1,5 @@
 # der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# 3-6 Aug 2026, noon to noon: the loadcast bank's peak
 # three days, noon to noon, around the loadcast bank's design-year peak on 4 Aug
 time_grid:
   resolution_minutes: 60

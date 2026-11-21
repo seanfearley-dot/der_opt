@@ -1,7 +1,8 @@
 # der-opt scenario building blocks specification
 
-**Version 1.1** (2026-11-20). v1.0 was approved with the recommended choice on each decision
-(section 5); v1.1 revises decision 2 so same-name devices merge setting by setting.
+**Version 1.2** (2026-11-20). v1.0 was approved with the recommended choice on each decision
+(section 5); v1.1 revises decision 2 so same-name devices merge setting by setting; v1.2
+adds picking blocks from a library (section 3a).
 Implemented in `der_opt.scenarios.compose`, `.validate` and `.templates`.
 
 ## Purpose
@@ -140,6 +141,47 @@ What `new` fills in:
 
 `TODO` is written for choices only you can make: the DR incentive, participant
 costs, discount rates, the deferral value, a missing file.
+
+## 3a. Picking blocks from a library
+
+```bash
+der-opt blocks                                   # what's in the library, by kind
+der-opt new scenarios/home_a.yaml --pick --timeseries data/home_a.csv
+der-opt new scenarios/home_a.yaml --use year_2026 --use battery_13kwh ... --timeseries data/home_a.csv
+der-opt setup library my_library                 # remember the library to pick from
+```
+
+- **Which library:** `--library DIR`, else the one `der-opt setup library` remembered,
+  else der-opt's starter library (`examples/library/`). For templates, `--library`
+  keeps its meaning: where to write their fragments.
+- **A block's kind** comes from what it sets, not its folder:
+  - one: time grid (required), prices and objective (required), billing, DR program,
+    avoided costs, cost tests;
+  - any number: devices, meter limits, counterfactual, DR add-ons (a `dr` block
+    without a `program_id`, merged after the program);
+  - feeder blocks aren't offered: these build a single home.
+- **Descriptions** are each block's first comment line, after der-opt's own header.
+  **Needs** are the `TODO`s it leaves.
+- **Menus** (`--pick`) go kind by kind, and print the matching `--use` command at the
+  end. `--use` takes `folder/name`, or the name alone when it's unique.
+- **The home's data:** `--timeseries` adds solar from `pv_kw` and the load from
+  `load_kw` (or `net_kw`), for the file's only premise or `--premise`.
+- **Placeholders:**
+  - a block value `"TODO: set in the scenario"` is per-home data (a thermostat's
+    outdoor temperature, a baseline territory). It's copied into the scenario, where
+    it's filled in.
+  - any other `TODO` is a study-level choice, left in the block and listed.
+- **Picks that don't fit together are refused, and nothing is written:**
+  - a missing required kind, or two of a one-only kind;
+  - two blocks with the same device name;
+  - a battery charging from a device you didn't pick;
+  - a counterfactual, or DR or cost-test measure, for a device you didn't pick;
+  - two meter blocks setting the same limit differently;
+  - the bill objective without a billing block;
+  - a DR add-on without a program;
+  - a feeder block.
+
+  The message lists every problem and the `--use` command to change and run again.
 
 ## 4. `der-opt validate`
 

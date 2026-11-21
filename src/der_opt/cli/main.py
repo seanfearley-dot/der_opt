@@ -609,11 +609,22 @@ def new(
     premises: Path | None = typer.Option(None, help="feeder-from-files: premises.csv"),
     network: Path | None = typer.Option(None, help="feeder-from-files: network.csv"),
     year: int | None = typer.Option(None, help="Run year (default: the time series file's, else this year)"),
-    library: Path | None = typer.Option(None, help="Put the shared parts in fragment files here and extend them"),
+    library: Path | None = typer.Option(
+        None, help="Templates: put the shared parts in fragment files here. --pick/--use: the library to pick "
+        "from (default: `der-opt setup library`'s, else the starter library)"),
     force: bool = typer.Option(False, "--force", help="Overwrite the scenario file if it exists"),
+    pick: bool = typer.Option(False, "--pick", help="Choose blocks from the library from menus"),
+    use: list[str] | None = typer.Option(None, "--use", help="A library block to extend (repeat for each)"),
 ) -> None:
-    """Write a commented starting scenario from a template. What the options don't fill
-    in is written as TODO; `der-opt validate` lists what's left."""
+    """Write a starting scenario: from a template (`der-opt new TEMPLATE FILE`), or from
+    library blocks (`der-opt new FILE --pick`, or `--use BLOCK` for each). What isn't
+    filled in is written as TODO; `der-opt validate` lists what's left."""
+    if pick or use:
+        if template is not None and target is not None:
+            raise typer.BadParameter("--pick and --use take the scenario file only, not a template")
+        _new_from_blocks(Path(template) if target is None else target, use or [], pick, timeseries, premise,
+                         library, force)
+        return
     from der_opt.scenarios.templates import TEMPLATES, Options, write_template
 
     if list_templates or template is None:
@@ -621,6 +632,7 @@ def new(
             typer.echo(f"  {name:<19}{described}")
         if template is None and not list_templates:
             typer.echo("\nUsage: der-opt new TEMPLATE SCENARIO.yaml [options]")
+            typer.echo("   or: der-opt new SCENARIO.yaml --pick (menus of library blocks; `der-opt blocks` lists them)")
         return
     if template not in TEMPLATES:
         raise typer.BadParameter(f"no template {template!r}; choose from {', '.join(TEMPLATES)}")
@@ -652,6 +664,115 @@ def new(
         typer.echo(f"{written.todos} TODO{'s' if written.todos != 1 else ''} to fill in; then: der-opt validate {target}")
     else:
         typer.echo(f"Next: der-opt validate {target}")
+
+
+def _new_from_blocks(target: Path | None, use: list[str], pick: bool, timeseries: Path | None,
+                     premise: str | None, library: Path | None, force: bool) -> None:
+    from der_opt.scenarios.library import (
+        KINDS,
+        find,
+        home_data,
+        read_library,
+        time_matches,
+        write_picked,
+    )
+    from der_opt.settings import library_dir
+
+    if target is None:
+        raise typer.BadParameter("name the scenario file to write")
+    if timeseries is not None and not timeseries.exists():
+        raise typer.BadParameter(f"--timeseries {timeseries} doesn't exist")
+    try:
+        folder, source = library_dir(library)
+    except FileNotFoundError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    blocks = read_library(folder)
+    home = home_data(timeseries, premise)
+    try:
+        picks = [find(blocks, name) for name in use]
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    if pick:
+        typer.echo(f"Blocks from {folder} ({source}); Enter skips an optional menu.")
+        for kind in KINDS:
+            options = [b for b in blocks if b.kind == kind.key and b not in picks]
+            if not options:
+                continue
+            typer.echo(f"\n{kind.title}:")
+            width = max(len(b.stem) for b in options) + 2
+            for number, block in enumerate(options, 1):
+                marks = [m for m, on in (("matches your time series", time_matches(block, home)),
+                                         ("illustrative values", block.illustrative)) if on]
+                needs = f"  needs: {', '.join(n.split('.')[-1] for n in block.needs)}" if block.needs else ""
+                extra = f"  [{'; '.join(marks)}]" if marks else ""
+                typer.echo(f"  {number:>2} {block.stem:<{width}}{block.description}{needs}{extra}")
+            how = "any, e.g. 1,3" if kind.many else "one"
+            while True:
+                answer = typer.prompt(f"  {how}{'' if kind.required else ', or Enter'}", default="", show_default=False)
+                try:
+                    numbers = [int(x) for x in answer.replace(" ", ",").split(",") if x]
+                except ValueError:
+                    numbers = [0]
+                if any(not 1 <= n <= len(options) for n in numbers):
+                    typer.echo(f"  numbers 1-{len(options)}, please")
+                elif kind.required and not numbers:
+                    typer.echo("  this one is needed")
+                elif not kind.many and len(numbers) > 1:
+                    typer.echo("  just one here")
+                else:
+                    break
+            picks += [options[n - 1] for n in dict.fromkeys(numbers)]
+    try:
+        written = write_picked(target, picks, home, folder, force)
+    except FileExistsError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except ValueError as exc:
+        typer.echo(str(exc))
+        command = " ".join([f"der-opt new {target}"] + [f"--use {b.name}" for b in picks])
+        typer.echo(f"Change the picks and run it again:\n  {command}")
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"\nWrote {written.scenario}: extends {len(written.blocks)} blocks from {folder}")
+    if home.path is not None:
+        what = " and ".join(x for x, on in (("solar", "pv_kw" in home.columns), ("load", True)) if on)
+        typer.echo(f"  {what} from {home.path} ({home.premise or 'premise_id: TODO'})")
+    illustrative = [b.name for b in written.blocks if b.illustrative]
+    if illustrative:
+        typer.echo(f"Note: {', '.join(illustrative)} hold values marked illustrative; check them before trusting results")
+    if written.todos_in_scenario:
+        typer.echo(f"{written.todos_in_scenario} TODO(s) to fill in, in {written.scenario.name}")
+    for where in written.todos_in_blocks:
+        typer.echo(f"TODO left in a block (shared by every scenario that uses it): {where}")
+    if pick:
+        typer.echo(f"To make this again without the menus:\n  {written.command}")
+    typer.echo(f"Next: der-opt validate {written.scenario}")
+
+
+@app.command()
+def blocks(
+    library: Path | None = typer.Option(None, help="Library folder (default: `der-opt setup library`'s, "
+                                        "else the starter library)"),
+) -> None:
+    """List a library's blocks, by kind, with what each needs from the scenario."""
+    from der_opt.scenarios.library import KINDS, read_library
+    from der_opt.settings import library_dir
+
+    try:
+        folder, source = library_dir(library)
+    except FileNotFoundError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    found = read_library(folder)
+    typer.echo(f"{folder} ({source}): {len(found)} blocks. Use them with `der-opt new FILE --pick` or --use NAME.")
+    titles = {k.key: k.title for k in KINDS} | {"feeder": "Feeder (for feeder scenarios)"}
+    width = max((len(b.name) for b in found), default=0) + 2
+    for key in [*[k.key for k in KINDS], "feeder"]:
+        group = [b for b in found if b.kind == key]
+        if not group:
+            continue
+        typer.echo(f"\n{titles[key]}:")
+        for block in group:
+            flags = [f"needs: {', '.join(n.split('.')[-1] for n in block.needs)}"] if block.needs else []
+            flags += ["illustrative values"] if block.illustrative else []
+            typer.echo(f"  {block.name:<{width}}{block.description}" + (f"  [{'; '.join(flags)}]" if flags else ""))
 
 
 @app.command("fetch-lmp")
@@ -788,6 +909,26 @@ app.add_typer(setup_app, name="setup")
 def _setup() -> None:
     """One-time setup of tools der-opt works with."""
     return
+
+
+@setup_app.command("library")
+def setup_library(
+    directory: Path = typer.Argument(..., help="A folder of scenario blocks"),
+) -> None:
+    """Remember the block library `der-opt new --pick` and `der-opt blocks` use."""
+    from der_opt.scenarios.library import read_library
+    from der_opt.settings import load_settings, save_settings
+
+    folder = directory.expanduser().resolve()
+    if not folder.is_dir():
+        raise typer.BadParameter(f"{folder} isn't a folder")
+    found = read_library(folder)
+    if not found:
+        raise typer.BadParameter(f"{folder} has no scenario blocks (.yaml files)")
+    settings = load_settings()
+    settings["library"] = {"path": str(folder)}
+    saved = save_settings(settings)
+    typer.echo(f"Remembered {folder} ({len(found)} blocks) in {saved}.")
 
 
 @setup_app.command("openbca")

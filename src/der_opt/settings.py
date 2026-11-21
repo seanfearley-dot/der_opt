@@ -1,4 +1,5 @@
-"""der-opt's own settings, kept between runs: currently where OpenBCA is installed.
+"""der-opt's own settings, kept between runs: where OpenBCA is installed, and the block
+library `der-opt new --pick` and `der-opt blocks` use.
 
 The file is ~/.der-opt/config.yaml, or wherever DER_OPT_CONFIG points. Nothing is
 written to it except by `der-opt setup`.
@@ -57,3 +58,19 @@ def find_uv() -> str | None:
     candidates = [home / ".local" / "bin" / "uv", home / ".cargo" / "bin" / "uv",
                   *sorted((home / "Library" / "Python").glob("*/bin/uv"))]
     return next((str(c) for c in candidates if c.exists()), None)
+
+
+def library_dir(explicit: str | Path | None = None) -> tuple[Path, str]:
+    """The block library, and where it came from: an explicit path, else the one
+    `der-opt setup library` remembered, else der-opt's starter library."""
+    from der_opt.scenarios.library import STARTER_LIBRARY
+
+    for candidate, source in ((explicit, "--library"), (load_settings().get("library", {}).get("path"), str(config_path()))):
+        if candidate:
+            path = Path(candidate).expanduser()
+            if not path.is_dir():
+                raise FileNotFoundError(f"{path} (from {source}) isn't a folder")
+            return path, source
+    if STARTER_LIBRARY.is_dir():
+        return STARTER_LIBRARY, "der-opt's starter library"
+    raise FileNotFoundError("no block library: pass --library DIR, or remember one with `der-opt setup library DIR`")

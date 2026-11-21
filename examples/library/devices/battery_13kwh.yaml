@@ -1,4 +1,5 @@
 # der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# 13.5 kWh / 5 kW home battery
 # A 13.5 kWh / 5 kW home battery. A scenario changes any setting by naming the device:
 #   devices: [{name: battery, params: {charge_sources: [solar], soc_final_min_frac: null}}]
 devices:

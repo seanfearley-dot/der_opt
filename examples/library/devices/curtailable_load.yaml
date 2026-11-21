@@ -1,4 +1,5 @@
 # der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# a load served in 0.75 kW blocks, up to 2 off
 # A flexible load served in discrete blocks (a pool pump, a water heater element).
 # The scenario supplies its baseline, which is per site:
 #   devices: [{name: flexible_load, params: {baseline_load_kw: [...]}}]
@@ -7,6 +8,6 @@ devices:
   - type: curtailable_load
     name: flexible_load
     params:
-      baseline_load_kw: TODO # set in your scenario (kW per step, or one value)
+      baseline_load_kw: "TODO: set in the scenario" # kW per step, or one value
       block_size_kw: 0.75
       max_blocks: 2

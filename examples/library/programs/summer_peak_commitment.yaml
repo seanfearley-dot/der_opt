@@ -1,4 +1,5 @@
 # der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# the summer program with a 3 kW firm commitment
 # The summer peak program, with a firm kW commitment: load must come down by
 # committed_kw from the settlement baseline, and any shortfall is penalized.
 extends: summer_peak_incentive.yaml

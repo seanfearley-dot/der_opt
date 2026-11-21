@@ -1,4 +1,5 @@
 # der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# central AC on a smart thermostat, 20-25 °C
 # Central AC on a smart thermostat (1R1C thermal model). The scenario supplies the
 # outdoor temperature, which is per site:
 #   devices: [{name: thermostat, params: {ambient_temp_c: {source: timeseries, path: ..., column: ...}}}]
@@ -7,7 +8,7 @@ devices:
     name: thermostat
     params:
       mode: cooling
-      ambient_temp_c: TODO # set in your scenario (outdoor temperature, °C, per step or one value)
+      ambient_temp_c: "TODO: set in the scenario" # outdoor temperature, °C, per step or one value
       thermal_resistance_r: 2.5 # °C/kW, illustrative
       thermal_capacitance_c: 2.0 # kWh/°C, illustrative
       cop: 3.2

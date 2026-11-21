@@ -1,4 +1,5 @@
 # der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# cost-test settings on the synthetic set
 # Cost-test settings and the synthetic avoided cost set (docs/COST_TEST_SPEC.md).
 # Costs and rates are illustrative.
 cost_test:

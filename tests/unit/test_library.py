@@ -106,7 +106,8 @@ def test_a_block_todo_left_unset_names_the_block(tmp_path, built):
         errors = [f.message for f in validate_scenario(bare).report.errors]
     finally:
         bare.unlink()
-    expected = "devices[0].params.ambient_temp_c is still a placeholder ('TODO') in thermostat_cooling.yaml; fill it in"
+    expected = ("devices[0].params.ambient_temp_c is still a placeholder ('TODO: set in the scenario') in "
+                "thermostat_cooling.yaml; fill it in")
     assert errors == [expected]
 
 

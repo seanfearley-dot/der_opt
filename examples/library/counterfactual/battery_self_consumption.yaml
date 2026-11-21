@@ -1,4 +1,5 @@
 # der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# the battery self-consumes
 # R1 for a battery: charge from solar surplus, discharge to cover load, no price awareness
 counterfactual:
   policies:

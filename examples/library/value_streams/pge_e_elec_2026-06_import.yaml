@@ -1,4 +1,5 @@
 # der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# E-ELEC import, flat $0.05/kWh export
 # E-ELEC retail import; a flat export price keeps the run a fast LP (an NBT export rate
 # above import needs exclusive_import_export, a MILP).
 value_streams:

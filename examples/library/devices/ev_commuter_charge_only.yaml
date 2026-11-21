@@ -1,4 +1,5 @@
 # der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# the commuter EV without V2X (charges only)
 # The same commuter EV, without V2X: it charges but never discharges.
 extends: ev_commuter_v2x.yaml
 devices:

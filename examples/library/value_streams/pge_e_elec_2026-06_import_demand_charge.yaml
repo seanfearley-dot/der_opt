@@ -1,4 +1,5 @@
 # der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# E-ELEC import, flat export, $15/kW demand charge
 # E-ELEC retail import plus a $/kW charge on the run's peak import. E-ELEC has no demand
 # charge: the rate is illustrative, for trying peak-shaving value. Lists replace when
 # blocks merge, so this restates the energy prices rather than adding to them.

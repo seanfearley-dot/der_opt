@@ -1,4 +1,5 @@
 # der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# May-Oct weekday 4-9 pm, paid per kWh, random events
 # A summer peak DR program paying per kWh of reduction, with randomized events
 # (docs/DR_CAPACITY_SPEC.md).
 dr:

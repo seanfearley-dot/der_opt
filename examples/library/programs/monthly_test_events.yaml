@@ -1,4 +1,5 @@
 # der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# year-round, a test event the 1st Tuesday each month
 # Add after a program block: makes the program year-round and replaces its events with
 # one 2-hour test event on the first Tuesday of every month.
 dr:

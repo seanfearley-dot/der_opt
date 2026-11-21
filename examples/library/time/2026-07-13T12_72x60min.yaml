@@ -1,4 +1,5 @@
 # der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# 13-16 Jul 2026, noon to noon, hourly
 # three days, noon to noon, so every night's charging is inside
 time_grid:
   resolution_minutes: 60

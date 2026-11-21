@@ -1,4 +1,5 @@
 # der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# E-ELEC with NBT export credits
 # E-ELEC charges with NBT export credits, billed the way PG&E would (README: Billing)
 billing:
   tariff: ../../data/tariffs/pge_e_elec_2026-06.yaml

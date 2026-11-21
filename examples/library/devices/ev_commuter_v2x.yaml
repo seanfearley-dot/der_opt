@@ -1,4 +1,5 @@
 # der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# 75 kWh V2X EV, commuting 38 mi weekdays, 20 weekends
 # A commuter's V2X EV, described by a daily pattern (docs/EV_PATTERN_SPEC.md).
 devices:
   - type: ev_v2x

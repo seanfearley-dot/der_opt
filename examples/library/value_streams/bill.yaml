@@ -1,4 +1,5 @@
 # der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# optimize the bill in the billing block
 # Optimize the bill itself (the billing section): nbt_bill or nem2_bill, by its program.
 value_streams:
   - type: bill

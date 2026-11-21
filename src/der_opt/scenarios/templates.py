@@ -348,13 +348,15 @@ def _relative(path: Path | None, folder: Path) -> str:
     folder, absolute when they only share the root or home folder."""
     if path is None:
         return TODO
-    path, folder = path.resolve(), folder.resolve()
+    return _quoted(_path_text(path, folder))
+
+
+def _path_text(path: Path, folder: Path) -> str:
+    path, folder = Path(path).resolve(), Path(folder).resolve()
     common = Path(os.path.commonpath([path, folder]))
     if common in (Path(common.anchor), Path.home(), Path.home().parent):
-        text = path.as_posix()
-    else:
-        text = Path(os.path.relpath(path, folder)).as_posix()
-    return _quoted(text)
+        return path.as_posix()
+    return Path(os.path.relpath(path, folder)).as_posix()
 
 
 def _quoted(text: str) -> str:
