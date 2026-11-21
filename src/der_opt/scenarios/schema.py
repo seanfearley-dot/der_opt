@@ -234,9 +234,19 @@ class NetworkValueStreamConfig(BaseModel):
     threshold_kw: float = 0.0
 
 
+class BackgroundLoadConfig(BaseModel):
+    """kW through an element in every run that isn't a customer: not billed, never
+    flexible (docs/COORDINATION_SPEC.md section 1)."""
+
+    name: str
+    element: str
+    load: list[float] | dict[str, Any]  # a literal array or a data source, like external_load
+
+
 class FeederConfig(BaseModel):
     elements: list[NetworkElementConfig] = Field(default_factory=list)  # or premise_data.network
     value_streams: list[NetworkValueStreamConfig] = Field(default_factory=list)
+    background_load: list[BackgroundLoadConfig] = Field(default_factory=list)
 
 
 class HouseDefaultsConfig(BaseModel):
@@ -253,6 +263,11 @@ class HouseDefaultsConfig(BaseModel):
     # (e.g. {battery: {eta_charge: 0.96, degradation_cost_per_kwh: 0.015}}); sizes come
     # from the premises file
     device_params: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    # who takes part in coordination, and how (docs/COORDINATION_SPEC.md section 1)
+    participation: Literal["participant", "non_participant"] = "participant"
+    baseline_behavior: Literal["own_bill", "rule_based"] = "own_bill"
+    response: Literal["optimized", "rules"] = "optimized"
+    rules: dict[str, dict[str, dict[str, Any]]] = Field(default_factory=dict)  # mechanism -> device -> action
 
 
 class HouseConfig(BaseModel):
@@ -270,6 +285,11 @@ class HouseConfig(BaseModel):
     exclusive_import_export: bool | None = None
     counterfactual: CounterfactualConfig | None = None
     billing: BillingConfig | None = None  # this house's own; default the scenario's
+    participation: Literal["participant", "non_participant"] | None = None  # default house_defaults'
+    baseline_behavior: Literal["own_bill", "rule_based"] | None = None
+    response: Literal["optimized", "rules"] | None = None
+    rules: dict[str, dict[str, dict[str, Any]]] = Field(default_factory=dict)  # merged over house_defaults.rules
+    envelope_weight: float | None = None  # envelopes, method weights
 
 
 class PremiseDataConfig(BaseModel):
@@ -301,6 +321,72 @@ class SyntheticHousesConfig(BaseModel):
     t_max_c: float = 40.0
 
 
+# --- feeder coordination (docs/COORDINATION_SPEC.md v1.0) -----------------------------
+
+
+class PriceScheduleRule(BaseModel):
+    element: str
+    per_kwh: float
+    months: list[int] | Literal["all"] = "all"
+    hours: str = "00:00-24:00"  # local, "HH:MM-HH:MM"
+    days: Literal["all", "weekdays", "weekends"] = "all"
+
+
+class PriceSignalConfig(BaseModel):
+    source: Literal["coordinated", "schedule", "file"] = "coordinated"
+    schedule: list[PriceScheduleRule] = Field(default_factory=list)  # source: schedule
+    path: str | None = None  # source: file -- timestamp, element_id, price_per_kwh
+    paid: bool = True
+
+
+class AllocationConfig(BaseModel):
+    method: Literal["pro_rata_need", "equal", "service_size", "weights", "max_min", "fixed", "file"] = "pro_rata_need"
+    column: str | None = None  # weights: a premises.csv column (else each house's envelope_weight)
+    kw: float | None = None  # fixed
+    path: str | None = None  # file -- timestamp, premise_id, import_kw, export_kw
+
+
+class HeadroomConfig(BaseModel):
+    margin_pct: float = 0.0
+
+
+class EnvelopeConfig(BaseModel):
+    import_: AllocationConfig | None = Field(default_factory=AllocationConfig, alias="import")
+    export: AllocationConfig | None = None  # left out: no export envelope
+    headroom: HeadroomConfig = Field(default_factory=HeadroomConfig)
+    nesting: Literal["min_along_path", "top_down"] = "min_along_path"
+    granularity: Literal["step", "static"] | dict[str, float] = "step"  # or {block_hours: 4}
+    min_kw: float = 1.0
+    violation_penalty_per_kwh: float = 5.0
+
+    model_config = {"populate_by_name": True}
+
+
+class FeederDRTrigger(BaseModel):
+    above_pct: float
+
+
+class FeederDRConfig(BaseModel):
+    element: str
+    program: DRProgramConfig
+    trigger: FeederDRTrigger | None = None  # or events
+    events: DREventsConfig | None = None
+    duration: Literal["fixed", "variable"] = "variable"
+    hours: float | None = None  # fixed duration; default the program's max_hours
+    customer_class: Literal["residential", "commercial"] = "residential"
+    tz: str = "America/Los_Angeles"
+
+
+MechanismName = Literal["price_signal", "envelopes", "dr_events"]
+
+
+class CoordinationConfig(BaseModel):
+    price_signal: PriceSignalConfig | None = None
+    envelopes: EnvelopeConfig | None = None
+    dr_events: FeederDRConfig | None = None
+    runs: dict[str, list[MechanismName]] | None = None  # left out: each alone, plus all combined
+
+
 class FeederScenarioConfig(BaseModel):
     name: str
     time_grid: TimeGridConfig
@@ -310,3 +396,4 @@ class FeederScenarioConfig(BaseModel):
     synthetic_houses: list[SyntheticHousesConfig] = Field(default_factory=list)
     premise_data: PremiseDataConfig | None = None
     billing: BillingConfig | None = None
+    coordination: CoordinationConfig | None = None

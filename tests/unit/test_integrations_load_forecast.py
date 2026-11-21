@@ -156,10 +156,9 @@ def test_example_feeder_scenario_reads_the_bank_trace(monkeypatch):
     root = Path(__file__).resolve().parents[2]
     monkeypatch.chdir(root)
     built = build_feeder_scenario(load_feeder_config("examples/scenarios/feeder_bank_planning_trace.yaml"))
-    existing = next(p for p in built.premises if p.name == "existing_bank_load")
-    load = np.asarray(existing.external_load)
-    stamps = existing.time_grid.timestamps()
-    peak = int(load.argmax())
-    assert load.max() == pytest.approx(1990.4, abs=1.0)  # the design year's annual peak
+    element, load = built.background["existing_bank_load"]  # background load: fixed, not billed
+    stamps = built.premises[0].time_grid.timestamps()
+    peak = int(np.asarray(load).argmax())
+    assert np.max(load) == pytest.approx(1990.4, abs=1.0)  # the design year's annual peak
     assert stamps[peak] == datetime(2026, 8, 4, 16)
-    assert built.houses.loc["existing_bank_load", "element"] == "bank"
+    assert element == "bank" and "existing_bank_load" not in built.houses.index

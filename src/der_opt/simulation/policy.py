@@ -60,3 +60,30 @@ class RuleBasedEVChargingPolicy(ControlPolicy):
         if soc >= self.soc_max:
             return {"p_ch": 0.0}
         return {"p_ch": self.p_max_charge_kw}
+
+
+def setpoint_power(thermostat, temp: float, t: int, setpoint: float) -> float:
+    """The HVAC power that brings a thermostat's temperature to `setpoint` by the end of
+    step t (cooling: at most the setpoint; heating: at least), within its rating."""
+    dt = thermostat.time_grid.dt_hours
+    drift = (thermostat.T_amb[t] - temp) / thermostat.R
+    needed = thermostat.sign * ((setpoint - temp) * thermostat.C / dt - drift) / thermostat.cop
+    return min(max(needed, 0.0), thermostat.p_max_kw)
+
+
+class SetpointThermostatPolicy(ControlPolicy):
+    """A plain thermostat: cools (or heats) just enough to hold the comfort limit --
+    the top of the band when cooling, the bottom when heating. `offset_c` moves the
+    setpoint (positive = warmer when cooling)."""
+
+    def __init__(self, thermostat, offset_c: float = 0.0):
+        self.thermostat = thermostat
+        self.offset_c = offset_c
+
+    def setpoint(self, t: int, offset_c: float = 0.0) -> float:
+        th = self.thermostat
+        base = th.T_max[t] if th.sign < 0 else th.T_min[t]
+        return base + (self.offset_c + offset_c) * (1 if th.sign < 0 else -1)
+
+    def decide(self, state: dict, observations: dict, t: int) -> dict:
+        return {"p_hvac": setpoint_power(self.thermostat, state["temp"], t, self.setpoint(t))}

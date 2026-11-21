@@ -121,7 +121,7 @@ house_defaults:
 |---|---|
 | EV | `pause` (`catch_up`); `discharge`, V2X only (`to: home_load` or `export`, `max_kw`, `keep_soc_frac`, the charge it won't go below); `limit`; `none` |
 | Battery | `discharge` (`to: home_load` or `export`, `max_kw`, `keep_soc_frac`, `precharge_hours`: charge to full from the grid in the hours before an event); `limit`; `none` |
-| Thermostat | `setback` (`offset_c`, `precool_hours`, `precool_offset_c`); `none` |
+| Thermostat | `setback` (`offset_c`, `precool_hours`, `precool_offset_c`): moves the setpoint of a thermostat whose baseline is the `setpoint` counterfactual policy (cool just enough to hold the comfort limit); `none` |
 | Flexible load | `shed` (`blocks`: `all` or a number); `none` |
 | Solar | `curtail`; `none` |
 

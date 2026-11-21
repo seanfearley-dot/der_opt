@@ -102,18 +102,37 @@ class CapacityDeferral(NetworkValueStream):
         return self.value_per_kw * max(0.0, float(flows[self.element].max()) - self.threshold_kw)
 
 
-def element_flows(feeder: Feeder, dispatches: dict[str, DispatchResult]) -> pd.DataFrame:
+FixedLoads = dict[str, tuple[str, np.ndarray]]  # name -> (element it's attached to, kW per step)
+
+
+def fixed_below(feeder: Feeder, element: str, fixed: FixedLoads | None) -> np.ndarray | None:
+    """Fixed kW through an element from loads attached at or below it (background load,
+    non-participants), or None if there are none."""
+    total = None
+    for attached, kw in (fixed or {}).values():
+        if element in feeder.path_to_root(attached):
+            total = np.asarray(kw, dtype=float) if total is None else total + np.asarray(kw, dtype=float)
+    return total
+
+
+def element_flows(feeder: Feeder, dispatches: dict[str, DispatchResult], fixed: FixedLoads | None = None,
+                  index=None) -> pd.DataFrame:
     """kW through each element (positive toward the premises, negative = backfeed) for
-    any set of premise dispatches -- optimized jointly, separately, or simulated."""
+    any set of premise dispatches -- optimized jointly, separately, or simulated -- plus
+    any fixed loads (background load; non-participants solved on their own)."""
     net = {name: result.grid_import - result.grid_export for name, result in dispatches.items()}
-    missing = set(feeder.attachments) - set(net)
+    covered = set(net) | set(fixed or {})
+    missing = set(feeder.attachments) - covered
     if missing:
         raise ValueError(f"no dispatch for attached premises {sorted(missing)}")
+    if index is None:
+        index = next(iter(net.values())).index
     flows = {}
     for element in feeder.elements:
-        below = feeder.premises_below(element.name)
-        index = next(iter(net.values())).index
-        flows[element.name] = sum((net[p] for p in below), pd.Series(0.0, index=index))
+        below = [p for p in feeder.premises_below(element.name) if p in net]
+        flow = sum((net[p] for p in below), pd.Series(0.0, index=index))
+        extra = fixed_below(feeder, element.name, {k: v for k, v in (fixed or {}).items() if k not in net})
+        flows[element.name] = flow + (extra if extra is not None else 0.0)
     return pd.DataFrame(flows)
 
 
@@ -167,7 +186,11 @@ class NetworkDispatchModel:
         premises: list[Premise],
         value_streams: list[NetworkValueStream] | None = None,
         tie_break_per_kwh_hour: float = EARLIEST_TIE_BREAK_PER_KWH_HOUR,
+        fixed_loads: FixedLoads | None = None,
     ):
+        """fixed_loads: kW through the network that the optimization can't change --
+        background load, and non-participants' own dispatch -- by name, with the element
+        each is attached to."""
         names = [premise.name for premise in premises]
         if len(set(names)) != len(names):
             raise ValueError("premise names must be unique on a feeder")
@@ -182,6 +205,7 @@ class NetworkDispatchModel:
         self.value_streams = list(value_streams or [])
         self.tie_break_per_kwh_hour = tie_break_per_kwh_hour
         self.time_grid = premises[0].time_grid
+        self.fixed_loads = dict(fixed_loads or {})
         self.flows: dict[str, pyo.Var] = {}
 
     def build_model(self) -> pyo.ConcreteModel:
@@ -194,6 +218,8 @@ class NetworkDispatchModel:
 
         for element in self.feeder.elements:
             below = [by_name[name] for name in self.feeder.premises_below(element.name) if name in by_name]
+            fixed = fixed_below(self.feeder, element.name, self.fixed_loads)
+            fixed = np.zeros(len(model.T)) if fixed is None else fixed
             flow = pyo.Var(model.T, domain=pyo.Reals)
             model.add_component(_flow_name(element.name), flow)
             self.flows[element.name] = flow
@@ -201,7 +227,8 @@ class NetworkDispatchModel:
                 f"{_flow_name(element.name)}_def",
                 pyo.Constraint(
                     model.T,
-                    rule=lambda _m, t, f=flow, ps=below: f[t] == sum(p.grid_import[t] - p.grid_export[t] for p in ps),
+                    rule=lambda _m, t, f=flow, ps=below, x=fixed: f[t]
+                    == sum(p.grid_import[t] - p.grid_export[t] for p in ps) + float(x[t]),
                 ),
             )
             if element.rating_kw is None:
@@ -248,7 +275,7 @@ class NetworkDispatchModel:
             )
             for premise in self.premises
         }
-        flows = element_flows(self.feeder, dispatches)
+        flows = element_flows(self.feeder, dispatches, self.fixed_loads)
         return NetworkResult(
             premises=dispatches,
             flows=flows,

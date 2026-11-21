@@ -9,7 +9,7 @@
 # years whose annual peak is closest to POE90, POE50 and POE10, plus hourly quantiles over all
 # 200. `trace: poe10` picks the 1-in-10 design year, which peaks at 1,990 kW on 4 Aug 2026 at
 # 16:00 -- inside this window. `net` is what the bank sees: after the existing customers'
-# rooftop PV, with losses and unmetered load. Its customers are fixed load here (no devices).
+# rooftop PV, with losses and unmetered load. Its customers are background load here: fixed, not billed, never flexible.
 #
 # The new homes are der_opt's own synthetic houses, generated for a heat wave of similar
 # strength; their weather is not the loadcast trace's weather, so treat this as a sizing study,
@@ -39,17 +39,15 @@ feeder:
       rating_kw: 75
       overload_cost_per_kwh: 1.0
 
-houses:
-  - name: existing_bank_load
-    element: bank
-    devices: []
-    value_streams: [] # not billed here; it only loads the bank
-    poi_limit_kw: 5000 # overrides the homes' 30 kW service limit from house_defaults
-    external_load:
-      source: loadcast
-      path: ../data/loadcast/bank_a_2026_planning.nc
-      trace: poe10 # or poe50 / poe90 / max, a trace index, or quantile: 0.9 (an hourly envelope)
-      var: net
+  # the bank's existing customers: fixed load, not billed, never flexible
+  background_load:
+    - name: existing_bank_load
+      element: bank
+      load:
+        source: loadcast
+        path: ../data/loadcast/bank_a_2026_planning.nc
+        trace: poe10 # or poe50 / poe90 / max, a trace index, or quantile: 0.9 (an hourly envelope)
+        var: net
 
 synthetic_houses:
   - element: tx_new_a

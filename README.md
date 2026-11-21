@@ -68,6 +68,7 @@ der-opt run examples/scenarios/feeder_ev_heat_wave.yaml -o out/feeder           
 der-opt run examples/scenarios/feeder_bank_planning_trace.yaml -o out/bank_trace  # bank 1-in-10 year + 40 new homes (.[forecast])
 der-opt run examples/scenarios/battery_caiso_lmp.yaml                             # battery on CAISO LMP
 der-opt run examples/scenarios/feeder_from_files.yaml                             # 6 homes from spec files
+der-opt run examples/scenarios/feeder_coordination.yaml -o out/coordination       # price signal, envelopes, feeder DR
 der-opt run examples/scenarios/dr_battery_annual.yaml -o out/dr                   # DR program, full year
 der-opt run examples/scenarios/ev_commuter_annual.yaml -o out/ev                  # V2X EV from a daily pattern, full year
 ```
@@ -412,6 +413,7 @@ available, batteries/EVs/thermostats sit idle, curtailable load is fully served.
 |---|---|---|---|
 | `self_consumption` | charge from solar surplus, discharge to cover load, ignore prices | `battery` (or `ev_v2x`) | `p_max_charge_kw`, `p_max_discharge_kw` |
 | `rule_based_ev` | charge at full power from plug-in until full, never discharge | `ev_v2x` | `p_max_charge_kw`, `soc_max` (kWh) |
+| `setpoint` | cool (or heat) just enough to hold the comfort limit, like a plain thermostat | `thermostat` | `offset_c` (moves the setpoint) |
 | `no_flexibility` | idle | any | — |
 
 Power limits default to the device's own. The counterfactual follows its rule only —
@@ -844,12 +846,93 @@ subdivision (80% EVs) joins on two 75 kW transformers. Over 3-6 Aug:
 
 The bank's own 4 pm peak leaves the new homes little room, but what binds first is their
 service transformers. Coordination costs 13 homes $40 in total for a $1,282 network saving.
-The existing load is fixed here (no controllable devices), the new homes' synthetic weather is
+The existing load is background load here (fixed, not billed), the new homes' synthetic weather is
 not the trace's weather, and loadcast's bank load includes its losses while the new homes'
 doesn't -- a sizing study, not a single consistent day.
 
 Flow is a power balance only: no losses, voltage, or reactive power, so convert kVA
 nameplates to kW yourself. Every house shares one time grid.
+
+### Coordination: price signals, operating envelopes, feeder DR
+
+The coordinated run is the ideal: one optimizer, perfect foresight. A `coordination`
+section adds runs with mechanisms a utility could use, alone or combined. Each run is
+measured against `independent` (the feeder with no program) and the ideal. Spec:
+[docs/COORDINATION_SPEC.md](docs/COORDINATION_SPEC.md); example:
+`examples/scenarios/feeder_coordination.yaml`.
+
+```yaml
+house_defaults:
+  participation: participant # or non_participant
+  baseline_behavior: own_bill # without a program: own_bill or rule_based
+  response: optimized # with one: optimized, or rules
+houses:
+  - name: home_02
+    baseline_behavior: rule_based
+    response: rules
+    rules: {dr_event: {ev: {action: discharge, to: export, keep_soc_frac: 0.5}}} # a V2X EV exports for events
+feeder:
+  background_load: # load that isn't a customer: fixed, not billed, never flexible
+    - {name: strip_mall, element: tx_2, load: {source: timeseries, path: ..., premise_id: strip_mall, column: load_kw}}
+coordination:
+  price_signal: {source: coordinated} # or schedule (by element, month and hour), or file
+  envelopes: {} # pro_rata_need shares of each element's headroom, a new envelope each hour
+  dr_events:
+    element: tx_1
+    trigger: {above_pct: 80} # events where the forecast loading is over 80% of the rating
+    program: {program_id: tx_1_peak, window: "15:00-22:00", max_hours: 4, response: incentive, incentive_per_kwh: 0.75}
+  runs: # optional; without it, each mechanism alone, plus all combined
+    envelopes: [envelopes]
+    signal_and_envelopes: [price_signal, envelopes]
+```
+
+**Who takes part:**
+- Non-participants behave the same in every run, and are fixed flows for everyone
+  else, like background load.
+- Participants follow `baseline_behavior` in `independent`, and respond to each run's
+  mechanisms:
+  - **optimized:** their own bill plus the mechanisms;
+  - **by rule:** their baseline rules, overridden step by step without looking ahead.
+
+**Rules** are actions with settings, by mechanism and device type (or device name):
+
+| Device | Actions |
+|---|---|
+| EV | `pause`, `discharge` (V2X: `to: home_load` or `export`, `keep_soc_frac`), `limit` |
+| Battery | `discharge`, with optional `precharge_hours` |
+| Thermostat | `setback`, with optional precool; needs the `setpoint` counterfactual policy |
+| Flexible load | `shed` |
+| Solar | `curtail` |
+
+When two rules apply at once, the one that draws less from the grid wins.
+
+**The mechanisms:**
+- **Price signal:** a $/kWh adder on net import, summed along the customer's path. It's
+  charged on the bill (`paid: true`) and reported as signal charges.
+- **Envelopes:** each participant's import (and optionally export) limit by step. It's
+  built from each element's rating less a margin, less non-participants' and background
+  flows, then:
+  - allocated by `pro_rata_need` (default), `equal`, `max_min`, `service_size`,
+    `weights`, `fixed` or `file`;
+  - nested `min_along_path` (default) or `top_down`;
+  - issued per step, per block of hours, or once (`static`).
+
+  Limits are soft: going over is penalized and reported.
+- **Feeder DR:** events triggered by the loading forecast of a "twin" without events.
+  For DR alone, that's `independent`; combined, it's the other mechanisms in place.
+  Participants below the element are settled against their own history, or the twin's
+  load when the run is too short for the settlement rule's lookback.
+
+**What's written:**
+- `coordination.csv`: one row per run, with peaks, hours over the rating, network cost,
+  bills by group, payments, and the network saving against the ideal's.
+- `customers.csv`: one row per customer and run.
+- `envelopes_<run>.csv`, `signal_<run>.csv`, `dr_calendar_<run>.csv`.
+
+In the example, envelopes capture 87% of the ideal's network saving, and the three
+together 95%. The evening price signal and the DR events, each alone, *add* $95 to
+network cost: participants move charging to just after the window, which makes a new
+peak on tx_1.
 
 ## Modeling caveats worth knowing
 
@@ -928,6 +1011,7 @@ src/der_opt/
   cost_test/     the measure impact package for cost tests (OpenBCA)
   integrations/  LBNL load, EV model, PVWatts, PG&E NBT export rates, CAISO LMP
   network/       feeder topology, multi-premise dispatch, congestion prices, synthetic houses
+  coordination/  participation, price signals, operating envelopes, rule-based responses, feeder DR
   scenarios/     YAML schema, loader, extends and paths, validate, templates (der-opt new), feeder scenarios
   viz/           heatmap, dispatch, value stack, duals, comparison, feeder loading charts
   cli/           der-opt CLI

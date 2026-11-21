@@ -246,6 +246,55 @@ def price_based(price: np.ndarray, program, time_grid: TimeGrid, settings) -> li
     return check_calendar(events, program, time_grid)
 
 
+def loading_triggered(loading_pct: np.ndarray, program, time_grid: TimeGrid, above_pct: float,
+                      duration: str = "variable", hours: float | None = None) -> list[Event]:
+    """Feeder DR (docs/COORDINATION_SPEC.md section 5): events on the days an element's
+    forecast loading goes above `above_pct` of its rating inside the program window,
+    highest first, within the program's limits. variable: the steps over the trigger
+    around the day's peak, held to min_hours..max_hours; fixed: `hours` (default
+    max_hours) at the day's highest-loading block."""
+    stamps = pd.DatetimeIndex(time_grid.timestamps())
+    value = pd.Series(np.asarray(loading_pct, dtype=float), index=stamps)
+    dt = time_grid.dt_hours
+    peaks = {}
+    for day in eligible_days(program, time_grid):
+        window = value.loc[_steps_in_window(day, program, time_grid)]
+        if len(window) and window.max() > above_pct:
+            peaks[day] = float(window.max())
+    chosen: list[date] = []
+    for day in sorted(peaks, key=lambda d: -peaks[d]):
+        if _limits_allow(chosen, day, program, None):
+            chosen.append(day)
+    events = []
+    n_min, n_max = round(program.min_hours / dt), round(program.max_hours / dt)
+    for day in sorted(chosen):
+        window = value.loc[_steps_in_window(day, program, time_grid)]
+        if duration == "fixed":
+            n = min(round((hours or program.max_hours) / dt), len(window))
+            sums = window.rolling(n).sum().shift(-(n - 1)).dropna()
+            start, length = sums.idxmax(), n
+        else:
+            over = window.to_numpy() > above_pct
+            peak = int(np.argmax(window.to_numpy()))
+            lo = hi = peak
+            while lo > 0 and over[lo - 1] and hi - lo + 1 < n_max:
+                lo -= 1
+            while hi + 1 < len(window) and over[hi + 1] and hi - lo + 1 < n_max:
+                hi += 1
+            while hi - lo + 1 < n_min:  # too short: widen toward the higher neighbor
+                left = window.iloc[lo - 1] if lo > 0 else -np.inf
+                right = window.iloc[hi + 1] if hi + 1 < len(window) else -np.inf
+                if left == right == -np.inf:
+                    break
+                if right >= left:
+                    hi += 1
+                else:
+                    lo -= 1
+            start, length = window.index[lo], hi - lo + 1
+        events.append(_event(program, day, start, length * dt, "dispatch", f"loading>{above_pct:g}%/{duration}"))
+    return check_calendar(events, program, time_grid)
+
+
 def randomized(program, time_grid: TimeGrid, settings, replicate: int = 0, price: np.ndarray | None = None) -> list[Event]:
     """The spec's 1c proposal: a set number of events per month on randomly drawn
     eligible days (uniform, or weighted toward high prices), at random allowed starts,

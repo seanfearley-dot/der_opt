@@ -1,0 +1,132 @@
+# Six homes on two transformers, with the three coordination mechanisms a utility could
+# use -- a price signal, dynamic operating envelopes and feeder DR events -- each alone
+# and combined, measured against the ideal (docs/COORDINATION_SPEC.md). Run with:
+#   der-opt run examples/scenarios/feeder_coordination.yaml -o out/coordination
+#
+# The homes are the synthetic sample in ../data/spec_sample/ (the same as
+# feeder_from_files.yaml), written out here so each can have its own part:
+#   home_01  solar and an EV: a participant, optimized
+#   home_02  an EV that charges on plug-in: a participant responding by rule (it pauses
+#            for events and stays within its envelope)
+#   home_03  an EV that charges on plug-in today; enrolling brings a managed charger
+#            (a participant, rule-based baseline, optimized response)
+#   home_04  no DERs: a participant with nothing to flex
+#   home_05  metered (its devices are in its meter data): not in the program, own bill
+#   home_06  solar and a battery: a participant, optimized
+# A strip mall on tx_2 is background load: fixed, not billed, never flexible.
+# Prices are E-ELEC import and a flat $0.05/kWh export, so every run is an LP. The
+# mechanisms' values (signal, incentive) are illustrative.
+
+extends:
+  - ../library/time/2026-07-13T12_72x60min.yaml
+  - ../library/feeder/homes_bill.yaml # the counterfactual policies (EVs on plug-in, batteries self-consume)
+
+name: feeder_coordination
+
+feeder:
+  elements:
+    - {name: lateral, rating_kw: 100}
+    - {name: tx_1, parent: lateral, rating_kw: 16, overload_cost_per_kwh: 1.0}
+    - {name: tx_2, parent: lateral, rating_kw: 15, overload_cost_per_kwh: 1.0}
+  value_streams:
+    - {type: capacity_deferral, element: tx_1, value_per_kw: 40.0}
+  background_load:
+    - name: strip_mall
+      element: tx_2
+      load: {source: timeseries, path: ../data/spec_sample/background.csv, premise_id: strip_mall, column: load_kw}
+
+house_defaults:
+  value_streams: # replaces homes_bill's bill objective: these homes aren't billed on a tariff here
+    - type: energy_arbitrage
+      params:
+        import_price: {type: retail_tariff, path: ../data/tariffs/pge_e_elec_2026-06.yaml}
+        export_price: {type: constant, price: 0.05} # illustrative
+  poi_limit_kw: 20
+
+houses:
+  - name: home_01
+    element: tx_1
+    external_load: {source: timeseries, path: ../data/spec_sample/timeseries.csv, premise_id: home_01, column: load_kw}
+    devices:
+      - {type: solar, name: solar, params: {available_kw: {source: timeseries, path: ../data/spec_sample/timeseries.csv, premise_id: home_01, column: pv_kw}}}
+      - type: ev_v2x
+        name: ev
+        params:
+          capacity_kwh: 60
+          p_max_charge_kw: 7.2
+          p_max_discharge_kw: 0
+          soc_init_frac: 0.9
+          soc_max_frac: 0.9
+          soc_departure_min_frac: 0.9 # at every departure, found from ev_connected
+          connected: {source: timeseries, path: ../data/spec_sample/timeseries.csv, premise_id: home_01, column: ev_connected}
+          driving_kwh: {source: timeseries, path: ../data/spec_sample/timeseries.csv, premise_id: home_01, column: ev_driving_kwh}
+  - name: home_02
+    element: tx_1
+    baseline_behavior: rule_based # charges on plug-in today
+    response: rules # enrolled: pauses for events, fits its envelope
+    external_load: {source: timeseries, path: ../data/spec_sample/timeseries.csv, premise_id: home_02, column: load_kw}
+    devices:
+      - type: ev_v2x
+        name: ev
+        params:
+          capacity_kwh: 82
+          p_max_charge_kw: 7.2
+          p_max_discharge_kw: 0
+          soc_init_frac: 0.9
+          soc_max_frac: 0.9
+          soc_departure_min_frac: 0.9
+          connected: {source: timeseries, path: ../data/spec_sample/timeseries.csv, premise_id: home_02, column: ev_connected}
+          driving_kwh: {source: timeseries, path: ../data/spec_sample/timeseries.csv, premise_id: home_02, column: ev_driving_kwh}
+  - name: home_03
+    element: tx_1
+    baseline_behavior: rule_based # charges on plug-in today
+    response: optimized # enrolled: a managed charger
+    external_load: {source: timeseries, path: ../data/spec_sample/timeseries.csv, premise_id: home_03, column: load_kw}
+    devices:
+      - type: ev_v2x
+        name: ev
+        params:
+          capacity_kwh: 60
+          p_max_charge_kw: 7.2
+          p_max_discharge_kw: 0
+          soc_init_frac: 0.9
+          soc_max_frac: 0.9
+          soc_departure_min_frac: 0.9
+          connected: {source: timeseries, path: ../data/spec_sample/timeseries.csv, premise_id: home_03, column: ev_connected}
+          driving_kwh: {source: timeseries, path: ../data/spec_sample/timeseries.csv, premise_id: home_03, column: ev_driving_kwh}
+  - name: home_04
+    element: tx_2
+    external_load: {source: timeseries, path: ../data/spec_sample/timeseries.csv, premise_id: home_04, column: load_kw}
+  - name: home_05
+    element: tx_2
+    participation: non_participant
+    external_load: {source: timeseries, path: ../data/spec_sample/timeseries.csv, premise_id: home_05, column: net_kw}
+  - name: home_06
+    element: tx_2
+    external_load: {source: timeseries, path: ../data/spec_sample/timeseries.csv, premise_id: home_06, column: load_kw}
+    devices:
+      - {type: solar, name: solar, params: {available_kw: {source: timeseries, path: ../data/spec_sample/timeseries.csv, premise_id: home_06, column: pv_kw}}}
+      - type: battery
+        name: battery
+        params: {capacity_kwh: 13.5, p_max_charge_kw: 5, p_max_discharge_kw: 5, soc_init_frac: 0.5,
+                 soc_final_min_frac: 0.5, degradation_cost_per_kwh: 0.015, charge_sources: [solar]}
+
+coordination:
+  price_signal:
+    source: schedule # a fixed evening adder on both transformers, like a critical-peak adder
+    schedule:
+      - {element: tx_1, per_kwh: 0.40, hours: "16:00-21:00"} # illustrative
+      - {element: tx_2, per_kwh: 0.40, hours: "16:00-21:00"}
+  envelopes: {} # pro_rata_need shares of each transformer's headroom, a new envelope each hour
+  dr_events:
+    element: tx_1
+    trigger: {above_pct: 80} # call an event where tx_1's forecast loading is above 80%
+    program:
+      program_id: tx_1_peak
+      window: "15:00-22:00"
+      min_hours: 1
+      max_hours: 4
+      max_events_per_month: 8
+      response: incentive
+      incentive_per_kwh: 0.75 # illustrative
+  # no runs: each mechanism alone, plus all three combined

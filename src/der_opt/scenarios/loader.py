@@ -42,6 +42,7 @@ from der_opt.simulation import (
     NoFlexibilityPolicy,
     RuleBasedEVChargingPolicy,
     SelfConsumptionBatteryPolicy,
+    SetpointThermostatPolicy,
 )
 from der_opt.time_grid import TimeGrid
 
@@ -292,9 +293,13 @@ def _build_policy(device_name: str, policy_config: dict, device: Device) -> Cont
         return RuleBasedEVChargingPolicy(
             p_max_charge_kw=device_attr("p_max_charge_kw"), soc_max=device_attr("soc_max")
         )
+    if kind == "setpoint":
+        if not hasattr(device, "T_amb"):
+            raise ValueError(f"counterfactual policy 'setpoint' on {device_name!r} is for thermostats")
+        return SetpointThermostatPolicy(device, offset_c=overrides.get("offset_c", 0.0))
     raise ValueError(
         f"Unknown counterfactual policy type {kind!r} for {device_name!r}; "
-        "expected 'self_consumption', 'rule_based_ev', or 'no_flexibility'"
+        "expected 'self_consumption', 'rule_based_ev', 'setpoint', or 'no_flexibility'"
     )
 
 

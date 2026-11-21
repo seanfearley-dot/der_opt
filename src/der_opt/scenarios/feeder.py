@@ -25,7 +25,6 @@ from der_opt.network import (
     NetworkDispatchModel,
     NetworkElement,
     element_flows,
-    solve_independently,
 )
 from der_opt.network.synthetic import synthetic_houses
 from der_opt.premise import Premise
@@ -67,9 +66,12 @@ class FeederScenario:
     premises: list[Premise]
     network_streams: list
     houses: pd.DataFrame  # one row per house: element, devices, synthetic draws
+    roles: dict = field(default_factory=dict)  # house -> coordination Role
+    background: dict = field(default_factory=dict)  # name -> (element, kW): background load
+    explicit_rules: dict = field(default_factory=dict)  # house -> rules as written on it
 
     def network(self) -> NetworkDispatchModel:
-        return NetworkDispatchModel(self.feeder, self.premises, self.network_streams)
+        return NetworkDispatchModel(self.feeder, self.premises, self.network_streams, fixed_loads=self.background)
 
 
 def _house_scenario(config: FeederScenarioConfig, house: HouseConfig) -> ScenarioConfig:
@@ -249,13 +251,28 @@ def build_feeder_scenario(config: FeederScenarioConfig) -> FeederScenario:
     feeder = Feeder(config.name, elements, attachments={house.name: house.element for house in house_list})
     house_configs = [_house_scenario(config, house) for house in house_list]
     premises = [build_premise(house_config) for house_config in house_configs]
+    from der_opt.coordination.roles import house_role
+    from der_opt.scenarios.loader import _resolve_external_load
+
+    roles = {house.name: house_role(config.house_defaults, house) for house in house_list}
+    time_grid = _build_time_grid(config.time_grid)
+    background = {}
+    names = {house.name for house in house_list}
+    for item in config.feeder.background_load:
+        if item.name in names or item.name in background:
+            raise ValueError(f"background_load {item.name!r}: the name is already used")
+        feeder.element(item.element)  # fails early on a typo
+        background[item.name] = (item.element, _resolve_external_load(item.load, time_grid))
     streams = [CapacityDeferral(s.element, s.value_per_kw, s.threshold_kw) for s in config.feeder.value_streams]
     for stream in streams:
         feeder.element(stream.element)  # fails early on a typo
     houses = pd.DataFrame(explicit_rows + rows).set_index("house").loc[[h.name for h in house_list]]
     houses.insert(0, "element", [house.element for house in house_list])
     houses.insert(1, "devices", [", ".join(d.name for d in house.devices) or "-" for house in house_list])
-    return FeederScenario(config, feeder, house_configs, premises, streams, houses)
+    houses.insert(2, "group", [roles[h.name].group for h in house_list])
+    houses.insert(3, "baseline_behavior", [roles[h.name].baseline_behavior for h in house_list])
+    explicit = {house.name: getattr(house, "rules", {}) or {} for house in house_list}
+    return FeederScenario(config, feeder, house_configs, premises, streams, houses, roles, background, explicit)
 
 
 @dataclass
@@ -280,6 +297,51 @@ class FeederStudy:
     congestion_prices: pd.DataFrame
     prices_exact: bool
     checks: CheckReport = field(default_factory=CheckReport)
+    coordination: object | None = None  # coordination.study.CoordinationResult
+
+    def coordination_table(self) -> pd.DataFrame:
+        """One row per run: network loading and costs, customers' costs by group, the
+        mechanisms' payments, and the share of the ideal captured."""
+        from der_opt.coordination.study import share_of_ideal
+
+        groups = self.scenario.houses["group"]
+        mech = self.coordination.runs if self.coordination is not None else {}
+        net = {label: sum(run.network_costs.values()) for label, run in self.runs.items()}
+        rows = []
+        for label, run in self.runs.items():
+            row = {"run": label, "mechanisms": ", ".join(mech[label].mechanisms) if label in mech else ""}
+            for element in self.scenario.feeder.elements:
+                row[f"{element.name}_peak_kw"] = float(run.flows[element.name].max())
+                if element.rating_kw:
+                    over = (run.flows[element.name].abs() > element.rating_kw + 1e-6).sum()
+                    row[f"{element.name}_hours_over"] = float(over * self.scenario.premises[0].time_grid.dt_hours)
+            row["network_cost"] = net[label]
+            for group in sorted(set(groups)):
+                members = groups.index[groups == group]
+                row[f"bills: {group}"] = float(run.house_costs.loc[members, "bill"].sum())
+            row["degradation"] = float(run.house_costs["degradation"].sum())
+            if label in mech and not mech[label].payments.empty:
+                for column in mech[label].payments.columns:
+                    row[column] = float(mech[label].payments[column].sum())
+            if label in mech and {"independent", "coordinated"} <= set(net):
+                row["network_saving"] = net["independent"] - net[label]
+                row["ideal_network_saving"] = net["independent"] - net["coordinated"]
+                row["share_of_ideal"] = share_of_ideal(net["independent"], net[label], net["coordinated"])
+            rows.append(row)
+        return pd.DataFrame(rows).set_index("run")
+
+    def customers_table(self) -> pd.DataFrame:
+        """One row per customer and run."""
+        mech = self.coordination.runs if self.coordination is not None else {}
+        frames = []
+        for label, run in self.runs.items():
+            frame = run.house_costs.copy()
+            frame.insert(0, "group", self.scenario.houses["group"])
+            if label in mech and not mech[label].payments.empty:
+                frame = frame.join(mech[label].payments)
+            frame.insert(0, "run", label)
+            frames.append(frame.rename_axis("house").reset_index())
+        return pd.concat(frames, ignore_index=True)
 
 
 def _house_costs(premises: list[Premise], dispatches: dict[str, DispatchResult]) -> pd.DataFrame:
@@ -292,20 +354,43 @@ def _house_costs(premises: list[Premise], dispatches: dict[str, DispatchResult])
 
 
 def _summarize(label, scenario: FeederScenario, network: NetworkDispatchModel, dispatches) -> RunSummary:
-    flows = element_flows(scenario.feeder, dispatches)
+    flows = element_flows(scenario.feeder, dispatches, scenario.background)
     return RunSummary(label, dispatches, flows, _house_costs(scenario.premises, dispatches), network.network_costs(flows))
 
 
 def run_feeder_study(scenario: FeederScenario, independent: bool = True, counterfactual: bool = True) -> FeederStudy:
+    """The coordinated, independent and counterfactual runs, then each coordination run
+    (docs/COORDINATION_SPEC.md). Non-participants and background load are fixed flows
+    in every run; participants are what the runs change."""
+    from der_opt.coordination.study import baselines, make_network, run_coordination
     from der_opt.simulation import CounterfactualSimulator
 
-    network = scenario.network()
-    result, model, backend = network.solve()
-    prices, exact = network.congestion_prices(model, backend)
-    runs = {"coordinated": _summarize("coordinated", scenario, network, result.premises)}
+    roles = scenario.roles
+    participants = [p for p in scenario.premises if roles[p.name].participant]
+    coordinating = scenario.config.coordination is not None
+    needs_base = independent or coordinating or len(participants) < len(scenario.premises)
+    base = baselines(scenario) if needs_base else {}
+    fixed = dict(scenario.background)
+    for premise in scenario.premises:
+        if not roles[premise.name].participant:
+            result = base[premise.name]
+            fixed[premise.name] = (scenario.feeder.attachments[premise.name],
+                                   (result.grid_import - result.grid_export).to_numpy())
+    cost_network = scenario.network()
+    index = pd.DatetimeIndex(scenario.premises[0].time_grid.timestamps())
+    if participants:
+        network = make_network(scenario, participants, fixed)
+        result, model, backend = network.solve()
+        prices, exact = network.congestion_prices(model, backend)
+        coordinated = dict(result.premises)
+    else:
+        prices = pd.DataFrame(0.0, index=index, columns=[e.name for e in scenario.feeder.elements])
+        exact, coordinated = True, {}
+    coordinated |= {name: base[name] for name in fixed if name in base}
+    runs = {"coordinated": _summarize("coordinated", scenario, cost_network, coordinated)}
 
-    if independent:
-        runs["independent"] = _summarize("independent", scenario, network, solve_independently(scenario.premises))
+    if independent or coordinating:
+        runs["independent"] = _summarize("independent", scenario, cost_network, base)
 
     if counterfactual:
         policies = {
@@ -317,8 +402,15 @@ def run_feeder_study(scenario: FeederScenario, independent: bool = True, counter
                 premise.name: CounterfactualSimulator(premise, policies[premise.name] or {}).run()
                 for premise in scenario.premises
             }
-            runs["counterfactual"] = _summarize("counterfactual", scenario, network, dispatches)
-    return FeederStudy(scenario, runs, prices, exact, check_feeder_study(scenario, runs))
+            runs["counterfactual"] = _summarize("counterfactual", scenario, cost_network, dispatches)
+
+    coordination = None
+    if coordinating:
+        coordination = run_coordination(scenario, base, fixed, prices, cost_network)
+        for label, run in coordination.runs.items():
+            runs[label] = _summarize(label, scenario, cost_network, run.dispatches)
+    study = FeederStudy(scenario, runs, prices, exact, check_feeder_study(scenario, runs), coordination)
+    return study
 
 
 def check_feeder_study(scenario: FeederScenario, runs: dict[str, RunSummary]) -> CheckReport:

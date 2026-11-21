@@ -154,9 +154,10 @@ def _run_feeder(scenario: Path, output_dir: Path | None, no_counterfactual: bool
         }
     rows["Total"] = {k: r.total for k, r in runs.items()}
     width = max(len(name) for name in rows) + 2
-    typer.echo(" " * (width + 2) + "".join(f"{label:>16}" for label in runs))
+    columns = {label: max(16, len(label) + 2) for label in runs}
+    typer.echo(" " * (width + 2) + "".join(f"{label:>{columns[label]}}" for label in runs))
     for name, values in rows.items():
-        typer.echo(f"  {name:<{width}}" + "".join(f"{_money(values[k]):>16}" for k in runs))
+        typer.echo(f"  {name:<{width}}" + "".join(f"{_money(values[k]):>{columns[k]}}" for k in runs))
 
     typer.echo("\nPeak loading:")
     summaries = {label: loading_summary(run.flows, built.feeder, time_grid) for label, run in runs.items()}
@@ -199,6 +200,8 @@ def _run_feeder(scenario: Path, output_dir: Path | None, no_counterfactual: bool
                 f"at most {_money(worse.max())}, {worse.idxmax()}), for a network saving of "
                 f"{_money(sum(runs['independent'].network_costs.values()) - sum(runs['coordinated'].network_costs.values()))}"
             )
+    if study.coordination is not None:
+        _print_coordination(study)
     _print_checks(report)
 
     if output_dir is not None:
@@ -209,6 +212,17 @@ def _run_feeder(scenario: Path, output_dir: Path | None, no_counterfactual: bool
         for label, run in runs.items():
             houses[f"bill_{label}"] = run.house_costs["bill"].round(2)
         houses.to_csv(output_dir / "houses.csv")
+        if study.coordination is not None:
+            study.coordination_table().to_csv(output_dir / "coordination.csv")
+            study.customers_table().to_csv(output_dir / "customers.csv", index=False)
+            for label, run in study.coordination.runs.items():
+                slug = label.replace(" ", "_").replace("(", "").replace(")", "")
+                if run.envelopes is not None:
+                    run.envelopes.to_csv(output_dir / f"envelopes_{slug}.csv", index=False)
+                if run.signal is not None:
+                    run.signal.to_csv(output_dir / f"signal_{slug}.csv", index_label="timestamp")
+                if run.calendar is not None:
+                    run.calendar.to_csv(output_dir / f"dr_calendar_{slug}.csv", index=False)
         pd.concat({label: run.flows for label, run in runs.items()}, axis=1).to_csv(output_dir / "flows_kw.csv")
         pd.concat(summaries).to_csv(output_dir / "loading.csv")
         prices.to_csv(output_dir / "congestion_prices.csv")
@@ -219,7 +233,8 @@ def _run_feeder(scenario: Path, output_dir: Path | None, no_counterfactual: bool
                 frame["grid_import"] = result.grid_import
                 frame["grid_export"] = result.grid_export
                 frames[name] = frame
-            pd.concat(frames, axis=1).to_csv(output_dir / f"dispatch_{label}.csv")
+            slug = label.replace(" ", "_").replace("(", "").replace(")", "")
+            pd.concat(frames, axis=1).to_csv(output_dir / f"dispatch_{slug}.csv")
         feeder_loading_plot({label: run.flows for label, run in runs.items()}, built.feeder, title=built.config.name).savefig(
             output_dir / "feeder_loading.png", dpi=120
         )
@@ -234,6 +249,38 @@ def _run_feeder(scenario: Path, output_dir: Path | None, no_counterfactual: bool
 
         plt.close("all")  # charts are saved; free them (matters when runs are scripted in a loop)
         typer.echo(f"\nWrote CSVs, charts and run_record.json to {output_dir}")
+
+
+def _print_coordination(study) -> None:
+    """The coordination runs against the ideal (docs/COORDINATION_SPEC.md section 6)."""
+    table = study.coordination_table()
+    houses = study.scenario.houses
+    typer.echo("\nCoordination runs (each against independent, the feeder with no program):")
+    groups = houses["group"].value_counts()
+    typer.echo("  customers: " + ", ".join(f"{n} {g}" for g, n in groups.items())
+               + (f"; background load: {', '.join(study.scenario.background)}" if study.scenario.background else ""))
+    for label, run in study.coordination.runs.items():
+        row = table.loc[label]
+        share = row.get("share_of_ideal")
+        saving, ideal = row.get("network_saving", 0.0), row.get("ideal_network_saving", 0.0)
+        effect = f"saves {_money(saving)} in" if saving >= 0 else f"adds {_money(-saving)} to"
+        share_text = (f"{effect} network cost (the ideal saves {_money(ideal)}"
+                      + (f"; {100 * share:.0f}% of it)" if share is not None and pd.notna(share) else ")"))
+        mechanisms = ", ".join(run.mechanisms)
+        named = label if mechanisms == label else f"{label} ({mechanisms})"
+        typer.echo(f"  {named}: network cost {_money(row['network_cost'])}, {share_text}")
+        paid = []
+        for column, text in (("signal_charges", "signal charges"), ("dr_incentive", "DR incentives")):
+            if column in row and abs(row[column]) > 0.005:
+                paid.append(f"{text} {_money(row[column])}")
+        for column, text in (("dr_shortfall_kwh", "DR shortfall"), ("envelope_over_import_kwh", "over import envelopes"),
+                             ("envelope_over_export_kwh", "over export envelopes")):
+            if column in row and row[column] > 0.005:
+                paid.append(f"{text} {row[column]:.1f} kWh")
+        if run.calendar is not None:
+            paid.append(f"{len(run.calendar)} events (triggered and settled on {run.twin})")
+        if paid:
+            typer.echo(f"    {'; '.join(paid)}")
 
 
 def _print_dr(study, config, r2_bill) -> None:

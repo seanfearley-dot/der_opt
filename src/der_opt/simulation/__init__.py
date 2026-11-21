@@ -3,6 +3,8 @@ from der_opt.simulation.policy import (
     NoFlexibilityPolicy,
     RuleBasedEVChargingPolicy,
     SelfConsumptionBatteryPolicy,
+    SetpointThermostatPolicy,
+    setpoint_power,
 )
 from der_opt.simulation.runner import CounterfactualSimulator
 from der_opt.simulation.state import DeviceState, PremiseState
@@ -15,4 +17,6 @@ __all__ = [
     "PremiseState",
     "RuleBasedEVChargingPolicy",
     "SelfConsumptionBatteryPolicy",
+    "SetpointThermostatPolicy",
+    "setpoint_power",
 ]

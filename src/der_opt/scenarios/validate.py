@@ -275,6 +275,9 @@ def validate_scenario(path: str | Path, cost_tests: bool = False, build: bool = 
         return v
     v.report.ran("build")
     if v.is_feeder:
+        from der_opt.coordination.study import check_coordination
+
+        v.report.ran("coordination", check_coordination(v.feeder))
         return v
     v.report.extend(check_prices(v.premise))
     v.report.extend(check_load(v.premise))
