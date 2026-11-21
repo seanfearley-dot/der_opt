@@ -4,7 +4,7 @@ Two commands take a measure from a scenario file to cost-test results:
 
 ```bash
 der-opt run scenario.yaml -o out/measure          # a scenario with `dr` and `cost_test` sections
-der-opt openbca out/measure --openbca /path/to/openbca
+der-opt openbca out/measure                       # or: der-opt run ... --cost-tests
 ```
 
 The diagrams show which run produces which number, and in what order. Order matters
@@ -19,7 +19,7 @@ in three places, marked ①–③:
 3. **Screening values and the impact package** compare the responding run with R1 or
    R3, depending on `cost_test.scope`.
 
-Specs: [input data](INPUT_DATA_SPEC.md), [DR events and capacity](DR_CAPACITY_SPEC.md),
+Specs: [scenario building blocks](SCENARIO_COMPOSITION_SPEC.md), [input data](INPUT_DATA_SPEC.md), [DR events and capacity](DR_CAPACITY_SPEC.md),
 [avoided costs](AVOIDED_COST_SPEC.md), [cost tests](COST_TEST_SPEC.md).
 
 ## 1. `der-opt run`: the measure's year, DR study, screening values, impact package
@@ -37,9 +37,9 @@ sequenceDiagram
     participant F as Output (-o)
 
     U->>CLI: scenario.yaml
-    CLI->>L: load, validate
+    CLI->>L: compose, validate
     L-->>CLI: premise
-    Note over L: input-spec files read<br/>gaps warned
+    Note over L: extends merged, paths resolved<br/>no-solve checks: errors stop here
 
     rect rgba(120, 120, 120, 0.08)
     CLI->>O: solve year, no events

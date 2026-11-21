@@ -4,7 +4,7 @@
 #
 # The bank's existing load comes from loadcast (the load-forecasting package), through the
 # `loadcast` data source (der_opt.integrations.load_forecast; needs the forecast extra:
-# pip install -e ".[forecast]"). examples/data/loadcast/bank_a_2026_planning.nc holds three of
+# pip install -e ".[forecast]"). ../data/loadcast/bank_a_2026_planning.nc holds three of
 # the 200 years loadcast simulated for its synthetic bank in 2026 (`loadcast simulate-year`): the
 # years whose annual peak is closest to POE90, POE50 and POE10, plus hourly quantiles over all
 # 200. `trace: poe10` picks the 1-in-10 design year, which peaks at 1,990 kW on 4 Aug 2026 at
@@ -47,7 +47,7 @@ houses:
     poi_limit_kw: 5000 # overrides the homes' 30 kW service limit from house_defaults
     external_load:
       source: loadcast
-      path: examples/data/loadcast/bank_a_2026_planning.nc
+      path: ../data/loadcast/bank_a_2026_planning.nc
       trace: poe10 # or poe50 / poe90 / max, a trace index, or quantile: 0.9 (an hourly envelope)
       var: net
 
@@ -83,8 +83,8 @@ house_defaults:
       battery: {type: self_consumption}
 
 billing:
-  tariff: examples/data/tariffs/pge_e_elec_2026-06.yaml
+  tariff: ../data/tariffs/pge_e_elec_2026-06.yaml
   program:
     type: nbt
-    export_rates_csv: examples/data/pge_nbt_eec_2026.csv
+    export_rates_csv: ../data/pge_nbt_eec_2026.csv
     acc_plus_per_kwh: 0.0088

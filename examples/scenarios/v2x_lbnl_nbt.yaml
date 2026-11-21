@@ -43,10 +43,10 @@ value_streams:
   #     params:
   #       import_price:
   #         type: retail_tariff # PG&E E-ELEC, the rate NBT customers are required to be on
-  #         path: examples/data/tariffs/pge_e_elec_2026-06.yaml
+  #         path: ../data/tariffs/pge_e_elec_2026-06.yaml
   #       export_price:
   #         type: nbt_export
-  #         csv_path: examples/data/pge_nbt_eec_2026.csv
+  #         csv_path: ../data/pge_nbt_eec_2026.csv
   #         adder_per_kwh: 0.0088 # ACC Plus, 2026 residential applicants
   - type: nbt_bill
 
@@ -72,9 +72,9 @@ counterfactual:
 # Bill both runs the way PG&E would: E-ELEC charges, NBT export credits (generation and
 # delivery halves offsetting only their own charges), ACC Plus, base services charge.
 billing:
-  tariff: examples/data/tariffs/pge_e_elec_2026-06.yaml
+  tariff: ../data/tariffs/pge_e_elec_2026-06.yaml
   income_tier: 3
   program:
     type: nbt
-    export_rates_csv: examples/data/pge_nbt_eec_2026.csv
+    export_rates_csv: ../data/pge_nbt_eec_2026.csv
     acc_plus_per_kwh: 0.0088

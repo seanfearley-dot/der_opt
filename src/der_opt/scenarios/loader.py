@@ -5,7 +5,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import yaml
 
 from der_opt.devices import (
     BatteryStorage,
@@ -30,6 +29,7 @@ from der_opt.pricing.sources import (
     DailyTOUPriceSeries,
     PriceSeries,
 )
+from der_opt.scenarios.compose import load_composed
 from der_opt.scenarios.data_sources import resolve_array_param
 from der_opt.scenarios.schema import (
     CSVSeriesConfig,
@@ -62,23 +62,42 @@ def _build_time_grid(config) -> TimeGrid:
 def _build_device(config: DeviceConfig, time_grid: TimeGrid, built_devices: dict[str, Device]) -> Device:
     """Resolves any `{source: ...}` data-source params (e.g. available_kw from the real
     LBNL PV profile, connected from the real EV arrival/departure data) and
-    `charge_sources` (device *names*, looked up against devices already built earlier
-    in this scenario's device list -- so a battery/EV referencing a solar device must
-    be listed after it in the YAML)."""
+    `charge_sources` (device *names*, already built: see _dependency_order)."""
     cls = DEVICE_REGISTRY[config.type]
     params = {}
     for key, value in config.params.items():
         if key == "charge_sources":
-            missing = [name for name in value if name not in built_devices]
-            if missing:
-                raise ValueError(
-                    f"charge_sources {missing} not found -- they must be listed earlier "
-                    f"in this scenario's devices than {config.name!r}"
-                )
             params[key] = [built_devices[name] for name in value]
         else:
             params[key] = resolve_array_param(value, time_grid)
     return cls(name=config.name, time_grid=time_grid, **params)
+
+
+def _dependency_order(configs: list[DeviceConfig]) -> list[DeviceConfig]:
+    """Devices in the order they can be built: each after the devices it charges from,
+    otherwise as listed (so a battery fragment can come before the solar it charges
+    from)."""
+    names = [d.name for d in configs]
+    if len(set(names)) != len(names):
+        repeated = sorted({n for n in names if names.count(n) > 1})
+        raise ValueError(f"device names must be unique; repeated: {repeated}")
+    by_name = {d.name: d for d in configs}
+    for d in configs:
+        missing = [s for s in d.params.get("charge_sources", []) if s not in by_name]
+        if missing:
+            raise ValueError(f"{d.name!r} charges from {missing}, which aren't devices in this scenario "
+                             f"(devices: {names})")
+    ordered: list[DeviceConfig] = []
+    placed: set[str] = set()
+    while len(ordered) < len(configs):
+        ready = [d for d in configs if d.name not in placed
+                 and all(s in placed for s in d.params.get("charge_sources", []))]
+        if not ready:
+            stuck = sorted(set(names) - placed)
+            raise ValueError(f"devices {stuck} charge from each other in a circle")
+        ordered.append(ready[0])
+        placed.add(ready[0].name)
+    return ordered
 
 
 def _read_csv_series(config: CSVSeriesConfig) -> pd.Series:
@@ -202,18 +221,19 @@ def _resolve_external_load(config, time_grid: TimeGrid) -> np.ndarray:
 
 
 def load_scenario_config(path: str | Path) -> ScenarioConfig:
-    """Parses and validates a scenario YAML file without building anything."""
-    raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
-    return ScenarioConfig.model_validate(raw)
+    """Parses and validates a scenario YAML file without building anything: merges
+    what it `extends` and resolves its paths from the files that name them
+    (docs/SCENARIO_COMPOSITION_SPEC.md)."""
+    return ScenarioConfig.model_validate(load_composed(path).data)
 
 
 def build_premise(config: ScenarioConfig) -> Premise:
     time_grid = _build_time_grid(config.time_grid)
 
     built_devices: dict[str, Device] = {}
-    for device_config in config.devices:
+    for device_config in _dependency_order(config.devices):
         built_devices[device_config.name] = _build_device(device_config, time_grid, built_devices)
-    devices = list(built_devices.values())
+    devices = [built_devices[d.name] for d in config.devices]
 
     value_streams = [_build_value_stream(stream_config, time_grid, config) for stream_config in config.value_streams]
     external_load = _resolve_external_load(config.external_load, time_grid)

@@ -165,10 +165,10 @@ def test_nbt_bill_objective_matches_the_printed_bill(tmp_path):
 def test_nbt_bill_needs_a_billing_section(tmp_path):
     result = runner.invoke(app, ["run", str(_bill_objective_scenario(tmp_path, ""))])
     assert result.exit_code != 0
-    assert "needs a billing section" in str(result.exception)
+    assert "needs a billing section" in result.output  # caught by validation, before any solve
 
 
 def test_nbt_bill_and_energy_arbitrage_together_are_rejected(tmp_path):
     result = runner.invoke(app, ["run", str(_bill_objective_scenario(tmp_path, BILLING_SECTION, keep_arbitrage=True))])
     assert result.exit_code != 0
-    assert "counted twice" in str(result.exception)
+    assert "counted twice" in result.output

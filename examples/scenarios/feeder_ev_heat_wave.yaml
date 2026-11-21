@@ -72,8 +72,8 @@ house_defaults:
 # every home on E-ELEC with Net Billing Tariff export credit (solar homes export;
 # the rest just buy)
 billing:
-  tariff: examples/data/tariffs/pge_e_elec_2026-06.yaml
+  tariff: ../data/tariffs/pge_e_elec_2026-06.yaml
   program:
     type: nbt
-    export_rates_csv: examples/data/pge_nbt_eec_2026.csv
+    export_rates_csv: ../data/pge_nbt_eec_2026.csv
     acc_plus_per_kwh: 0.0088

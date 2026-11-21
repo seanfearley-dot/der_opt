@@ -53,8 +53,8 @@ value_streams:
   # To see what the naive objective does instead, swap this for:
   #   - type: energy_arbitrage
   #     params:
-  #       import_price: {type: retail_tariff, path: examples/data/tariffs/pge_e_elec_2026-06.yaml}
-  #       export_price: {type: nbt_export, csv_path: examples/data/pge_nbt_eec_2026.csv, adder_per_kwh: 0.0088}
+  #       import_price: {type: retail_tariff, path: ../data/tariffs/pge_e_elec_2026-06.yaml}
+  #       export_price: {type: nbt_export, csv_path: ../data/pge_nbt_eec_2026.csv, adder_per_kwh: 0.0088}
   - type: nbt_bill
 
 external_load:
@@ -77,9 +77,9 @@ counterfactual:
 # Bill both runs the way PG&E would: E-ELEC charges, NBT export credits (generation and
 # delivery halves offsetting only their own charges), ACC Plus, base services charge.
 billing:
-  tariff: examples/data/tariffs/pge_e_elec_2026-06.yaml
+  tariff: ../data/tariffs/pge_e_elec_2026-06.yaml
   income_tier: 3
   program:
     type: nbt
-    export_rates_csv: examples/data/pge_nbt_eec_2026.csv
+    export_rates_csv: ../data/pge_nbt_eec_2026.csv
     acc_plus_per_kwh: 0.0088

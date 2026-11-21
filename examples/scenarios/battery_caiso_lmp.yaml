@@ -33,8 +33,8 @@ value_streams:
   - type: energy_arbitrage
     params:
       # buying and selling at the same price, so there's no gain in doing both at once
-      import_price: {type: csv, path: examples/data/caiso_lmp_np15_dam_2026-07-13.csv, column: lmp_per_kwh}
-      export_price: {type: csv, path: examples/data/caiso_lmp_np15_dam_2026-07-13.csv, column: lmp_per_kwh}
+      import_price: {type: csv, path: ../data/caiso_lmp_np15_dam_2026-07-13.csv, column: lmp_per_kwh}
+      export_price: {type: csv, path: ../data/caiso_lmp_np15_dam_2026-07-13.csv, column: lmp_per_kwh}
 
 # no external_load: a standalone battery serves no load of its own
 poi_limit_kw: 1000

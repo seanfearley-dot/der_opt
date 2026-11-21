@@ -69,7 +69,7 @@ counterfactual:
 # E-TOU-C rate, non-bypassable charges on imports, the base services charge monthly, and
 # the baseline credit; energy settles at the 12-month true-up.
 billing:
-  tariff: examples/data/tariffs/pge_e_tou_c_2026-06.yaml
+  tariff: ../data/tariffs/pge_e_tou_c_2026-06.yaml
   income_tier: 3
   baseline_territory: R # assumed: Central Valley, to match the LBNL hot-dry climate; edit for a real customer
   baseline_code: basic

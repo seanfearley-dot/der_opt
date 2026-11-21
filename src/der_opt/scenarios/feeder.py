@@ -17,7 +17,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pandas as pd
-import yaml
 
 from der_opt.diagnostics import CheckReport, Finding
 from der_opt.network import (
@@ -32,6 +31,7 @@ from der_opt.network.synthetic import synthetic_houses
 from der_opt.premise import Premise
 from der_opt.pricing import value_breakdown
 from der_opt.results.schema import DispatchResult
+from der_opt.scenarios.compose import compose_scenario, load_composed
 from der_opt.scenarios.loader import (
     _build_time_grid,
     build_counterfactual_policies,
@@ -46,14 +46,17 @@ from der_opt.scenarios.schema import (
     ScenarioConfig,
 )
 
+# where premises' `tariff` names are looked up when premise_data.tariff_dir isn't set:
+# the tariffs that ship with der-opt's examples
+DEFAULT_TARIFF_DIR = Path(__file__).resolve().parents[3] / "examples" / "data" / "tariffs"
+
 
 def is_feeder_scenario(path: str | Path) -> bool:
-    raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
-    return isinstance(raw, dict) and "feeder" in raw
+    return "feeder" in compose_scenario(path).data
 
 
 def load_feeder_config(path: str | Path) -> FeederScenarioConfig:
-    return FeederScenarioConfig.model_validate(yaml.safe_load(Path(path).read_text(encoding="utf-8")))
+    return FeederScenarioConfig.model_validate(load_composed(path).data)
 
 
 @dataclass
@@ -207,7 +210,7 @@ def _premise_houses(config: FeederScenarioConfig) -> tuple[list[HouseConfig], li
         if row.get("tariff"):
             program = row.get("export_program") or None
             billing = BillingConfig(
-                tariff=str(Path(data.tariff_dir) / f"{row['tariff']}.yaml"), income_tier=data.income_tier,
+                tariff=str(Path(data.tariff_dir or DEFAULT_TARIFF_DIR) / f"{row['tariff']}.yaml"), income_tier=data.income_tier,
                 program=({"type": program} | data.programs.get(program, {})) if program else None,
                 baseline_territory=row.get("baseline_territory") or None, baseline_code=data.baseline_code,
             )

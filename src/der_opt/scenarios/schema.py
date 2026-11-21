@@ -279,7 +279,7 @@ class PremiseDataConfig(BaseModel):
     timeseries: list[str]  # one or more time series files; a premise's columns can span files
     network: str | None = None  # network.csv, instead of feeder.elements
     tz: str = "America/Los_Angeles"  # the local clock the run works on
-    tariff_dir: str = "examples/data/tariffs"  # where premises' `tariff` names are looked up
+    tariff_dir: str | None = None  # where premises' `tariff` names are looked up; default der-opt's example tariffs
     programs: dict[str, dict[str, Any]] = Field(default_factory=dict)  # nbt: {...}, nem2: {...}
     income_tier: int = 3
     baseline_code: str = "basic"

@@ -4,7 +4,7 @@
 # Check your own files first:
 #   der-opt check-data data/timeseries.csv --premises data/premises.csv --network data/network.csv
 #
-# examples/data/spec_sample/ is synthetic (made with der_opt.network.synthetic):
+# ../data/spec_sample/ is synthetic (made with der_opt.network.synthetic):
 # home_05 is metered (import_kw/export_kw); the rest are gross load with solar, a
 # battery or an EV as premises.csv sizes them. Tariffs and export programs are per
 # premise; device behavior is set here, under house_defaults.device_params.
@@ -17,13 +17,13 @@ time_grid:
   start: "2026-07-13T12:00:00"
 
 premise_data:
-  premises: examples/data/spec_sample/premises.csv
-  timeseries: [examples/data/spec_sample/timeseries.csv]
-  network: examples/data/spec_sample/network.csv
+  premises: ../data/spec_sample/premises.csv
+  timeseries: [../data/spec_sample/timeseries.csv]
+  network: ../data/spec_sample/network.csv
   tz: America/Los_Angeles
-  tariff_dir: examples/data/tariffs # premises.csv `tariff` names a file here
+  tariff_dir: ../data/tariffs # premises.csv `tariff` names a file here
   programs: # settings for each export_program named in premises.csv
-    nbt: {export_rates_csv: examples/data/pge_nbt_eec_2026.csv, acc_plus_per_kwh: 0.0088}
+    nbt: {export_rates_csv: ../data/pge_nbt_eec_2026.csv, acc_plus_per_kwh: 0.0088}
     nem2: {nsc_rate_per_kwh: 0.02781}
 
 feeder:

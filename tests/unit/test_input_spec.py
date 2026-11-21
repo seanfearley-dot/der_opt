@@ -144,7 +144,7 @@ poi_limit_kw: 20
 
     late = scenario.read_text(encoding="utf-8").replace('start: "2026-07-13T00:00:00"', 'start: "2026-07-13T12:00:00"')
     result = runner.invoke(app, ["run", str(_write(tmp_path, late, "late.yaml"))])
-    assert result.exit_code != 0 and "not the whole run" in str(result.exception)
+    assert result.exit_code != 0 and "not the whole run" in result.output  # stopped by validation
 
 
 # --- premises and network -----------------------------------------------------------

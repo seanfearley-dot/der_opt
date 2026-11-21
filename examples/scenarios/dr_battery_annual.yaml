@@ -2,7 +2,7 @@
 # for DR studies (docs/DR_CAPACITY_SPEC.md v1.0). Run with:
 #   der-opt run examples/scenarios/dr_battery_annual.yaml -o out/dr
 #
-# The home is synthetic (examples/data/spec_sample/annual_home.csv, input data spec):
+# The home is synthetic (../data/spec_sample/annual_home.csv, input data spec):
 # gross load with an AC that follows an inland California climate, and rooftop solar.
 # Prices: E-ELEC import; a flat $0.05/kWh for export keeps this a fast LP (a real NBT
 # export rate can exceed import, which needs exclusive_import_export, a MILP).
@@ -19,7 +19,7 @@ devices:
   - type: solar
     name: solar
     params:
-      available_kw: {source: timeseries, path: examples/data/spec_sample/annual_home.csv, premise_id: home_a, column: pv_kw}
+      available_kw: {source: timeseries, path: ../data/spec_sample/annual_home.csv, premise_id: home_a, column: pv_kw}
   - type: battery
     name: battery
     params:
@@ -35,10 +35,10 @@ devices:
 value_streams:
   - type: energy_arbitrage
     params:
-      import_price: {type: retail_tariff, path: examples/data/tariffs/pge_e_elec_2026-06.yaml}
+      import_price: {type: retail_tariff, path: ../data/tariffs/pge_e_elec_2026-06.yaml}
       export_price: {type: constant, price: 0.05}
 
-external_load: {source: timeseries, path: examples/data/spec_sample/annual_home.csv, premise_id: home_a, column: load_kw}
+external_load: {source: timeseries, path: ../data/spec_sample/annual_home.csv, premise_id: home_a, column: load_kw}
 poi_limit_kw: 20
 
 # R1, the counterfactual: what the battery does today without optimization
@@ -70,7 +70,7 @@ cost_test:
   scope: control # measure = optimization + DR participation, against R1 (self-consumption)
   start_year: 2027
   measure_life_years: 10
-  avoided_costs: {set: examples/data/avoided_costs/synthetic_2026}
+  avoided_costs: {set: ../data/avoided_costs/synthetic_2026}
   capacity_value: {reference: R2, basis: import, measure: counted}
   net_to_gross: 1.0
   bill_escalation: 0.03

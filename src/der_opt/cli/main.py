@@ -24,11 +24,32 @@ def _print_checks(report) -> None:
         typer.echo(f"  {line}")
 
 
-def _write_checks(output_dir: Path, scenario: Path, config, report, results: dict) -> Path:
+def _write_checks(output_dir: Path, scenario: Path, config, report, results: dict, composed=None) -> Path:
     from der_opt.run_record import write_run_record
 
     report.to_frame().to_csv(output_dir / "checks.csv", index=False)
-    return write_run_record(output_dir, scenario, config.model_dump(mode="json"), report, results)
+    return write_run_record(output_dir, scenario, config.model_dump(mode="json"), report, results, composed)
+
+
+def _validate_first(scenario: Path, cost_tests: bool):
+    """Runs `der-opt validate`'s checks; stops the run on any error."""
+    import time
+
+    from der_opt.scenarios.validate import validate_scenario
+
+    started = time.perf_counter()
+    validation = validate_scenario(scenario, cost_tests=cost_tests, before_run=True)
+    if not validation.ok:
+        typer.echo(f"{scenario} didn't validate, so nothing was solved:")
+        for line in validation.report.lines():
+            if line.startswith("ERROR"):
+                typer.echo(f"  {line}")
+        typer.echo("Fix the errors above (`der-opt validate` shows every finding), or pass --no-validate.")
+        raise typer.Exit(code=1)
+    warned = len(validation.report.warnings)
+    typer.echo(f"Validated in {time.perf_counter() - started:.1f} s"
+               + (f" ({warned} warning{'s' if warned != 1 else ''}, listed with the checks below)" if warned else ""))
+    return validation
 
 
 def _print_bills(bills: dict, tariff, program) -> None:
@@ -88,7 +109,7 @@ def _money(value: float) -> str:
     return f"-${-value:,.2f}" if value < 0 else f"${value:,.2f}"
 
 
-def _run_feeder(scenario: Path, output_dir: Path | None, no_counterfactual: bool) -> None:
+def _run_feeder(scenario: Path, output_dir: Path | None, no_counterfactual: bool, validation=None) -> None:
     import pandas as pd
 
     from der_opt.diagnostics import CheckReport, collect_data_warnings
@@ -99,10 +120,16 @@ def _run_feeder(scenario: Path, output_dir: Path | None, no_counterfactual: bool
         run_feeder_study,
     )
 
-    report = CheckReport()
-    config = load_feeder_config(scenario)
-    with collect_data_warnings(report):
-        built = build_feeder_scenario(config)
+    if validation is not None:
+        report, config, built, composed = validation.report, validation.config, validation.feeder, validation.composed
+    else:
+        from der_opt.scenarios.compose import load_composed
+
+        report = CheckReport()
+        composed = load_composed(scenario)
+        config = load_feeder_config(scenario)
+        with collect_data_warnings(report):
+            built = build_feeder_scenario(config)
     study = run_feeder_study(built, counterfactual=not no_counterfactual)
     report.extend(study.checks)
     runs = study.runs
@@ -202,7 +229,7 @@ def _run_feeder(scenario: Path, output_dir: Path | None, no_counterfactual: bool
                     "peak_kw": {e.name: float(run.flows[e.name].max()) for e in built.feeder.elements}}
             for label, run in runs.items()
         }
-        _write_checks(output_dir, scenario, config, report, results)
+        _write_checks(output_dir, scenario, config, report, results, composed)
         import matplotlib.pyplot as plt
 
         plt.close("all")  # charts are saved; free them (matters when runs are scripted in a loop)
@@ -305,8 +332,11 @@ def run(
         "output goes to -o, default out/<scenario name>)"),
     openbca_path: Path | None = typer.Option(
         None, "--openbca", help="OpenBCA checkout for --cost-tests (default: from `der-opt setup openbca`)"),
+    no_validate: bool = typer.Option(
+        False, "--no-validate", help="Skip the checks `der-opt validate` runs before solving"),
 ) -> None:
-    """Solve a scenario and print a summary. If the scenario has a `counterfactual`
+    """Solve a scenario and print a summary. Runs `der-opt validate`'s checks first and
+    stops on any error, before solving anything. If the scenario has a `counterfactual`
     section, also simulates that rule-based baseline and reports the value of
     optimization. A scenario with a `feeder` section is a multi-house run: it compares
     coordinated, independent and rule-based dispatch on the network. With
@@ -318,17 +348,25 @@ def run(
         build_billing,
         build_counterfactual_policies,
         build_premise,
-        is_feeder_scenario,
         load_scenario_config,
     )
+    from der_opt.scenarios.compose import CompositionError, compose_scenario
     from der_opt.simulation import CounterfactualSimulator
 
-    if is_feeder_scenario(scenario):
-        if cost_tests:
-            raise typer.BadParameter("--cost-tests is for single-measure runs; feeder scenarios don't have cost tests yet")
+    try:
+        sections = compose_scenario(scenario).data
+    except CompositionError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    feeder = "feeder" in sections
+    if feeder and cost_tests:
+        raise typer.BadParameter("--cost-tests is for single-measure runs; feeder scenarios don't have cost tests yet")
+    if cost_tests and sections.get("cost_test") is None:
+        raise typer.BadParameter("--cost-tests needs a cost_test section in the scenario")
+    validation = None if no_validate else _validate_first(scenario, cost_tests)
+    if feeder:
         if duals:
             typer.echo("(feeder runs always report congestion prices; --duals adds nothing)")
-        _run_feeder(scenario, output_dir, no_counterfactual)
+        _run_feeder(scenario, output_dir, no_counterfactual, validation)
         return
 
     from der_opt.diagnostics import (
@@ -341,11 +379,17 @@ def run(
         collect_data_warnings,
     )
 
-    report = CheckReport()
-    config = load_scenario_config(scenario)
+    if validation is not None:
+        report, config, premise, composed = validation.report, validation.config, validation.premise, validation.composed
+    else:
+        from der_opt.scenarios.compose import load_composed
+
+        report = CheckReport()
+        composed = load_composed(scenario)
+        config = load_scenario_config(scenario)
+        with collect_data_warnings(report):
+            premise = build_premise(config)
     if cost_tests:
-        if config.cost_test is None:
-            raise typer.BadParameter("--cost-tests needs a cost_test section in the scenario")
         from der_opt.settings import openbca_dir
 
         try:
@@ -353,8 +397,6 @@ def run(
         except FileNotFoundError as exc:
             raise typer.BadParameter(str(exc)) from exc
         output_dir = output_dir or Path("out") / config.name
-    with collect_data_warnings(report):
-        premise = build_premise(config)
     dispatch, model, backend = premise.solve()
 
     typer.echo(f"Scenario: {premise.name}")
@@ -431,13 +473,14 @@ def run(
         _print_screening(screening, acs, without_label, chosen)
         report.ran("avoided cost set")
 
-    report.extend(check_prices(premise))
-    report.extend(check_load(premise))
+    if validation is None:  # validation ran these
+        report.extend(check_prices(premise))
+        report.extend(check_load(premise))
     runs_checked = {"optimal": dispatch} | ({"counterfactual": counterfactual} if counterfactual is not None else {})
     for label, result in runs_checked.items():
         report.extend(check_dispatch(premise, result, run=label))
     report.extend(check_end_states(premise, runs_checked))
-    if billing is not None:
+    if billing is not None and validation is None:
         report.extend(check_tariff_dates(billing[0], premise.time_grid))
     _print_checks(report)
 
@@ -510,13 +553,98 @@ def run(
                                  for label, r in (("without", without), ("with", with_))}
             write_impact_package(output_dir, config, without_label, without, with_, premise.time_grid,
                                  dr_study, package_bills, tz=config.dr.tz if config.dr else "America/Los_Angeles")
-        _write_checks(output_dir, scenario, config, report, results)
+        _write_checks(output_dir, scenario, config, report, results, composed)
         import matplotlib.pyplot as plt
 
         plt.close("all")  # charts are saved; free them (matters when runs are scripted in a loop)
         typer.echo(f"\nWrote CSVs, charts and run_record.json to {output_dir}")
         if cost_tests:
             _cost_tests(output_dir, openbca_path)
+
+
+@app.command()
+def validate(
+    scenario: Path = typer.Argument(..., help="Path to a scenario YAML file"),
+    cost_tests: bool = typer.Option(
+        False, "--cost-tests", help="Also require what --cost-tests needs (OpenBCA set up, discount rates)"),
+) -> None:
+    """Check a scenario without solving it: what it extends, its schema, placeholders,
+    every file it names, its input data, avoided cost set, tariffs, device names, DR
+    event calendar and cost-test settings. Exits 1 on any error."""
+    import time
+
+    from der_opt.scenarios.validate import validate_scenario
+
+    started = time.perf_counter()
+    result = validate_scenario(scenario, cost_tests=cost_tests)
+    if result.composed is not None and result.composed.fragments:
+        typer.echo(f"{scenario} extends {len(result.composed.fragments)} file(s):")
+        for fragment in result.composed.fragments:
+            typer.echo(f"  {fragment}")
+    _print_checks(result.report)
+    typer.echo(f"\n({time.perf_counter() - started:.1f} s)")
+    if not result.ok:
+        typer.echo("Not ready to run: fix the errors above.")
+        raise typer.Exit(code=1)
+    typer.echo("Ready to run.")
+
+
+@app.command()
+def new(
+    template: str | None = typer.Argument(None, help="Template name (see --list)"),
+    target: Path | None = typer.Argument(None, help="Scenario file to write"),
+    list_templates: bool = typer.Option(False, "--list", help="List the templates"),
+    timeseries: Path | None = typer.Option(None, help="Input-spec time series file (load_kw, pv_kw)"),
+    premise: str | None = typer.Option(None, help="premise_id in the time series file (default: its only one)"),
+    tariff: Path | None = typer.Option(None, help="Retail tariff YAML"),
+    program: str = typer.Option("nbt", help="home-bill export program: nbt or nem2"),
+    export_rates: Path | None = typer.Option(None, help="NBT export rates CSV"),
+    baseline_territory: str | None = typer.Option(None, help="PG&E baseline territory, for tariffs with a baseline"),
+    avoided_costs: Path | None = typer.Option(None, help="Avoided cost set folder"),
+    price: Path | None = typer.Option(None, help="lmp-battery: price CSV (from `der-opt fetch-lmp`)"),
+    premises: Path | None = typer.Option(None, help="feeder-from-files: premises.csv"),
+    network: Path | None = typer.Option(None, help="feeder-from-files: network.csv"),
+    year: int | None = typer.Option(None, help="Run year (default: the time series file's, else this year)"),
+    library: Path | None = typer.Option(None, help="Put the shared parts in fragment files here and extend them"),
+    force: bool = typer.Option(False, "--force", help="Overwrite the scenario file if it exists"),
+) -> None:
+    """Write a commented starting scenario from a template. What the options don't fill
+    in is written as TODO; `der-opt validate` lists what's left."""
+    from der_opt.scenarios.templates import TEMPLATES, Options, write_template
+
+    if list_templates or template is None:
+        for name, described in TEMPLATES.items():
+            typer.echo(f"  {name:<19}{described}")
+        if template is None and not list_templates:
+            typer.echo("\nUsage: der-opt new TEMPLATE SCENARIO.yaml [options]")
+        return
+    if template not in TEMPLATES:
+        raise typer.BadParameter(f"no template {template!r}; choose from {', '.join(TEMPLATES)}")
+    if target is None:
+        raise typer.BadParameter("name the scenario file to write")
+    if program not in ("nbt", "nem2"):
+        raise typer.BadParameter("--program is nbt or nem2")
+    for option, value in (("--timeseries", timeseries), ("--tariff", tariff), ("--export-rates", export_rates),
+                          ("--avoided-costs", avoided_costs), ("--price", price), ("--premises", premises),
+                          ("--network", network)):
+        if value is not None and not value.exists():
+            raise typer.BadParameter(f"{option} {value} doesn't exist")
+    opts = Options(timeseries=timeseries, premise=premise, tariff=tariff, program=program, export_rates=export_rates,
+                   baseline_territory=baseline_territory, avoided_costs=avoided_costs, price=price,
+                   premises=premises, network=network, year=year)
+    try:
+        written = write_template(template, target, opts, library=library, force=force)
+    except FileExistsError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"Wrote {written.scenario}")
+    for fragment in written.fragments_written:
+        typer.echo(f"  new fragment {fragment}")
+    for fragment in written.fragments_kept:
+        typer.echo(f"  uses existing fragment {fragment} (left as it is)")
+    if written.todos:
+        typer.echo(f"{written.todos} TODO{'s' if written.todos != 1 else ''} to fill in; then: der-opt validate {target}")
+    else:
+        typer.echo(f"Next: der-opt validate {target}")
 
 
 @app.command("fetch-lmp")

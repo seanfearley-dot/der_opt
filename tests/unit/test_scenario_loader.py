@@ -122,11 +122,12 @@ external_load: [0.0, 0.0]
     assert battery.charge_sources[0].name == "solar"
 
 
-def test_charge_sources_referencing_a_later_device_raises(tmp_path):
-    # "solar" is listed *after* "battery", which references it -- must fail clearly
-    # rather than silently resolving to nothing.
+def test_charge_sources_can_reference_a_later_device(tmp_path):
+    # "solar" is listed after the battery that charges from it, as when a battery
+    # fragment comes before the scenario's own solar: devices build in dependency
+    # order, and keep their listed order in the premise.
     scenario_yaml = """
-name: bad_order_test
+name: order_test
 time_grid:
   resolution_minutes: 60
   horizon_steps: 2
@@ -145,9 +146,23 @@ devices:
 external_load: [0.0, 0.0]
 """
     scenario_path = tmp_path / "scenario.yaml"
-    scenario_path.write_text(scenario_yaml)
+    scenario_path.write_text(scenario_yaml, encoding="utf-8")
+    premise = load_scenario(scenario_path)
+    assert [d.name for d in premise.devices] == ["battery", "solar"]
+    assert premise.devices[0].charge_sources[0] is premise.devices[1]
 
-    with pytest.raises(ValueError, match="solar"):
+
+def test_charge_sources_naming_a_missing_device_raises(tmp_path):
+    scenario_path = tmp_path / "scenario.yaml"
+    scenario_path.write_text("""
+name: missing_source
+time_grid: {resolution_minutes: 60, horizon_steps: 2}
+devices:
+  - {type: battery, name: battery, params: {capacity_kwh: 10, p_max_charge_kw: 5, p_max_discharge_kw: 5,
+                                             charge_sources: [solar]}}
+external_load: [0.0, 0.0]
+""", encoding="utf-8")
+    with pytest.raises(ValueError, match="charges from \\['solar'\\], which aren't devices"):
         load_scenario(scenario_path)
 
 

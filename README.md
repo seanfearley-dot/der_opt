@@ -106,6 +106,7 @@ finding. A warning means the result is consistent but could mislead.
 | `--duals` | print the dual/shadow-price families, marking exact LP duals vs. fix-and-resolve approximations |
 | `-o DIR` | write everything printed as CSVs and charts (below) |
 | `--no-counterfactual` | skip the scenario's counterfactual comparison |
+| `--no-validate` | skip the `der-opt validate` checks that run before solving |
 
 Files written with `-o`:
 
@@ -119,18 +120,75 @@ Files written with `-o`:
 | `duals.csv`, `duals.png` | all dual families (long format), and a chart of the marginal value of energy at the meter (with `--duals`) |
 | `bill_cycles.csv`, `counterfactual_bill_cycles.csv` | per billing cycle: kWh, charges by bucket, credits earned and applied, amount due, credit balances (with `billing`) |
 | `checks.csv` | every check finding: level, check, run, house, message |
-| `run_record.json` | what produced the result: the scenario as resolved, a SHA-256 of every input file it names, the git commit (and whether there were uncommitted changes), Python and package versions, headline results, and the checks |
+| `run_record.json` | what produced the result: the scenario as resolved, a SHA-256 of every input file it names, the git commit (and whether there were uncommitted changes), Python and package versions, headline results, and the checks; with `extends`, a SHA-256 of every fragment |
 | `scenario.yaml` | a copy of the scenario file as run |
+| `scenario.resolved.yaml` | the scenario with everything it extends merged in and every path absolute |
 
 State columns (`soc`, `temp`) are the value at the **start** of each period in both
 the optimal and counterfactual CSVs.
 
-The fastest way to a new scenario: **copy one of the files in `examples/scenarios/`
-and edit it.**
+### Starting a scenario, and checking it before a long solve
+
+```bash
+der-opt new --list
+der-opt new dr-battery scenarios/home_a.yaml --timeseries data/timeseries.csv \
+    --tariff data/tariffs/pge_e_elec_2026-06.yaml --avoided-costs data/acc_2026 --library library
+der-opt validate scenarios/home_a.yaml
+```
+
+`der-opt new` writes a commented starting scenario from a template: `dr-battery`,
+`home-bill` (`--program nbt|nem2`), `feeder-from-files` (`--premises`, `--network`) or
+`lmp-battery` (`--price`). It fills in what the options give it, including the premise
+when the time series file has only one and the run period from the time series (or
+price) file, and writes `TODO` for the rest: incentives, costs, discount rates, a
+baseline territory. With `--library DIR` the shared parts (time grid, battery, prices
+or billing, DR program, cost-test settings) go into fragment files under `DIR` that
+the scenario extends. A second scenario made with the same library reuses those files
+as they are, edits included.
+
+`der-opt validate` runs every check that doesn't need a solve, in about a second:
+what the scenario extends, the schema, `TODO`s left (naming the file each is in),
+every file it names, `check-data` on its input-spec files, the avoided cost set
+(including the measure's whole life), building the premise (data coverage, tariffs,
+device names), billing's baseline territory, tariff dates, the DR event calendar, and
+cost-test settings. It exits 1 on any error. **`der-opt run` runs the same checks
+first** and stops before solving anything if one fails; `--no-validate` skips them.
+
+### Building blocks: `extends`
+
+```yaml
+# scenarios/home_a.yaml
+extends:
+  - ../library/time/year_2026.yaml
+  - ../library/devices/battery_13kwh.yaml
+  - ../library/programs/summer_peak_incentive.yaml
+name: home_a
+devices:
+  - {type: solar, name: solar, params: {available_kw: {source: timeseries, path: ../data/timeseries.csv, premise_id: home_a, column: pv_kw}}}
+```
+
+Fragments are any part of a scenario, and can extend others. They merge in order, then
+the scenario's own content on top: mappings key by key, `devices` by `name` (a later
+device with the same name replaces the earlier one; new names are added), every other
+list replaced whole, and `null` removes an inherited key (`counterfactual: null`). A
+device can charge from one listed after it. Runs write `scenario.resolved.yaml`, the
+merged scenario with every path absolute (it runs as it is), and `run_record.json`
+records a SHA-256 of every fragment. Spec:
+[docs/SCENARIO_COMPOSITION_SPEC.md](docs/SCENARIO_COMPOSITION_SPEC.md).
+
+Paths written the old way (relative to the folder you run from) still work in this
+release, with a warning naming the file, key and the path to write instead.
+
+Or copy one of the files in `examples/scenarios/` and edit it.
 
 ## Scenario file reference
 
+Relative paths in a scenario (or a fragment it extends) are from **that file's
+folder**, so a scenario runs from any folder. The examples' `../data/...` paths point
+at `examples/data/`.
+
 ```yaml
+extends: [../library/time/year_2026.yaml]  # optional: building blocks merged in first (below)
 name: my_house                      # any label; prefixes constraint names in --duals output
 
 time_grid:
@@ -138,7 +196,7 @@ time_grid:
   horizon_steps: 72                 # number of periods (72 hourly = 3 days)
   start: "2025-07-15T00:00:00"      # required for anything date/hour-of-day aware
 
-devices: [...]                      # see Devices below; order matters for charge_sources
+devices: [...]                      # see Devices below
 value_streams: [...]                # see Value streams below
 external_load: ...                  # kW the premise must serve (omit for none); see Data sources below
 
@@ -153,8 +211,8 @@ counterfactual:                     # optional; see Counterfactuals below
     battery: {type: self_consumption}
 
 billing:                            # optional; see Billing below
-  tariff: examples/data/tariffs/pge_e_elec_2026-06.yaml
-  program: {type: nbt, export_rates_csv: examples/data/pge_nbt_eec_2026.csv, acc_plus_per_kwh: 0.0088}
+  tariff: ../data/tariffs/pge_e_elec_2026-06.yaml
+  program: {type: nbt, export_rates_csv: ../data/pge_nbt_eec_2026.csv, acc_plus_per_kwh: 0.0088}
 ```
 
 ### Devices
@@ -199,8 +257,8 @@ Price series (`import_price` / `export_price`):
 {type: constant, price: 0.25}
 {type: daily_tou, hourly_pattern: [24 values, $/kWh by hour of day]}
 {type: csv, path: prices.csv, column: price}          # first column = timestamps (see below)
-{type: retail_tariff, path: examples/data/tariffs/pge_e_elec_2026-06.yaml}  # total $/kWh of a billing tariff
-{type: nbt_export, csv_path: examples/data/pge_nbt_eec_2026.csv, adder_per_kwh: 0.0088}
+{type: retail_tariff, path: ../data/tariffs/pge_e_elec_2026-06.yaml}  # total $/kWh of a billing tariff
+{type: nbt_export, csv_path: ../data/pge_nbt_eec_2026.csv, adder_per_kwh: 0.0088}
     # real PG&E NBT export rate; adder_per_kwh = ACC Plus for the customer's application
     # year (residential: 2023 0.022, 2024 0.0176, 2025 0.0132, 2026 0.0088, 2027 0.0044);
     # include_produced: false drops the generation half, for CCA/DA customers
@@ -303,11 +361,11 @@ tariff sheets, not from memory.
 
 ```yaml
 billing:
-  tariff: examples/data/tariffs/pge_e_elec_2026-06.yaml
+  tariff: ../data/tariffs/pge_e_elec_2026-06.yaml
   income_tier: 3                  # base services charge tier (3 = not CARE/FERA)
-  program: {type: nbt, export_rates_csv: examples/data/pge_nbt_eec_2026.csv, acc_plus_per_kwh: 0.0088}
+  program: {type: nbt, export_rates_csv: ../data/pge_nbt_eec_2026.csv, acc_plus_per_kwh: 0.0088}
   # or, for NEM 2.0 on E-TOU-C:
-  # tariff: examples/data/tariffs/pge_e_tou_c_2026-06.yaml
+  # tariff: ../data/tariffs/pge_e_tou_c_2026-06.yaml
   # baseline_territory: R         # the customer's baseline territory letter
   # baseline_code: basic          # or all_electric
   # program: {type: nem2, nsc_rate_per_kwh: 0.02781}
@@ -457,7 +515,7 @@ premise_data:
   premises: data/premises.csv
   timeseries: [data/timeseries.csv]          # a premise's columns may span several files
   network: data/network.csv                  # instead of feeder.elements
-  tariff_dir: examples/data/tariffs          # premises.csv `tariff` names a file here
+  tariff_dir: ../data/tariffs                # premises.csv `tariff` names a file here (default: der-opt's example tariffs)
   programs: {nbt: {export_rates_csv: ..., acc_plus_per_kwh: 0.0088}, nem2: {nsc_rate_per_kwh: 0.02781}}
 house_defaults:
   value_streams: [{type: bill}]              # each home's own bill, nbt_bill or nem2_bill by its program
@@ -626,7 +684,7 @@ cost_test:
   scope: control                       # control (vs R1) or device (vs R3)
   start_year: 2027
   measure_life_years: 10
-  avoided_costs: {set: examples/data/avoided_costs/synthetic_2026}
+  avoided_costs: {set: ../data/avoided_costs/synthetic_2026}
   capacity_value: {reference: R2, basis: import, measure: counted}
   participant_costs: {upfront: 300, annual_om: 0}
   program_costs: {admin_upfront: 75, admin_annual: 15}
@@ -805,7 +863,7 @@ src/der_opt/
   cost_test/     the measure impact package for cost tests (OpenBCA)
   integrations/  LBNL load, EV model, PVWatts, PG&E NBT export rates, CAISO LMP
   network/       feeder topology, multi-premise dispatch, congestion prices, synthetic houses
-  scenarios/     YAML schema, loader, data-source resolvers, feeder scenarios
+  scenarios/     YAML schema, loader, extends and paths, validate, templates (der-opt new), feeder scenarios
   viz/           heatmap, dispatch, value stack, duals, comparison, feeder loading charts
   cli/           der-opt CLI
 examples/        Python-API scripts, scenarios/ (YAML), data/ (NBT rates, sample tariff)

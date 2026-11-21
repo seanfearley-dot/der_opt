@@ -67,7 +67,8 @@ def _versions() -> dict[str, str | None]:
     return versions
 
 
-def build_run_record(scenario_path: str | Path, raw_scenario: dict, report: CheckReport, results: dict) -> dict:
+def build_run_record(scenario_path: str | Path, raw_scenario: dict, report: CheckReport, results: dict,
+                     fragments: list[dict] | None = None) -> dict:
     scenario_path = Path(scenario_path)
     paths: dict[str, Path] = {}
     _referenced_paths(raw_scenario, paths)
@@ -81,7 +82,8 @@ def build_run_record(scenario_path: str | Path, raw_scenario: dict, report: Chec
     dirty = _git("status", "--porcelain")
     return {
         "created": datetime.now().isoformat(timespec="seconds"),
-        "scenario": {"path": str(scenario_path), "sha256": _sha256(scenario_path), "resolved": raw_scenario},
+        "scenario": {"path": str(scenario_path), "sha256": _sha256(scenario_path), "resolved": raw_scenario,
+                     "fragments": fragments or []},
         "inputs": inputs,
         "code": {
             "git_commit": commit,
@@ -98,9 +100,19 @@ def build_run_record(scenario_path: str | Path, raw_scenario: dict, report: Chec
     }
 
 
-def write_run_record(output_dir: Path, scenario_path: str | Path, raw_scenario: dict, report: CheckReport, results: dict) -> Path:
-    record = build_run_record(scenario_path, raw_scenario, report, results)
+def write_run_record(output_dir: Path, scenario_path: str | Path, raw_scenario: dict, report: CheckReport, results: dict,
+                     composed=None) -> Path:
+    """Writes run_record.json, a copy of the scenario file as given (scenario.yaml) and,
+    when the run came from a composed scenario, the merged scenario with every path
+    resolved (scenario.resolved.yaml), which runs as it is from anywhere."""
+    fragments = composed.fingerprints() if composed is not None else None
+    record = build_run_record(scenario_path, raw_scenario, report, results, fragments)
     path = Path(output_dir) / "run_record.json"
     path.write_text(json.dumps(record, indent=2, default=str), encoding="utf-8")
     (Path(output_dir) / "scenario.yaml").write_bytes(Path(scenario_path).read_bytes())
+    if composed is not None:
+        import yaml
+
+        resolved = yaml.safe_dump(composed.data, sort_keys=False, allow_unicode=True)
+        (Path(output_dir) / "scenario.resolved.yaml").write_text(resolved, encoding="utf-8")
     return path
