@@ -579,8 +579,32 @@ A `cost_test` section writes `measure_impacts/` with `-o`:
 - `bills.csv`: without and with, if the scenario bills;
 - `dr_incentives.csv`.
 
-The cost tests themselves are OpenBCA's job. `examples/scenarios/dr_battery_annual.yaml`
-has a `cost_test` section.
+**Cost tests in OpenBCA:**
+
+```bash
+der-opt run examples/scenarios/dr_battery_annual.yaml -o out/dr
+der-opt openbca out/dr --openbca /path/to/openbca      # an OpenBCA checkout after `uv sync`
+```
+
+This writes OpenBCA's input tables for each test into `out/dr/openbca/<test>/` (CSV,
+readable). It runs OpenBCA's own core on them, through its table ("integrated") pathway,
+and prints each test's OpenBCA totals and ratio. Next to them goes an SPM-convention
+re-tally of the same values, where each stream counts by its sign, so load increases and
+lost revenue are costs and a participant's incentive is a benefit. `cost_tests.csv` has
+both.
+
+Mapping, tested against OpenBCA commit 7e13b36:
+- one configuration per test: PCT, RIM, `CA TRC`, `USI` (PAC), `USI + Non-USI` (SCT),
+  each with its own discount rate;
+- the measure and its load increases on separate rows;
+- energy in MWh and avoided costs in $/MWh, because OpenBCA rounds avoided costs to 3
+  decimals;
+- capacity values with your monthly shares applied;
+- bills as a custom stream (PCT benefit, RIM lost revenue).
+
+**OpenBCA doesn't discount annual cost fields** (admin, O&M, the annual DR incentive).
+See [docs/COST_TEST_SPEC.md](docs/COST_TEST_SPEC.md) section 3. The `cost_test` section
+needs `discount_rates: {utility, participant, societal}` for the export.
 
 ```yaml
 cost_test:

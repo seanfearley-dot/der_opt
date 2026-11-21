@@ -571,5 +571,34 @@ def check_data(
         raise typer.Exit(code=1)
     typer.echo("\nPasses the spec.")
 
+@app.command()
+def openbca(
+    run_dir: Path = typer.Argument(..., help="A `der-opt run -o` folder with a measure_impacts/ package"),
+    openbca_dir: Path = typer.Option(..., "--openbca", help="An OpenBCA checkout with its environment (`uv sync`)"),
+) -> None:
+    """Run the cost tests in OpenBCA from a measure impact package (docs/COST_TEST_SPEC.md):
+    writes OpenBCA's input tables for each test, runs OpenBCA's core on them, and reports
+    OpenBCA's results next to an SPM-convention re-tally of the same values."""
+    from der_opt.cost_test.openbca import OPENBCA_COMMIT, export_openbca, run_openbca, tally
+
+    out = run_dir / "openbca"
+    exported = export_openbca(run_dir / "measure_impacts", out)
+    typer.echo(f"Wrote OpenBCA inputs for {', '.join(e.test for e in exported)} to {out}")
+    run_openbca(exported, openbca_dir, out / "run_core.py")
+    table = tally(exported)
+    table.to_csv(out / "cost_tests.csv", index=False)
+    typer.echo(f"\nCost tests (OpenBCA, mapping tested against commit {OPENBCA_COMMIT}); present values in $:")
+    typer.echo(f"  {'test':<5}{'benefits':>12}{'costs':>12}{'net':>12}{'ratio':>8}   SPM convention: {'benefits':>10}{'costs':>11}{'ratio':>8}")
+    for _, r in table.iterrows():
+        typer.echo(f"  {r['test']:<5}{r['openbca_benefits']:>12,.2f}{r['openbca_costs']:>12,.2f}{r['net_benefits']:>12,.2f}"
+                   f"{r['openbca_ratio']:>8.2f}   {'':16}{r['spm_benefits']:>10,.2f}{r['spm_costs']:>11,.2f}{r['spm_ratio']:>8.2f}")
+    import json
+
+    notes = {n for e in exported for n in json.loads((e.folder / "test.json").read_text(encoding="utf-8"))["notes"]}
+    for note in sorted(notes):
+        typer.echo(f"  Note: {note}")
+    typer.echo(f"\nWrote {out / 'cost_tests.csv'}; OpenBCA's own outputs are in {out}/<test>/output/")
+
+
 if __name__ == "__main__":
     app()

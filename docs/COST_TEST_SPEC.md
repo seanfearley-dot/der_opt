@@ -1,8 +1,9 @@
 # der-opt measure impact export specification (for cost tests)
 
-**Version 1.0 — approved 2026-11-20.** Not yet implemented. Change it only by a new
-version, approved the same way. (Drafts 0.1-0.3 led here; section 3 holds the OpenBCA
-fit check.)
+**Version 1.1 — approved 2026-11-20.** Implemented: the impact package and the OpenBCA
+export (`der_opt.cost_test`, `der-opt openbca`). Change it only by a new
+version, approved the same way. (1.1 switches the export from Excel templates to
+OpenBCA's input tables; 1.0 approved 2026-11-20; drafts 0.1-0.3 led to 1.0.)
 
 ## Division of labor
 
@@ -96,6 +97,27 @@ Two things in how OpenBCA scores a run matter here:
   SPM-convention benefit-cost ratios next to OpenBCA's. The values all come from
   OpenBCA; only the classification differs.
 
+### What implementing the export found (OpenBCA 7e13b36)
+
+- **Avoided costs are rounded to 3 decimals.** OpenBCA's loading step casts them to
+  `NUMERIC`, which DuckDB reads as `DECIMAL(18,3)`: $0.0949/kWh becomes $0.095, and
+  emission intensities in tCO2/kWh become 0. This also affects OpenBCA's own Excel
+  pathway. **Workaround (exact):** the export gives energy in MWh and avoided costs in
+  $/MWh, so the same dollars are rounded at $0.001/MWh. OpenBCA's "kWh" outputs are
+  therefore in MWh.
+- **Annual cost fields aren't discounted.** OpenBCA's core leaves the discount factor
+  off annual admin, O&M and utility incentives ("costs are accrued on an ongoing
+  basis"). Benefits are discounted, so measures with ongoing costs score lower than the
+  SPM would score them. **Not worked around:** this is an open decision.
+- **Load increases on their own row.** The measure is exported as two OpenBCA rows: the
+  measure (hours it lowers load, plus all costs, capacity, bills and incentives) and its
+  increases only. OpenBCA's totals are unchanged, and the re-tally can count increases
+  as costs.
+- **Custom streams:** all five custom slots must carry distinct impact categories,
+  because OpenBCA uses them as map keys. Unused slots get excluded placeholders.
+- **Verification:** an integration test runs OpenBCA on the export and reconciles its
+  discounted energy stream with an independent calculation, to 32-bit precision.
+
 ## 4. Inputs
 
 ```yaml
@@ -128,8 +150,13 @@ sweeps and quick comparisons without a round trip through OpenBCA (decision 1).
 - **Scope:** a per-run setting, `control` (against R1) or `device` (against R3).
 - **Capacity value:** R2 / import / counted by default, configurable.
 - **Tests:** OpenBCA allocates, discounts and runs them. der-opt computes no cost tests.
-  It writes one OpenBCA configuration per test (PCT, RIM, TRC, PAC, SCT), filling
-  OpenBCA's Excel templates.
+  It writes one OpenBCA configuration per test (PCT, RIM, TRC, PAC, SCT) as **OpenBCA's
+  input tables (its "integrated" pathway), not its Excel templates (v1.1)**. A test
+  showed that re-saving the templates from Python changes OpenBCA's results (benefits
+  off by up to $862 per measure; the templates' formulas lose their computed values)
+  and takes about 4 minutes per load. Tables carry exact values and run in seconds.
+  OpenBCA calls this pathway unsupported, so the mapping is pinned to the tested
+  commit and rechecked when OpenBCA changes.
 - **Tax credits:** OpenBCA's cost-treatment setting decides their treatment.
 - **Later-year bills:** escalated, carried as a custom stream.
 - **Negative streams:** OpenBCA's values and ratios. der-opt also re-tallies OpenBCA's

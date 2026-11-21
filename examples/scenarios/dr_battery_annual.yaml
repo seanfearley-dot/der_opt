@@ -77,3 +77,4 @@ cost_test:
   cost_escalation: 0.025
   participant_costs: {upfront: 300, annual_om: 0}
   program_costs: {admin_upfront: 75, admin_annual: 15, upfront_incentive: 0}
+  discount_rates: {utility: 0.075, participant: 0.10, societal: 0.03} # illustrative

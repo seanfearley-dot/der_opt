@@ -160,6 +160,12 @@ class ProgramCostsConfig(BaseModel):
     upfront_incentive: float = 0.0
 
 
+class DiscountRatesConfig(BaseModel):
+    utility: float  # RIM, TRC, PAC
+    participant: float  # PCT
+    societal: float  # SCT
+
+
 class CostTestConfig(BaseModel):
     scope: Literal["control", "device"] = "control"
     measure_devices: list[str] | None = None  # device scope: removed for R3; default dr.measure_devices or all
@@ -174,6 +180,10 @@ class CostTestConfig(BaseModel):
     participant_costs: ParticipantCostsConfig = Field(default_factory=ParticipantCostsConfig)
     program_costs: ProgramCostsConfig = Field(default_factory=ProgramCostsConfig)
     tax_credits: float = 0.0
+    # OpenBCA's tables carry the run settings, so the export needs these (spec v1.1)
+    discount_rates: DiscountRatesConfig | None = None
+    tests: list[Literal["PCT", "RIM", "TRC", "PAC", "SCT"]] = Field(
+        default_factory=lambda: ["PCT", "RIM", "TRC", "PAC", "SCT"])
 
 
 class ScenarioConfig(BaseModel):

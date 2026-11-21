@@ -144,6 +144,7 @@ def write_impact_package(out_dir: Path, config, without_label: str, without: Dis
         "bill_escalation": ct.bill_escalation, "cost_escalation": ct.cost_escalation,
         "participant_costs": ct.participant_costs.model_dump(), "program_costs": ct.program_costs.model_dump(),
         "tax_credits": ct.tax_credits, "avoided_cost_set": ct.avoided_costs.set,
+        "discount_rates": ct.discount_rates.model_dump() if ct.discount_rates else None, "tests": list(ct.tests),
         "capacity_value": chosen, "first_year": {
             "energy_impact_kwh": round(float(energy["load_reduction_kwh"].sum()), 3),
             "decrease_kwh": round(float(energy["decrease_kwh"].sum()), 3),
