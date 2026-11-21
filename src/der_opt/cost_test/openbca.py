@@ -315,10 +315,13 @@ def export_openbca(package: str | Path, out_dir: str | Path) -> list[ExportedTes
         _write_table(folder, "program_value_streams", pd.DataFrame(columns=list(SCHEMAS["program_value_streams"])))
         _write_table(folder, "first_year_avoided_costs_by_id", pd.DataFrame(columns=list(SCHEMAS["first_year_avoided_costs_by_id"])))
         settings = json.dumps({
-            "test": test, "cost_treatment": COST_TREATMENT[test], "discount_rate": rate,
+            "test": test, "cost_treatment": COST_TREATMENT[test], "discount_rate": rate, "measure_life_years": life,
             "dollars": f"{dollars.basis} ({dollars.base_year})", "openbca_commit_tested": OPENBCA_COMMIT,
             "units": "energy in MWh, avoided costs in $/MWh: OpenBCA rounds avoided costs to 3 decimals",
             "notes": [n for n in (
+                "OpenBCA counts annual cost fields (admin, O&M, the annual DR incentive) undiscounted; benefits are "
+                "discounted (OpenBCA's convention, kept)" if (prog["admin_annual"] or pc["annual_om"]
+                                                              or (first.get("dr_incentive") or 0)) else None,
                 "participant replacements aren't carried (OpenBCA has no field for them)" if pc.get("replacements") else None,
                 "annual costs aren't escalated (OpenBCA holds them flat)" if measure.get("cost_escalation") else None,
                 "the DR incentive is held flat over the life" if (first.get("dr_incentive") or 0) else None,
@@ -366,8 +369,17 @@ def tally(exported: list[ExportedTest]) -> pd.DataFrame:
         pv = streams.groupby(["id", "impact_category", "value_stream"])["present_value"].sum().fillna(0.0)
         benefits, costs = float(pv[pv > 0].sum()), float(-pv[pv < 0].sum())
         openbca_benefits, openbca_costs = float(ratio["total_benefits"]), float(-ratio["total_costs"])
+        # OpenBCA leaves annual cost fields undiscounted (its convention, kept by decision
+        # 2026-11-20): how net benefits would change if they were discounted at the test's
+        # rate (they carry their sign: a cost in RIM, a participant benefit in PCT)
+        settings = json.loads((item.folder / "test.json").read_text(encoding="utf-8"))
+        rate, life = settings["discount_rate"], settings["measure_life_years"]
+        annuity = sum(1 / (1 + rate) ** t for t in range(life)) / life
+        annual = streams[streams["value_stream"].str.endswith("_annual_dollar_per_year")
+                         & streams["impact_category"].isin(COST_CATEGORIES)]["present_value"].fillna(0.0).sum()
         rows.append({
             "test": item.test, "openbca_benefits": openbca_benefits, "openbca_costs": openbca_costs,
+            "net_change_if_annual_discounted": float(-annual * (1 - annuity)),
             "net_benefits": openbca_benefits - openbca_costs,
             "openbca_ratio": openbca_benefits / openbca_costs if openbca_costs > 0 else np.nan,
             "spm_benefits": benefits, "spm_costs": costs, "spm_ratio": benefits / costs if costs > 0 else np.nan,

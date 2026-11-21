@@ -108,7 +108,9 @@ Two things in how OpenBCA scores a run matter here:
 - **Annual cost fields aren't discounted.** OpenBCA's core leaves the discount factor
   off annual admin, O&M and utility incentives ("costs are accrued on an ongoing
   basis"). Benefits are discounted, so measures with ongoing costs score lower than the
-  SPM would score them. **Not worked around:** this is an open decision.
+  SPM would score them. **Decision (2026-11-20): keep OpenBCA's convention.** Every
+  export notes it and reports, per test, how net benefits would change if annual cost
+  fields were discounted at that test's rate (`net_change_if_annual_discounted`).
 - **Load increases on their own row.** The measure is exported as two OpenBCA rows: the
   measure (hours it lowers load, plus all costs, capacity, bills and incentives) and its
   increases only. OpenBCA's totals are unchanged, and the re-tally can count increases
@@ -165,6 +167,8 @@ sweeps and quick comparisons without a round trip through OpenBCA (decision 1).
 - **Impact degradation:** 0 for now.
 - **First-year screening values:** der-opt keeps them, labeled as screening, not test
   results.
+- **Annual costs (v1.1):** OpenBCA's convention of not discounting them is kept, noted and
+  quantified on every export.
 
 ## Threads to pull
 

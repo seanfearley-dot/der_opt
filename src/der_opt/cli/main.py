@@ -597,6 +597,10 @@ def openbca(
     notes = {n for e in exported for n in json.loads((e.folder / "test.json").read_text(encoding="utf-8"))["notes"]}
     for note in sorted(notes):
         typer.echo(f"  Note: {note}")
+    effect = table.set_index("test")["net_change_if_annual_discounted"]
+    if (effect.abs() > 0.005).any():
+        typer.echo("  If OpenBCA discounted annual cost fields at each test's rate, net benefits would change by: "
+                   + ", ".join(f"{t} {'+' if v >= 0 else '-'}${abs(v):,.2f}" for t, v in effect.items() if abs(v) > 0.005))
     typer.echo(f"\nWrote {out / 'cost_tests.csv'}; OpenBCA's own outputs are in {out}/<test>/output/")
 
 

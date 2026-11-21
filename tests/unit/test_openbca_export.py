@@ -111,6 +111,13 @@ def test_openbca_runs_and_reconciles(exported, run_dir):
     run_openbca(exported, OPENBCA_DIR, run_dir / "openbca" / "run_core.py")
     table = tally(exported).set_index("test")
     assert table.loc["PCT", "spm_benefits"] > 0  # the DR incentive, a participant benefit
+    # PAC counts 10 x $15 admin and 10 x the DR incentive undiscounted; at 7.5% they'd be
+    # worth 7.38/10 as much
+    annual = 10 * 15 + 10 * yaml.safe_load((run_dir / "measure_impacts" / "measure.yaml").read_text(
+        encoding="utf-8"))["first_year"]["dr_incentive"]
+    annuity = sum(1 / 1.075 ** t for t in range(10)) / 10
+    assert table.loc["PAC", "net_change_if_annual_discounted"] == pytest.approx(annual * (1 - annuity), rel=1e-4)
+    assert table.loc["PCT", "net_change_if_annual_discounted"] < 0  # the incentive is a PCT benefit: overstated
     # OpenBCA's discounted energy stream equals an independent calculation (to float32;
     # $/kWh values would be rounded to 3 decimals by OpenBCA, hence the MWh units)
     acs = read_set(REPO / "examples/data/avoided_costs/synthetic_2026")

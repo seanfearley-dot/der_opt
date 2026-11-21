@@ -603,7 +603,9 @@ Mapping, tested against OpenBCA commit 7e13b36:
 - bills as a custom stream (PCT benefit, RIM lost revenue).
 
 **OpenBCA doesn't discount annual cost fields** (admin, O&M, the annual DR incentive).
-See [docs/COST_TEST_SPEC.md](docs/COST_TEST_SPEC.md) section 3. The `cost_test` section
+That's its convention, kept by decision. Every export notes it, and prints how each
+test's net benefits would change if those costs were discounted
+([docs/COST_TEST_SPEC.md](docs/COST_TEST_SPEC.md) section 3). The `cost_test` section
 needs `discount_rates: {utility, participant, societal}` for the export.
 
 ```yaml
