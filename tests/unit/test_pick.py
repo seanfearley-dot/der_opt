@@ -36,7 +36,7 @@ def test_blocks_lists_every_block_by_kind_with_what_it_needs():
     assert "devices/thermostat_cooling" in result.output and "needs: ambient_temp_c" in result.output
     assert "DR add-ons (after the program):\n  programs/monthly_test_events" in result.output
     kinds = {b.name: b.kind for b in read_library(STARTER_LIBRARY)}
-    assert kinds["programs/summer_peak_commitment"] == "dr" and kinds["feeder/homes_bill"] == "feeder"
+    assert kinds["programs/summer_peak_commitment"] == "dr" and kinds["study/homes_bill"] == "study"
     assert kinds["meter/no_simultaneous_import_export"] == "meter"
 
 
@@ -78,7 +78,7 @@ def test_per_home_placeholders_go_in_the_scenario(tmp_path):
     (["year_2026", "bill", "panel_15kw", "panel_20kw"], "both set poi_limit_kw (20 vs 15.0)"),
     (["year_2026", "bill", "monthly_test_events"], "adds to a DR program; pick a program too"),
     (["year_2026", "pge_e_elec_2026-06_import", "summer_peak_incentive"], "counts ['battery'] as the measure"),
-    (["year_2026", "bill", "homes_bill"], "is for feeder scenarios"),
+    (["year_2026", "bill", "homes_bill"], "is for studies"),
 ])
 def test_picks_that_dont_fit_are_refused(tmp_path, names, problem):
     target = tmp_path / "bad.yaml"

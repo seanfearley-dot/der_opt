@@ -64,7 +64,7 @@ der-opt run examples/scenarios/battery_solar_lbnl_nbt.yaml
 der-opt run examples/scenarios/v2x_lbnl_nbt.yaml --duals -o out/v2x
 der-opt run examples/scenarios/battery_solar_lbnl_nbt_annual.yaml -o out/annual   # ~1 min
 der-opt run examples/scenarios/battery_solar_lbnl_nem2_annual.yaml -o out/nem2     # same house on NEM 2.0
-der-opt run examples/scenarios/feeder_ev_heat_wave.yaml -o out/feeder             # 20 houses, 2 transformers
+der-opt run examples/scenarios/feeder_ev_heat_wave.yaml -o out/feeder             # a study: 20 homes, 2 transformers
 der-opt run examples/scenarios/feeder_bank_planning_trace.yaml -o out/bank_trace  # bank 1-in-10 year + 40 new homes (.[forecast])
 der-opt run examples/scenarios/battery_caiso_lmp.yaml                             # battery on CAISO LMP
 der-opt run examples/scenarios/feeder_from_files.yaml                             # 6 homes from spec files
@@ -84,7 +84,7 @@ objective *is* this bill (plus device costs), so "value of optimization" and "bi
 savings" differ only by battery/EV wear. With `energy_arbitrage` they can disagree in
 sign — see Modeling caveats.
 
-Every run ends with **checks** (feeder runs too, on every house in every run):
+Every run ends with **checks** (feeder runs too, on every premise in every run):
 
 | Check | Level | Catches |
 |---|---|---|
@@ -121,7 +121,7 @@ Files written with `-o`:
 | `comparison.png` | optimal vs. counterfactual grid flows and value breakdown |
 | `duals.csv`, `duals.png` | all dual families (long format), and a chart of the marginal value of energy at the meter (with `--duals`) |
 | `bill_cycles.csv`, `counterfactual_bill_cycles.csv` | per billing cycle: kWh, charges by bucket, credits earned and applied, amount due, credit balances (with `billing`) |
-| `checks.csv` | every check finding: level, check, run, house, message |
+| `checks.csv` | every check finding: level, check, message, run, premise |
 | `run_record.json` | what produced the result: the scenario as resolved, a SHA-256 of every input file it names, the git commit (and whether there were uncommitted changes), Python and package versions, headline results, and the checks; with `extends`, a SHA-256 of every fragment |
 | `scenario.yaml` | a copy of the scenario file as run |
 | `scenario.resolved.yaml` | the scenario with everything it extends merged in and every path absolute |
@@ -158,7 +158,7 @@ der-opt validate scenarios/home_a.yaml
 ```
 
 `der-opt new` writes a commented starting scenario from a template: `dr-battery`,
-`home-bill` (`--program nbt|nem2`), `feeder-from-files` (`--premises`, `--network`) or
+`home-bill` (`--program nbt|nem2`), `feeder-from-files` (a study: `--premises`, `--devices`, `--network`) or
 `lmp-battery` (`--price`). It fills in what the options give it, including the premise
 when the time series file has only one and the run period from the time series (or
 price) file, and writes `TODO` for the rest: incentives, costs, discount rates, a
@@ -213,7 +213,7 @@ release, with a warning naming the file, key and the path to write instead.
 blocks: time grids, batteries, a commuter EV (V2X or charge-only), a thermostat, a
 flexible load, retail, demand-charge and LMP prices, the bill objective, meter limits,
 counterfactuals, NBT and NEM2 billing, DR programs and test events, avoided costs, cost
-tests, and feeder house defaults. Every example scenario is built from it, and the
+tests, and study blocks (each premise's bill, device defaults). Every example is built from it, and the
 tests run every block. Its `# illustrative` values are placeholders: copy the folder
 and set your own.
 
@@ -270,8 +270,10 @@ devices:
 Every setting is resolved by one precedence rule. From weakest to strongest:
 1. built-in defaults;
 2. the template;
-3. defaults (`house_defaults` on a feeder);
-4. the premise's or device's own value.
+3. defaults (a study's `defaults`);
+4. the premise's or device's own value (its row in `premises.csv` or `devices.csv`, or
+   what's written out);
+5. a study's `overrides`.
 
 A template's counterfactual policy gives the scenario a counterfactual run.
 
@@ -583,13 +585,13 @@ from your own pipeline; nothing else needs configuring per file. In short:
 * **`devices.csv` (2.0):** one row per device, with `premise_id`, `device_id`, `type`
   (`solar`, `battery`, `ev`, `thermostat`, `flexible_load`), an optional `template` by
   name, `kw` and `kwh` sizes, `v2x`, `installed_cost` and `annual_om`, `charge_sources`,
-  and any device parameter by name. The scenario's `premise_data` names it with
-  `devices:`, and the folders to find templates in with `templates:` (default: your
-  library's `devices/`).
+  and any device parameter by name. A study's `population` names it with `devices:`,
+  and the folders to find templates in with `templates:` (default: your library's
+  `devices/`).
 
-  A 1.1 premises file with device columns still works. `der-opt convert premises
-  premises.csv --timeseries timeseries.csv --out new/` writes the 2.0 pair, which builds
-  identical premises.
+  A 1.1 premises file with device columns is read for one release, with a warning.
+  `der-opt convert premises premises.csv --timeseries timeseries.csv --out new/` writes
+  the 2.0 pair, which builds identical premises.
 * **`network.csv`:** one row per transformer or section: `element_id`, `parent_id`,
   `rating_kw`, `overload_cost_per_kwh`.
 
@@ -604,8 +606,8 @@ der-opt validate scenario.yaml --population out/population   # premises.csv and 
 writes them too:
 - `premises.csv`: each premise's settings and technology mix;
 - `device_parameters.csv`: every setting of every premise and device, with its value and
-  where it came from (`devices.csv row 4`, `template:commuter`,
-  `house_defaults.device_params.battery`).
+  where it came from (`devices.csv row 4`, `template:commuter`, `defaults[1]`,
+  `override:home_a/battery`, `add_devices[0]`).
 
 `check-data` names every rule a file breaks (exit code 1) and warns about suspect
 data: empty cells, a day or more without consumption, 12 h unchanged, spikes, a home
@@ -618,25 +620,31 @@ external_load: {source: timeseries, path: data/timeseries.csv, premise_id: home_
 import_price: {type: timeseries, path: data/prices.csv, column: import_price_per_kwh}
 ```
 
-For a feeder, `premise_data` builds every house from the files.
+For many premises, a study's `population` reads the files (see
+[Studies](#studies-a-population-and-its-analyses)).
 `examples/scenarios/feeder_from_files.yaml` runs the synthetic sample in
 `examples/data/spec_sample/`:
 
 ```yaml
-premise_data:
-  premises: data/premises.csv
-  timeseries: [data/timeseries.csv]          # a premise's columns may span several files
-  network: data/network.csv                  # instead of feeder.elements
-  tariff_dir: ../data/tariffs                # premises.csv `tariff` names a file here (default: der-opt's example tariffs)
+extends: [../library/time/2026-07-13T12_72x60min.yaml, ../library/study/homes_bill.yaml]
+population:
+  premises: ../data/spec_sample/premises.csv
+  devices: ../data/spec_sample/devices.csv
+  timeseries: [../data/spec_sample/timeseries.csv]   # a premise's columns may span several files
+  network: ../data/spec_sample/network.csv           # instead of the feeder analysis's elements
+tariffs:
+  dir: ../data/tariffs                       # premises.csv `tariff` names a file here (default: der-opt's example tariffs)
   programs: {nbt: {export_rates_csv: ..., acc_plus_per_kwh: 0.0088}, nem2: {nsc_rate_per_kwh: 0.02781}}
-house_defaults:
-  value_streams: [{type: bill}]              # each home's own bill, nbt_bill or nem2_bill by its program
-  device_params: {battery: {eta_charge: 0.96, degradation_cost_per_kwh: 0.015}, ev: {...}}
+defaults:                                    # homes_bill's come first: each home's own bill, and the counterfactuals
+  - where: {type: battery}
+    set: {device: {eta_charge: 0.96, degradation_cost_per_kwh: 0.015}}
+analyses:
+  feeder: {}
 ```
 
-Sizes come from `premises.csv` and behavior from `device_params` (defaults: batteries
-95% efficient each way, starting and ending half full; EVs charged to 90% by every
-departure, which is read off `ev_connected`). A metered premise can't have devices
+Sizes come from `devices.csv` and behavior from templates and `defaults` (built in:
+batteries 95% efficient each way, starting and ending half full; EVs charged to 90% by
+every departure, which is read off `ev_connected`). A metered premise can't have devices
 added: its meter already includes them. On the local clock, November's repeated hour
 is averaged into one and March's skipped hour interpolated.
 
@@ -802,35 +810,138 @@ cost_test:
   program_costs: {admin_upfront: 75, admin_annual: 15}
 ```
 
-## Feeders: many houses on a network
+## Studies: a population and its analyses
 
-A scenario with a `feeder` section is a multi-house run. Every house is an ordinary
-premise (devices, value streams, bill, counterfactual), and the feeder is a tree of
-transformers and line sections with kW ratings. `der-opt run` dispatches the same
-houses three ways and prices each on the same terms:
+A study keeps the population (who the premises are and what they have) apart from the
+analyses run on it ([docs/POPULATION_MODEL_SPEC.md](docs/POPULATION_MODEL_SPEC.md)).
+`der-opt run` and `der-opt validate` recognize a study by its `population` or
+`analyses` section. The feeder examples in `examples/scenarios/` are studies.
+
+```yaml
+name: two_homes
+time_grid: {resolution_minutes: 60, horizon_steps: 8760, start: "2026-01-01T00:00:00"}
+population:
+  premises: data/premises.csv                # premise_id, element_id, customer_class, tariff, tags...
+  devices: data/devices.csv                  # premise_id, device_id, type, template, kw, kwh, installed_cost...
+  timeseries: [data/timeseries.csv]
+  templates: [../library/devices]            # default: the library's devices/
+tariffs: {dir: ../data/tariffs, programs: {nbt: {...}}}
+objective: bill                              # or a list of value streams; each premise's own optimization
+defaults:                                    # applied in order; a later one wins
+  - set: {premise: {poi_limit_kw: 20}}       # no `where`: every premise
+  - where: {type: battery}                   # device keys: type, template, device_id
+    set: {device: {counterfactual: {type: self_consumption}}}
+  - where: {type: battery, segment: late}    # premise columns and tags; a list means any of
+    set: {device: {degradation_cost_per_kwh: 0.03}}
+overrides:                                   # one premise or device; beats every default
+  home_a/battery: {device: {installed_cost: 9000, eta_charge: 0.9}}
+  home_b: {premise: {participant_upfront: 250}}
+premises:                                    # written out, as well as (or instead of) the files
+  - {name: shop, element: tx, tariff: pge_e_elec_2026-06, tags: {segment: retail}, external_load: {...}, devices: [...]}
+  - {name: garage, element: tx, kind: background, external_load: {...}}  # fixed, not billed, never flexible
+add_devices:                                 # adoption what-ifs: the files stay as they are
+  - where: {element_id: tx, kind: premise}
+    share: 0.3                               # of the selected premises without this device_id
+    seed: 1
+    device: {device_id: battery, type: battery, template: battery_13kwh, kw: 5, kwh: 13.5, installed_cost: 9500}
+analyses:
+  feeder:                                    # every premise on one network
+    elements: [{name: tx, rating_kw: 12}]    # or population.network
+    coordination: {envelopes: {}}
+  portfolio:                                 # each selected premise on its own
+    select: {segment: late}                  # default: every premise
+    measure: {type: [battery]}               # the devices DR's R3 and the cost tests remove
+    dr: {program: {...}, events: {...}}      # customer_class comes from each premise
+    avoided_costs: {set: ../data/avoided_costs/synthetic_2026}
+    cost_test: {...}                         # needs a run covering a whole calendar year
+```
+
+Precedence, lowest to highest: built-in defaults, the device's template, the study's
+`defaults`, the population row (or the premise as written out), then `overrides`.
+Library blocks that set `defaults` add up: a study that extends several gets every
+block's entries in order, then its own. A device's `installed_cost` and
+`annual_om` come from its row, a default or an override. In the portfolio, a premise's
+participant cost is the cost test's base, plus its measure devices' costs, plus its own
+`participant_upfront` / `participant_annual_om`. `validate` reports every problem by
+premise before anything is solved: an override of a premise or device that isn't there,
+a parameter a device doesn't have, a counterfactual that doesn't fit its device (a
+`self_consumption` solar), DR without a premise's `customer_class`, and cost tests on
+less than a year.
+
+**`add_devices`** adds `round(share × eligible)` devices, at premises chosen at random
+from `seed`. Eligible premises are those `where` selects that don't have a device with
+that `device_id` and aren't metered (a meter already includes its devices). Each entry
+has its own random order, so raising a share keeps the premises already chosen, and one
+entry never changes another's. An added device is a `devices.csv` row (its source is
+`add_devices[0]`), so defaults and overrides apply to it. It needs its series like any
+device: a template with a `pattern` covers an EV. Added solar can take a shared shape
+per kW of its `kw`, as a default:
+
+```yaml
+defaults:
+  - where: {type: solar}  # rows with their own pv_kw series keep theirs
+    set: {device: {available_kw: {source: timeseries, path: data/pv_shape.csv, premise_id: shape, column: pv_kw, per_kw: true}}}
+```
+
+`run` prints what each entry chose, and `run_record.json` lists the premises.
+
+`der-opt run study.yaml -o out/` writes:
+- `premises.csv` and `device_parameters.csv`: what every premise resolved to, and where
+  each setting came from;
+- `feeder/`: the feeder analysis's outputs (see [Feeders](#feeders-many-premises-on-a-network));
+- `portfolio/<premise_id>/`: each premise's scenario.yaml and its outputs, as a
+  single-home run writes them (report.txt holds what it printed);
+- `portfolio/portfolio.csv`: one row per premise (costs, bills, DR incentive and counted
+  kW, screening values, cost-test ratios and net benefits) and a total row (sums; ratios
+  aren't summed);
+- `run_record.json`.
+
+A premise that fails in the portfolio is reported and the rest still run (exit code 1).
+A one-premise study of the `dr_battery_annual` home gives that example's results exactly,
+cost tests included.
+
+**The old feeder form** (`houses`, `house_defaults`, `premise_data`,
+`feeder.background_load`) and 1.1 premises files are read for one release, each with a
+warning saying what to write instead. In a study:
+- `houses` are `premises` (the same fields);
+- `premise_data`'s files are `population`, and its tariff settings `tariffs`;
+- `house_defaults.value_streams` is the `objective`, and its other settings a `defaults`
+  entry with no `where`;
+- `device_params.<type>` and counterfactual policies are `defaults` entries with
+  `where: {type: ...}`;
+- background load is a premise with `kind: background`.
+Each old form of the examples resolves to the same premises as its study (the tests
+check it).
+
+## Feeders: many premises on a network
+
+A study's `feeder` analysis is a multi-premise run. Every premise is an ordinary one
+(devices, objective, bill, counterfactual), and the feeder is a tree of transformers and
+line sections with kW ratings. `der-opt run` dispatches the same premises three ways
+and prices each on the same terms:
 
 | Run | What it is |
 |---|---|
-| coordinated | one optimization over every house and the network: bills + wear + overload + deferral value |
-| independent | each house optimizing its own bill, blind to the network |
-| counterfactual | the rule-based policies in `house_defaults.counterfactual` (e.g. EVs charging on plug-in) |
+| coordinated | one optimization over every premise and the network: bills + wear + overload + deferral value |
+| independent | each premise optimizing its own bill, blind to the network |
+| counterfactual | the premises' counterfactual policies (e.g. EVs charging on plug-in) |
 
 ```yaml
-time_grid: {resolution_minutes: 60, horizon_steps: 72, start: "2026-07-13T12:00:00"}
-feeder:
-  elements:
-    - {name: lateral, rating_kw: 200}
-    - {name: tx_a, parent: lateral, rating_kw: 50, overload_cost_per_kwh: 1.0}
-  value_streams:
-    - {type: capacity_deferral, element: tx_a, value_per_kw: 40.0}
-premise_data:                  # houses from input-spec files, or list them under houses:
+extends: [../library/time/2026-07-13T12_72x60min.yaml, ../library/study/homes_bill.yaml]
+population:                    # premises from input-spec files, and/or written out under premises:
   premises: ../data/heat_wave/premises.csv
+  devices: ../data/heat_wave/devices.csv
   timeseries: [../data/heat_wave/timeseries.csv]
-house_defaults:                # applied to every house that doesn't set its own
-  value_streams: [{type: nbt_bill}]
-  poi_limit_kw: 30
-  counterfactual: {policies: {ev: {type: rule_based_ev}, battery: {type: self_consumption}}}
-billing: {...}                 # shared by every house
+tariffs: {dir: ../data/tariffs, programs: {nbt: {...}}}
+defaults:                      # after homes_bill's (objective: bill, and the counterfactual policies)
+  - set: {premise: {poi_limit_kw: 30}}
+analyses:
+  feeder:
+    elements:
+      - {name: lateral, rating_kw: 200}
+      - {name: tx_a, parent: lateral, rating_kw: 50, overload_cost_per_kwh: 1.0}
+    value_streams:
+      - {type: capacity_deferral, element: tx_a, value_per_kw: 40.0}
 ```
 
 * **Elements:** `rating_kw` applies to load and backfeed. Without
@@ -839,9 +950,9 @@ billing: {...}                 # shared by every house
 * **`capacity_deferral`:** `value_per_kw` x (peak flow above `threshold_kw`, default 0).
   It takes an annual $/kW-year and applies it to the run's peak, so use it on a horizon
   that contains the element's annual peak.
-* **Houses** under `houses:` take the same fields as a one-house scenario plus
-  `element`. **`premise_data`** builds them from `premises.csv` and time series files
-  (see Input data). The example homes in `examples/data/heat_wave/` and
+* **Premises** come from the population's files (see Input data), or are written out
+  under the study's `premises:`, with the same fields as a single-home scenario plus
+  `element`. The example homes in `examples/data/heat_wave/` and
   `examples/data/new_subdivision/` are synthetic, written in that format. Each has:
   - base load, with morning and evening peaks and air conditioning that follows a
     heat-wave temperature;
@@ -853,9 +964,10 @@ billing: {...}                 # shared by every house
 * **Congestion prices** are the duals of each element's flow: the cost of one more kWh
   through it in each hour. They're exact while the model is an LP.
 
-Output (`-o`): `houses.csv` (devices, sizes, each run's bill),
-`flows_kw.csv`, `loading.csv` (peak, % of rating, hours and kWh over),
-`congestion_prices.csv`, `dispatch_<run>.csv` per house, and `feeder_loading.png`.
+Output (`-o`, in `feeder/`): `premises.csv` (devices, sizes, each run's bill),
+`device_parameters.csv`, `flows_kw.csv`, `loading.csv` (peak, % of rating, hours and kWh
+over), `congestion_prices.csv`, `dispatch_<run>.csv` per premise, and
+`feeder_loading.png`.
 
 `feeder_ev_heat_wave.yaml`, three heat-wave days, transformer A with 7 EVs in 10
 homes:
@@ -880,11 +992,11 @@ Two modeling choices matter here:
   "charge in off-peak" timer does. That is what produces the midnight spike in the
   independent run.
 * **The coordinated run is a planner's optimum.** It minimizes everyone's costs
-  together. It reports which houses pay more, but doesn't compensate them; that's for
+  together. It reports which premises pay more, but doesn't compensate them; that's for
   a settlement mechanism (not built yet).
 
 `feeder_bank_planning_trace.yaml` puts the same machinery under a whole primary bank. The
-bank's existing load is `background_load` from loadcast's 1-in-10 design year (`trace:
+bank's existing load is a background premise from loadcast's 1-in-10 design year (`trace:
 poe10`, peak 1,990 kW on 4 Aug 2026 at 16:00). A new 40-home subdivision (80% EVs) joins
 on two 75 kW transformers. Over 3-6 Aug:
 
@@ -896,12 +1008,12 @@ on two 75 kW transformers. Over 3-6 Aug:
 
 The bank's own 4 pm peak leaves the new homes little room, but what binds first is their
 service transformers. Coordination costs 13 homes $40 in total for a $1,149 network saving.
-The existing load is background load here (fixed, not billed), the new homes' synthetic weather is
+The existing load is a background premise here (fixed, not billed), the new homes' synthetic weather is
 not the trace's weather, and loadcast's bank load includes its losses while the new homes'
 doesn't -- a sizing study, not a single consistent day.
 
 Flow is a power balance only: no losses, voltage, or reactive power, so convert kVA
-nameplates to kW yourself. Every house shares one time grid.
+nameplates to kW yourself. Every premise shares one time grid.
 
 ### Coordination: price signals, operating envelopes, feeder DR
 
@@ -912,28 +1024,33 @@ measured against `independent` (the feeder with no program) and the ideal. Spec:
 `examples/scenarios/feeder_coordination.yaml`.
 
 ```yaml
-house_defaults:
-  participation: participant # or non_participant
-  baseline_behavior: own_bill # without a program: own_bill or rule_based
-  response: optimized # with one: optimized, or rules
-houses:
+defaults: # roles for everyone (built in: participant, own_bill, optimized)
+  - set: {premise: {participation: participant, baseline_behavior: own_bill, response: optimized}}
+premises: # or premises.csv columns: participation, baseline_behavior, response
   - name: home_02
-    baseline_behavior: rule_based
-    response: rules
-    rules: {dr_event: {ev: {action: discharge, to: export, keep_soc_frac: 0.5}}} # a V2X EV exports for events
-feeder:
-  background_load: # load that isn't a customer: fixed, not billed, never flexible
-    - {name: strip_mall, element: tx_2, load: {source: timeseries, path: ..., premise_id: strip_mall, column: load_kw}}
-coordination:
-  price_signal: {source: coordinated} # or schedule (by element, month and hour), or file
-  envelopes: {} # pro_rata_need shares of each element's headroom, a new envelope each hour
-  dr_events:
     element: tx_1
-    trigger: {above_pct: 80} # events where the forecast loading is over 80% of the rating
-    program: {program_id: tx_1_peak, window: "15:00-22:00", max_hours: 4, response: incentive, incentive_per_kwh: 0.75}
-  runs: # optional; without it, each mechanism alone, plus all combined
-    envelopes: [envelopes]
-    signal_and_envelopes: [price_signal, envelopes]
+    baseline_behavior: rule_based # without a program: own_bill or rule_based
+    response: rules # with one: optimized, or rules
+    rules: {dr_event: {ev: {action: discharge, to: export, keep_soc_frac: 0.5}}} # a V2X EV exports for events
+    external_load: {...}
+    devices: [...]
+  - name: strip_mall # load that isn't a customer: fixed, not billed, never flexible
+    element: tx_2
+    kind: background
+    external_load: {source: timeseries, path: ..., premise_id: strip_mall, column: load_kw}
+analyses:
+  feeder:
+    elements: [...]
+    coordination:
+      price_signal: {source: coordinated} # or schedule (by element, month and hour), or file
+      envelopes: {} # pro_rata_need shares of each element's headroom, a new envelope each hour
+      dr_events:
+        element: tx_1
+        trigger: {above_pct: 80} # events where the forecast loading is over 80% of the rating
+        program: {program_id: tx_1_peak, window: "15:00-22:00", max_hours: 4, response: incentive, incentive_per_kwh: 0.75}
+      runs: # optional; without it, each mechanism alone, plus all combined
+        envelopes: [envelopes]
+        signal_and_envelopes: [price_signal, envelopes]
 ```
 
 **Who takes part:**
@@ -983,68 +1100,6 @@ In the example, envelopes capture 87% of the ideal's network saving, and the thr
 together 95%. The evening price signal and the DR events, each alone, *add* $95 to
 network cost: participants move charging to just after the window, which makes a new
 peak on tx_1.
-
-## Studies: a population and its analyses
-
-A study keeps the population (who the premises are and what they have) apart from the
-analyses run on it ([docs/POPULATION_MODEL_SPEC.md](docs/POPULATION_MODEL_SPEC.md)).
-`der-opt run` and `der-opt validate` recognize a study by its `population` section:
-
-```yaml
-name: two_homes
-time_grid: {resolution_minutes: 60, horizon_steps: 8760, start: "2026-01-01T00:00:00"}
-population:
-  premises: data/premises.csv                # premise_id, element_id, customer_class, tariff, tags...
-  devices: data/devices.csv                  # premise_id, device_id, type, template, kw, kwh, installed_cost...
-  timeseries: [data/timeseries.csv]
-  templates: [../library/devices]            # default: the library's devices/
-tariffs: {dir: ../data/tariffs, programs: {nbt: {...}}}
-objective: bill                              # or a list of value streams; each premise's own optimization
-defaults:                                    # applied in order; a later one wins
-  - set: {premise: {poi_limit_kw: 20}}       # no `where`: every premise
-  - where: {type: battery}                   # device keys: type, template, device_id
-    set: {device: {counterfactual: {type: self_consumption}}}
-  - where: {type: battery, segment: late}    # premise columns and tags; a list means any of
-    set: {device: {degradation_cost_per_kwh: 0.03}}
-overrides:                                   # one premise or device; beats every default
-  home_a/battery: {device: {installed_cost: 9000, eta_charge: 0.9}}
-  home_b: {premise: {participant_upfront: 250}}
-analyses:
-  feeder:                                    # every premise on one network
-    elements: [{name: tx, rating_kw: 12}]    # or population.network
-    coordination: {envelopes: {}}
-  portfolio:                                 # each selected premise on its own
-    select: {segment: late}                  # default: every premise
-    measure: {type: [battery]}               # the devices DR's R3 and the cost tests remove
-    dr: {program: {...}, events: {...}}      # customer_class comes from each premise
-    avoided_costs: {set: ../data/avoided_costs/synthetic_2026}
-    cost_test: {...}                         # needs a run covering a whole calendar year
-```
-
-Precedence, lowest to highest: built-in defaults, the device's template, the study's
-`defaults`, the population row, then `overrides`. A device's `installed_cost` and
-`annual_om` come from its row, a default or an override. In the portfolio, a premise's
-participant cost is the cost test's base, plus its measure devices' costs, plus its own
-`participant_upfront` / `participant_annual_om`. `validate` reports every problem by
-premise before anything is solved: an override of a premise or device that isn't there,
-a parameter a device doesn't have, a counterfactual that doesn't fit its device (a
-`self_consumption` solar), DR without a premise's `customer_class`, and cost tests on
-less than a year.
-
-`der-opt run study.yaml -o out/` writes:
-- `premises.csv` and `device_parameters.csv`: what every premise resolved to, and where
-  each setting came from;
-- `feeder/`: the feeder analysis's outputs, as a feeder scenario writes them;
-- `portfolio/<premise_id>/`: each premise's scenario.yaml and its outputs, as a
-  single-home run writes them (report.txt holds what it printed);
-- `portfolio/portfolio.csv`: one row per premise (costs, bills, DR incentive and counted
-  kW, screening values, cost-test ratios and net benefits) and a total row (sums; ratios
-  aren't summed);
-- `run_record.json`.
-
-A premise that fails in the portfolio is reported and the rest still run (exit code 1).
-A one-premise study of the `dr_battery_annual` home gives that example's results exactly,
-cost tests included.
 
 ## Modeling caveats worth knowing
 
@@ -1117,14 +1172,15 @@ src/der_opt/
   pricing/       price series, dual extraction, value breakdown
   simulation/    counterfactual control policies + simulator
   billing/       retail tariffs, PG&E holidays, bill engine (NBT, NEM2), bill objectives
-  inputs/        input data spec v1.1: readers, validation, quality checks
+  inputs/        input data spec 2.0: readers, validation, quality checks
   dr/            demand response: event calendars, settlement, responses, capacity
   avoided_costs/ avoided cost sets and first-year screening values
   cost_test/     the measure impact package for cost tests (OpenBCA)
+  population/    the population model: resolved premises, precedence, templates, studies, portfolio
   integrations/  LBNL load, EV model, PVWatts, PG&E NBT export rates, CAISO LMP
   network/       feeder topology, multi-premise dispatch, congestion prices
   coordination/  participation, price signals, operating envelopes, rule-based responses, feeder DR
-  scenarios/     YAML schema, loader, extends and paths, validate, templates (der-opt new), feeder scenarios
+  scenarios/     YAML schema, loader, extends and paths, validate, templates (der-opt new), feeders and studies
   viz/           heatmap, dispatch, value stack, duals, comparison, feeder loading charts
   cli/           der-opt CLI
 examples/        Python-API scripts, scenarios/ (YAML), library/ (scenario building blocks), data/

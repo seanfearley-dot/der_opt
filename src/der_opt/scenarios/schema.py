@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class TimeGridConfig(BaseModel):
@@ -390,6 +390,11 @@ class FeederScenarioConfig(BaseModel):
 # --- studies (docs/POPULATION_MODEL_SPEC.md section 4) ------------------------------
 
 
+def is_study(data) -> bool:
+    """Whether a composed scenario file is a study (a population, or analyses)."""
+    return isinstance(data, dict) and ("population" in data or "analyses" in data)
+
+
 class PopulationFilesConfig(BaseModel):
     """The population's files (input data spec 2.0)."""
 
@@ -413,6 +418,41 @@ class StudyDefault(BaseModel):
 
     where: dict[str, Any] = Field(default_factory=dict)  # premise columns and tags; type, template, device_id
     set: dict[str, dict[str, Any]]  # premise: {...} and/or device: {...}
+
+
+class AddDevicesConfig(BaseModel):
+    """An adoption what-if (docs/POPULATION_MODEL_SPEC.md section 3a): `share` of the
+    premises `where` selects that don't already have `device.device_id` get the device,
+    chosen at random from `seed`."""
+
+    where: dict[str, Any] = Field(default_factory=dict)
+    share: float = Field(ge=0.0, le=1.0)
+    seed: int = 0
+    device: dict[str, Any]  # a devices.csv row: device_id, type, template, kw, kwh, v2x, costs, parameters
+
+    @model_validator(mode="after")
+    def _names_the_device(self):
+        missing = [k for k in ("device_id", "type") if not self.device.get(k)]
+        if missing:
+            raise ValueError(f"add_devices: the device needs {' and '.join(missing)}")
+        return self
+
+
+class StudyPremiseConfig(HouseConfig):
+    """A premise written out in the study (instead of, or as well as, the population's
+    files): a house's fields, plus what a premises.csv row can say."""
+
+    element: str | None = None  # needed for the feeder analysis
+    kind: Literal["premise", "background"] = "premise"  # background: external_load only, not billed, never flexible
+    customer_class: Literal["residential", "commercial"] | None = None
+    tariff: str | None = None  # a tariff file's name in tariffs.dir, like premises.csv `tariff`
+    export_program: str | None = None  # a program in tariffs.programs
+    income_tier: int | None = None
+    baseline_territory: str | None = None
+    baseline_code: str | None = None
+    participant_upfront: float | None = None
+    participant_annual_om: float | None = None
+    tags: dict[str, Any] = Field(default_factory=dict)  # for `where` selectors, like premises.csv tag columns
 
 
 class FeederAnalysisConfig(BaseModel):
@@ -440,10 +480,18 @@ class AnalysesConfig(BaseModel):
 class StudyConfig(BaseModel):
     name: str
     time_grid: TimeGridConfig
-    population: PopulationFilesConfig
+    population: PopulationFilesConfig | None = None  # the population's files
+    premises: list[StudyPremiseConfig] = Field(default_factory=list)  # premises written out here
     tariffs: TariffsConfig = Field(default_factory=TariffsConfig)
     objective: Literal["bill"] | list[ValueStreamConfig] | None = None  # each premise's own optimization
     defaults: list[StudyDefault] = Field(default_factory=list)
     overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)  # premise or premise/device -> {premise|device: {...}}
+    add_devices: list[AddDevicesConfig] = Field(default_factory=list)  # adoption what-ifs
     analyses: AnalysesConfig
     weather_case: str | None = None
+
+    @model_validator(mode="after")
+    def _has_premises(self):
+        if self.population is None and not self.premises:
+            raise ValueError("a study needs a population (its files) or premises written out")
+        return self

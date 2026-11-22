@@ -297,16 +297,19 @@ def test_new_feeder_and_nem2_leave_todos_for_what_they_cant_know(tmp_path):
     feeder = tmp_path / "feeder.yaml"
     result = runner.invoke(app, ["new", "feeder-from-files", str(feeder),
                                  "--premises", str(DATA / "spec_sample/premises.csv"),
+                                 "--devices", str(DATA / "spec_sample/devices.csv"),
                                  "--network", str(DATA / "spec_sample/network.csv"),
                                  "--timeseries", str(DATA / "spec_sample/timeseries.csv"),
                                  "--export-rates", str(DATA / "pge_nbt_eec_2026.csv")])
     assert result.exit_code == 0 and "1 TODO" in result.output
     config = yaml.safe_load(feeder.read_text(encoding="utf-8"))
     assert config["time_grid"]["horizon_steps"] == 96  # the time series file's span
-    assert config["feeder"]["value_streams"][0]["element"] == "lateral"  # the network's root
+    assert config["analyses"]["feeder"]["value_streams"][0]["element"] == "lateral"  # the network's root
+    assert config["objective"] == "bill" and len(config["defaults"]) == 5  # a study: every premise's bill
     feeder.write_text(feeder.read_text(encoding="utf-8").replace("value_per_kw: TODO", "value_per_kw: 40"),
                       encoding="utf-8")
-    assert runner.invoke(app, ["validate", str(feeder)]).exit_code == 0
+    checked = runner.invoke(app, ["validate", str(feeder)])
+    assert checked.exit_code == 0 and "old names" not in checked.output, checked.output
 
     nem2 = tmp_path / "nem2.yaml"
     runner.invoke(app, ["new", "home-bill", str(nem2), "--program", "nem2",

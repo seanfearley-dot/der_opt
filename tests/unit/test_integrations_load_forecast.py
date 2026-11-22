@@ -151,11 +151,11 @@ def test_yaml_data_source(bank_file):
 def test_example_feeder_scenario_reads_the_bank_trace(monkeypatch):
     from pathlib import Path
 
-    from der_opt.scenarios import build_feeder_scenario, load_feeder_config
+    from der_opt.scenarios import feeder_from_study, load_study_config
 
     root = Path(__file__).resolve().parents[2]
     monkeypatch.chdir(root)
-    built = build_feeder_scenario(load_feeder_config("examples/scenarios/feeder_bank_planning_trace.yaml"))
+    built = feeder_from_study(load_study_config("examples/scenarios/feeder_bank_planning_trace.yaml"))
     element, load = built.background["existing_bank_load"]  # background load: fixed, not billed
     stamps = built.premises[0].time_grid.timestamps()
     peak = int(np.asarray(load).argmax())

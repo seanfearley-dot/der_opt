@@ -43,7 +43,8 @@ KINDS = [
     Kind("other", "Other", many=True),
 ]
 METER_KEYS = {"poi_limit_kw", "import_limit_kw", "export_limit_kw", "exclusive_import_export"}
-FEEDER_KEYS = {"house_defaults", "feeder", "houses", "premise_data"}
+FEEDER_KEYS = {"house_defaults", "feeder", "houses", "premise_data"}  # the old feeder form
+STUDY_KEYS = {"population", "premises", "tariffs", "objective", "defaults", "overrides", "add_devices", "analyses"}
 
 
 @dataclass
@@ -63,6 +64,8 @@ class Block:
 
 def _kind(data: dict) -> str:
     keys = set(data)
+    if keys & STUDY_KEYS:
+        return "study"
     if keys & FEEDER_KEYS:
         return "feeder"
     if keys == {"time_grid"}:
@@ -165,8 +168,10 @@ def problems(picks: list[Block], home: HomeData) -> list[str]:
     by_kind: dict[str, list[Block]] = {}
     for block in picks:
         by_kind.setdefault(block.kind, []).append(block)
+    for block in by_kind.get("study", []):
+        found.append(f"{block.name} is for studies (`der-opt new feeder-from-files`), not a single home")
     for block in by_kind.get("feeder", []):
-        found.append(f"{block.name} is for feeder scenarios (`der-opt new feeder-from-files`), not a single home")
+        found.append(f"{block.name} is for feeder scenarios, not a single home")
     for kind in KINDS:
         chosen = by_kind.get(kind.key, [])
         if kind.required and not chosen:

@@ -664,8 +664,9 @@ def check_file(path: str | Path, premises: str | Path | None = None, network: st
         if result.tags:
             summary["tags"] = result.tags
         if result.v11_device_columns:
-            report.ran("v1.1 device columns", [_info("v1.1 device columns", f"{result.v11_device_columns} are read "
-                                                     "as devices; `der-opt convert premises` writes a 2.0 devices file")])
+            report.ran("v1.1 device columns", [_warn("v1.1 device columns", f"{result.v11_device_columns} are "
+                                                     "the 1.1 form, read as devices for one release; `der-opt convert "
+                                                     "premises` writes a 2.0 devices file")])
     elif kind == "devices":
         known = read_premises(premises, net, strict=False) if premises else None
         result = read_devices(path, known, strict=False)

@@ -121,12 +121,15 @@ def _resolve_loadcast(time_grid: TimeGrid, **kwargs) -> np.ndarray:
 
 def resolve_array_param(value: Any, time_grid: TimeGrid) -> Any:
     """If `value` is a `{source: "<name>", ...kwargs}` dict, resolves it against the
-    named data source and returns a numeric array; otherwise returns `value`
-    unchanged (a literal list, scalar, or already-resolved array)."""
+    named data source and returns a numeric array (times `multiply`, if given);
+    otherwise returns `value` unchanged (a literal list, scalar, or already-resolved array)."""
     if not (isinstance(value, dict) and "source" in value):
         return value
     source = value["source"]
     if source not in _RESOLVERS:
         raise ValueError(f"Unknown data source {source!r}; choices: {sorted(_RESOLVERS)}")
-    kwargs = {k: v for k, v in value.items() if k != "source"}
-    return _RESOLVERS[source](time_grid, **kwargs)
+    kwargs = {k: v for k, v in value.items() if k not in ("source", "multiply")}
+    values = _RESOLVERS[source](time_grid, **kwargs)
+    if value.get("multiply") is not None:  # a shared per-kW shape, sized by a device's kw
+        values = np.asarray(values, dtype=float) * float(value["multiply"])
+    return values

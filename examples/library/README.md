@@ -77,13 +77,16 @@ What merges and what replaces:
 | | `monthly_test_events` | add after a program: year-round, a 2-hour test event the first Tuesday of each month |
 | `avoided_costs/` | `synthetic_2026` | first-year screening values from the synthetic set |
 | `cost_tests/` | `synthetic_2026` | cost-test settings on the synthetic set, illustrative costs and rates |
-| `feeder/` | `homes_bill` | every house optimizes its own bill, against rule-based EVs and batteries |
-| | `device_params` | battery and EV behavior for houses built from `premise_data` |
+| `study/` | `homes_bill` | a study's objective (each premise's own bill) and counterfactuals (rule-based EVs, self-consuming batteries) |
+| | `device_params` | `defaults` for a study's batteries and EVs (sizes come from `devices.csv`) |
+
+Study blocks set `objective` and `defaults`. A study that extends several gets every
+block's `defaults`, in order, then its own (a later entry wins).
 
 A block with a `TODO` needs that value from the scenario. `der-opt validate` reports any
 `TODO` left, naming the block it's in.
 
 Not here, because they belong to one study rather than many: network ratings and
-deferral values, synthetic house mixes (both specific to a feeder), and capacity
+deferral values, synthetic premise mixes (both specific to a feeder), and capacity
 payments (`capacity_payment` needs event step numbers for one run; DR programs cover
 the same ground).

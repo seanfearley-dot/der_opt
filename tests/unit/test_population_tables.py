@@ -27,6 +27,7 @@ from der_opt.scenarios.schema import FeederScenarioConfig
 
 REPO = Path(__file__).parent.parent.parent
 DATA = REPO / "examples" / "data"
+V11 = REPO / "tests" / "fixtures" / "v11"  # the examples' 1.1 premises files
 runner = CliRunner()
 STAMPS = pd.date_range("2026-07-13", periods=24, freq="h", tz="America/Los_Angeles")
 
@@ -191,7 +192,7 @@ def test_population_problems_are_all_reported_by_premise(tmp_path):
     assert any("p3/solar: a solar needs a pv_kw series" in p for p in problems)
     assert any("p4/battery: charges from ['solar']" in p for p in problems)
     result = runner.invoke(app, ["validate", str(scenario)])
-    assert result.exit_code == 1 and result.output.count("ERROR population") == 1 and "4 houses" in result.output
+    assert result.exit_code == 1 and result.output.count("ERROR population") == 1 and "4 premises" in result.output
 
 
 def test_a_default_charge_source_a_premise_lacks_is_dropped(tmp_path):
@@ -227,8 +228,8 @@ def test_check_data_reads_devices_weather_and_v11_files(population):
     assert kind == "time series" and not report.errors and summary["premises"] == "1 weather stations"
     kind, report, summary = check_file(folder / "premises.csv")
     assert summary["background rows"] == 1 and "segment" in summary["tags"]
-    kind, report, _ = check_file(DATA / "spec_sample" / "premises.csv")
-    assert any(f.check == "v1.1 device columns" for f in report.findings)
+    kind, report, _ = check_file(V11 / "spec_sample" / "premises.csv")
+    assert any(f.check == "v1.1 device columns" and f.level == "warning" for f in report.findings)
 
 
 @pytest.mark.parametrize("example, folder", [("feeder_from_files", "spec_sample"),
@@ -237,8 +238,8 @@ def test_check_data_reads_devices_weather_and_v11_files(population):
 def test_converting_v11_files_gives_identical_premises(tmp_path, example, folder):
     if "bank" in example:
         pytest.importorskip("xarray")
-    converted = convert_premises(DATA / folder / "premises.csv", [DATA / folder / "timeseries.csv"], tmp_path)
-    old = load_feeder_config(REPO / "examples" / "scenarios" / f"{example}.yaml")
+    converted = convert_premises(V11 / folder / "premises.csv", [DATA / folder / "timeseries.csv"], tmp_path)
+    old = load_feeder_config(REPO / "tests" / "fixtures" / "old_forms" / f"{example}.yaml")
     new = FeederScenarioConfig.model_validate(old.model_dump(by_alias=True))
     new.premise_data.premises, new.premise_data.devices = str(converted.premises), str(converted.devices)
     a, b = build_feeder_scenario(old), build_feeder_scenario(new)
@@ -249,7 +250,7 @@ def test_converting_v11_files_gives_identical_premises(tmp_path, example, folder
 
 def test_cli_convert_validate_population_and_run_outputs(tmp_path, population):
     out = tmp_path / "converted"
-    result = runner.invoke(app, ["convert", "premises", str(DATA / "spec_sample" / "premises.csv"),
+    result = runner.invoke(app, ["convert", "premises", str(V11 / "spec_sample" / "premises.csv"),
                                  "--timeseries", str(DATA / "spec_sample" / "timeseries.csv"), "--out", str(out)])
     assert result.exit_code == 0 and "(1 battery, 3 ev, 2 solar)" in result.output
     tables = tmp_path / "tables"

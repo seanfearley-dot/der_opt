@@ -136,12 +136,12 @@ def _run_feeder(scenario: Path, output_dir: Path | None, no_counterfactual: bool
     time_grid = built.premises[0].time_grid
 
     typer.echo(f"Feeder scenario: {built.config.name}")
-    typer.echo(f"{len(built.premises)} houses on {len(built.feeder.elements)} network elements")
+    typer.echo(f"{len(built.premises)} premises on {len(built.feeder.elements)} network elements")
     counts = built.houses.groupby("element")["devices"].apply(
         lambda d: ", ".join(f"{sum(k in x.split(', ') for x in d)} {k}" for k in ("solar", "battery", "ev"))
     )
     for element, described in counts.items():
-        typer.echo(f"  {element}: {(built.houses['element'] == element).sum()} houses ({described})")
+        typer.echo(f"  {element}: {(built.houses['element'] == element).sum()} premises ({described})")
 
     typer.echo(f"\nCosts over the run ({', '.join(runs)}):")
     rows = {
@@ -191,12 +191,12 @@ def _run_feeder(scenario: Path, output_dir: Path | None, no_counterfactual: bool
     if "independent" in runs:
         change = runs["coordinated"].house_costs.sum(axis=1) - runs["independent"].house_costs.sum(axis=1)
         worse = change[change > 0.005]
-        typer.echo("\nCoordination vs each house optimizing alone:")
+        typer.echo("\nCoordination vs each premise optimizing alone:")
         if worse.empty:
-            typer.echo("  no house pays more")
+            typer.echo("  no premise pays more")
         else:
             typer.echo(
-                f"  {len(worse)} of {len(change)} houses pay more (by {_money(worse.sum())} in total, "
+                f"  {len(worse)} of {len(change)} premises pay more (by {_money(worse.sum())} in total, "
                 f"at most {_money(worse.max())}, {worse.idxmax()}), for a network saving of "
                 f"{_money(sum(runs['independent'].network_costs.values()) - sum(runs['coordinated'].network_costs.values()))}"
             )
@@ -208,13 +208,12 @@ def _run_feeder(scenario: Path, output_dir: Path | None, no_counterfactual: bool
         from der_opt.viz import feeder_loading_plot
 
         output_dir.mkdir(parents=True, exist_ok=True)
-        houses = built.houses.copy()
-        for label, run in runs.items():
-            houses[f"bill_{label}"] = run.house_costs["bill"].round(2)
-        houses.to_csv(output_dir / "houses.csv")
         from der_opt.population.report import parameters_table, premises_table
 
-        premises_table(built.resolved, built.premises).to_csv(output_dir / "premises.csv", index=False)
+        table = premises_table(built.resolved, built.premises)
+        for label, run in runs.items():  # each premise's bill in each run
+            table[f"bill_{label}"] = table["premise_id"].map(run.house_costs["bill"].round(2))
+        table.to_csv(output_dir / "premises.csv", index=False)
         parameters_table(built.resolved).to_csv(output_dir / "device_parameters.csv", index=False)
         if study.coordination is not None:
             study.coordination_table().to_csv(output_dir / "coordination.csv")
@@ -403,7 +402,9 @@ def run(
         sections = compose_scenario(scenario).data
     except CompositionError as exc:
         raise typer.BadParameter(str(exc)) from exc
-    if "population" in sections:
+    from der_opt.scenarios.schema import is_study
+
+    if is_study(sections):
         _run_study(scenario, output_dir, no_counterfactual, cost_tests, openbca_path, no_validate)
         return
     _run_scenario(scenario, output_dir, duals, no_counterfactual, cost_tests, openbca_path, no_validate)
@@ -435,14 +436,19 @@ def _run_study(study_path: Path, output_dir: Path | None, no_counterfactual: boo
     output_dir = output_dir or Path("out") / study.name
     output_dir.mkdir(parents=True, exist_ok=True)
     report = validation.report if validation is not None else CheckReport()
-    resolved = validation.resolved if validation is not None else resolve_study(study)[0]
+    details: dict = {}
+    resolved = validation.resolved if validation is not None else resolve_study(study, details)[0]
+    additions = validation.additions if validation is not None else details.get("add_devices")
     feeder = validation.feeder if validation is not None else None
     typer.echo(f"Study: {study.name}: {len(resolved)} premises")
+    _print_additions(additions)
     built = feeder.premises if feeder is not None else None
     premises_table(resolved, built).to_csv(output_dir / "premises.csv", index=False)
     parameters_table(resolved).to_csv(output_dir / "device_parameters.csv", index=False)
     results: dict = {"premises": len(resolved), "analyses": [k for k in ("feeder", "portfolio")
                                                              if getattr(study.analyses, k) is not None]}
+    if additions:
+        results["add_devices"] = additions
 
     if study.analyses.feeder is not None:
         typer.echo("\n=== Feeder analysis")
@@ -493,6 +499,14 @@ def _run_study(study_path: Path, output_dir: Path | None, no_counterfactual: boo
             raise typer.Exit(code=1)
     write_run_record(output_dir, study_path, study.model_dump(mode="json"), report, results, composed)
     typer.echo(f"\nWrote premises.csv, device_parameters.csv and run_record.json to {output_dir}")
+
+
+def _print_additions(additions) -> None:
+    """What each of a study's add_devices entries chose."""
+    for entry in additions or []:
+        typer.echo(f"  {entry['entry']}: {entry['device_id']} added at {len(entry['chosen'])} of {entry['eligible']} "
+                   f"eligible premises ({entry['selected']} selected, {len(entry['already_have'])} already had one"
+                   + (f", {len(entry['metered'])} metered" if entry["metered"] else "") + ")")
 
 
 def _run_scenario(scenario: Path, output_dir: Path | None = None, duals: bool = False, no_counterfactual: bool = False,
@@ -751,6 +765,7 @@ def validate(
         typer.echo(f"{scenario} extends {len(result.composed.fragments)} file(s):")
         for fragment in result.composed.fragments:
             typer.echo(f"  {fragment}")
+    _print_additions(result.additions)
     if result.feeder is not None:
         _print_mix(result.feeder)
     if population is not None and (result.feeder is not None or result.premise is not None):
@@ -819,6 +834,7 @@ def new(
     avoided_costs: Path | None = typer.Option(None, help="Avoided cost set folder"),
     price: Path | None = typer.Option(None, help="lmp-battery: price CSV (from `der-opt fetch-lmp`)"),
     premises: Path | None = typer.Option(None, help="feeder-from-files: premises.csv"),
+    devices: Path | None = typer.Option(None, help="feeder-from-files: devices.csv (input spec 2.0)"),
     network: Path | None = typer.Option(None, help="feeder-from-files: network.csv"),
     year: int | None = typer.Option(None, help="Run year (default: the time series file's, else this year)"),
     library: Path | None = typer.Option(
@@ -854,12 +870,12 @@ def new(
         raise typer.BadParameter("--program is nbt or nem2")
     for option, value in (("--timeseries", timeseries), ("--tariff", tariff), ("--export-rates", export_rates),
                           ("--avoided-costs", avoided_costs), ("--price", price), ("--premises", premises),
-                          ("--network", network)):
+                          ("--devices", devices), ("--network", network)):
         if value is not None and not value.exists():
             raise typer.BadParameter(f"{option} {value} doesn't exist")
     opts = Options(timeseries=timeseries, premise=premise, tariff=tariff, program=program, export_rates=export_rates,
                    baseline_territory=baseline_territory, avoided_costs=avoided_costs, price=price,
-                   premises=premises, network=network, year=year)
+                   premises=premises, devices=devices, network=network, year=year)
     try:
         written = write_template(template, target, opts, library=library, force=force)
     except FileExistsError as exc:
@@ -974,9 +990,10 @@ def blocks(
         raise typer.BadParameter(str(exc)) from exc
     found = read_library(folder)
     typer.echo(f"{folder} ({source}): {len(found)} blocks. Use them with `der-opt new FILE --pick` or --use NAME.")
-    titles = {k.key: k.title for k in KINDS} | {"feeder": "Feeder (for feeder scenarios)"}
+    titles = {k.key: k.title for k in KINDS} | {"study": "Study (objective and defaults for a study's premises)",
+                                                "feeder": "Feeder (the old feeder form)"}
     width = max((len(b.name) for b in found), default=0) + 2
-    for key in [*[k.key for k in KINDS], "feeder"]:
+    for key in [*[k.key for k in KINDS], "study", "feeder"]:
         group = [b for b in found if b.kind == key]
         if not group:
             continue
@@ -1139,7 +1156,7 @@ def convert_premises_command(
         raise typer.BadParameter(str(exc)) from exc
     counts = ", ".join(f"{n} {kind}" for kind, n in sorted(result.counts.items())) or "no devices"
     typer.echo(f"Wrote {result.premises} and {result.devices} ({counts}).")
-    typer.echo("In the scenario's premise_data, point premises at the new file and add `devices:` with the devices file.")
+    typer.echo("In the study's population, point premises at the new file and add `devices:` with the devices file.")
 
 
 setup_app = typer.Typer(help="One-time setup of tools der-opt works with")

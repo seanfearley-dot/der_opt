@@ -37,6 +37,7 @@ class Options:
     avoided_costs: Path | None = None
     price: Path | None = None
     premises: Path | None = None
+    devices: Path | None = None
     network: Path | None = None
     year: int | None = None
 
@@ -53,7 +54,7 @@ class Written:
 TEMPLATES = {
     "dr-battery": "one home, full year: a battery in a DR program, with a cost_test section",
     "home-bill": "one home, full year: solar and a battery optimizing the bill (NBT or NEM2)",
-    "feeder-from-files": "homes and network from premises.csv, network.csv and time series",
+    "feeder-from-files": "a study: premises, devices and network from files, with a feeder analysis",
     "lmp-battery": "a standalone battery on a wholesale price",
 }
 
@@ -223,42 +224,45 @@ $baseline_line  program: $program_block
 """, "billing/${tariff_name}_${program}.yaml")
 
 FEEDER_DATA = Section("""\
-premise_data:
+population:
   premises: $premises
-  timeseries: [$timeseries]
+$devices_line  timeseries: [$timeseries]
   network: $network
   tz: America/Los_Angeles
-  tariff_dir: $tariff_dir # premises.csv `tariff` names a file here
+
+tariffs:
+  dir: $tariff_dir # premises.csv `tariff` names a file here
   programs: # settings for each export_program premises.csv names
     nbt: {export_rates_csv: $export_rates, acc_plus_per_kwh: 0.0088}
     nem2: {nsc_rate_per_kwh: 0.02781} # check the current rate
 
-feeder:
-  value_streams:
-    - {type: capacity_deferral, element: $root_element, value_per_kw: $TODO} # $$/kW of peak avoided
+defaults:
+  - set: {premise: {exclusive_import_export: true}} # no importing and exporting in the same hour
 
-house_defaults:
-  exclusive_import_export: true # no importing and exporting in the same hour
+analyses:
+  feeder:
+    value_streams:
+      - {type: capacity_deferral, element: $root_element, value_per_kw: $TODO} # $$/kW of peak avoided
 """)
 
 HOMES_BILL = Section("""\
-# Every house optimizes its own bill, against rule-based EVs and self-consuming batteries.
-house_defaults:
-  value_streams:
-    - type: bill
-  counterfactual:
-    policies:
-      ev: {type: rule_based_ev}
-      battery: {type: self_consumption}
-""", "feeder/homes_bill.yaml")
+# Every premise optimizes its own bill, against rule-based EVs and self-consuming batteries.
+objective: bill
+defaults:
+  - where: {type: ev}
+    set: {device: {counterfactual: {type: rule_based_ev}}}
+  - where: {type: battery}
+    set: {device: {counterfactual: {type: self_consumption}}}
+""", "study/homes_bill.yaml")
 
 DEVICE_PARAMS = Section("""\
-# Device behavior for houses built from premise_data (sizes come from premises.csv)
-house_defaults:
-  device_params:
-    battery: {eta_charge: 0.96, eta_discharge: 0.96, degradation_cost_per_kwh: 0.015, charge_sources: [solar]}
-    ev: {degradation_cost_per_kwh: 0.0}
-""", "feeder/device_params.yaml")
+# Device behavior for the study's batteries and EVs (sizes come from devices.csv)
+defaults:
+  - where: {type: battery}
+    set: {device: {eta_charge: 0.96, eta_discharge: 0.96, degradation_cost_per_kwh: 0.015, charge_sources: [solar]}}
+  - where: {type: ev}
+    set: {device: {degradation_cost_per_kwh: 0.0}}
+""", "study/device_params.yaml")
 
 GRID_BATTERY = Section("""\
 devices:
@@ -296,7 +300,8 @@ SECTIONS = {
     "feeder-from-files": [TIME, FEEDER_DATA, HOMES_BILL, DEVICE_PARAMS],
     "lmp-battery": [TIME, GRID_BATTERY, LMP_PRICES, INTERCONNECTION_1MW],
 }
-PATH_VALUES = ("timeseries", "tariff", "export_rates", "avoided_costs", "price", "premises", "network", "tariff_dir")
+PATH_VALUES = ("timeseries", "tariff", "export_rates", "avoided_costs", "price", "premises", "devices", "network",
+               "tariff_dir")
 
 
 def _values(template: str, opts: Options) -> tuple[dict[str, str], dict[str, Path | None]]:
@@ -336,10 +341,12 @@ def _values(template: str, opts: Options) -> tuple[dict[str, str], dict[str, Pat
         "cost_name": opts.avoided_costs.name if opts.avoided_costs else "cost_test",
         "price_name": opts.price.stem if opts.price else "lmp",
         "root_element": _root_element(opts.network) or TODO,
+        "devices_line": ("  devices: $devices\n" if opts.devices else
+                         "  # devices: devices.csv (input spec 2.0; `der-opt convert premises` writes one)\n"),
     }
     paths = {"timeseries": opts.timeseries, "tariff": opts.tariff, "export_rates": opts.export_rates,
              "avoided_costs": opts.avoided_costs, "price": opts.price, "premises": opts.premises,
-             "network": opts.network, "tariff_dir": tariff_dir}
+             "devices": opts.devices, "network": opts.network, "tariff_dir": tariff_dir}
     return plain, paths
 
 
@@ -395,7 +402,7 @@ def _blocks(text: str) -> list[tuple[str, list[str]]]:
 
 
 def _merge_texts(sections: list[str]) -> str:
-    """Sections as one file. A key in several sections (`devices:`, `house_defaults:`)
+    """Sections as one file. A key in several sections (`devices:`, `defaults:`)
     becomes one, with each section's entries under it."""
     order: list[str] = []
     merged: dict[str, list[str]] = {}

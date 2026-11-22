@@ -95,7 +95,7 @@ def test_cost_tests_fail_fast_without_openbca_or_a_cost_test_section(tmp_path):
     assert result.exit_code != 0 and "cost_test section" in _flat(result.output)
     feeder = REPO / "examples" / "scenarios" / "feeder_ev_heat_wave.yaml"
     result = runner.invoke(app, ["run", str(feeder), "--cost-tests"])
-    assert result.exit_code != 0 and "single-measure" in _flat(result.output)
+    assert result.exit_code != 0 and "needs a portfolio analysis with a cost_test section" in _flat(result.output)
 
 
 @pytest.mark.skipif(not os.environ.get("OPENBCA_DIR"), reason="needs an OpenBCA checkout: set OPENBCA_DIR")

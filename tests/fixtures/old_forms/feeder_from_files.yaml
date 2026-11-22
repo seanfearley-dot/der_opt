@@ -1,0 +1,37 @@
+# The pre-study form of examples/scenarios/feeder_from_files.yaml (houses, house_defaults,
+# premise_data, v1.1 premises files), kept to check it still resolves to the same premises.
+
+# Six homes on two transformers, read from files in the input data spec
+# (docs/INPUT_DATA_SPEC.md) -- the template for running your own premises. Run with:
+#   der-opt run examples/scenarios/feeder_from_files.yaml -o out/files
+# Check your own files first:
+#   der-opt check-data data/timeseries.csv --premises data/premises.csv --network data/network.csv
+#
+# ../../../examples/data/spec_sample/ is synthetic (generated, not real premises):
+# home_05 is metered (import_kw/export_kw); the rest are gross load with solar, a
+# battery or an EV as premises.csv sizes them. Tariffs and export programs are per
+# premise; device behavior is set here, under house_defaults.device_params.
+
+extends:
+  - ../../../examples/library/time/2026-07-13T12_72x60min.yaml
+  - homes_bill.yaml # each home's own bill: nbt_bill or nem2_bill by its export program
+  - device_params.yaml # battery and EV behavior; sizes come from premises.csv
+
+name: feeder_from_files
+
+premise_data:
+  premises: ../v11/spec_sample/premises.csv
+  timeseries: [../../../examples/data/spec_sample/timeseries.csv]
+  network: ../../../examples/data/spec_sample/network.csv
+  tz: America/Los_Angeles
+  tariff_dir: ../../../examples/data/tariffs # premises.csv `tariff` names a file here
+  programs: # settings for each export_program named in premises.csv
+    nbt: {export_rates_csv: ../../../examples/data/pge_nbt_eec_2026.csv, acc_plus_per_kwh: 0.0088}
+    nem2: {nsc_rate_per_kwh: 0.02781}
+
+feeder:
+  value_streams:
+    - {type: capacity_deferral, element: tx_1, value_per_kw: 40.0}
+
+house_defaults:
+  exclusive_import_export: true # no importing and exporting in the same hour (each home needs both limits)

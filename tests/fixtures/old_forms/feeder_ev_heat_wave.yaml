@@ -1,0 +1,61 @@
+# The pre-study form of examples/scenarios/feeder_ev_heat_wave.yaml (houses, house_defaults,
+# premise_data, v1.1 premises files), kept to check it still resolves to the same premises.
+
+# Twenty homes on two 50 kW service transformers through a three-day heat wave -- the
+# first multi-premise (feeder) scenario. Run with:
+#   der-opt run examples/scenarios/feeder_ev_heat_wave.yaml -o out/feeder
+#
+# The homes are synthetic, in the input data spec: ../v11/heat_wave/premises.csv
+# sizes each one's solar, battery and EV; timeseries.csv has its load (with AC
+# following the heat wave), solar, and EV plug-in and driving. Transformer A has high
+# EV adoption, B low. The run compares three dispatches of the
+# same homes: coordinated (one optimization over all homes and both transformers),
+# independent (each home optimizing its own bill, blind to the transformer), and
+# today's rule-based behavior (EVs charge on plug-in, batteries self-consume).
+
+extends:
+  - ../../../examples/library/time/2026-07-13T12_72x60min.yaml
+  - homes_bill.yaml # each home's own bill; EVs charge on plug-in, batteries self-consume in R1
+
+name: two_transformer_heat_wave
+
+feeder:
+  elements:
+    - name: lateral
+      rating_kw: 200
+    - name: tx_a
+      parent: lateral
+      rating_kw: 50 # 50 kVA pole-top at unity power factor
+      # soft limit: flow can exceed the rating at this cost per kWh over, standing in
+      # for transformer loss of life (illustrative, not a sourced value)
+      overload_cost_per_kwh: 1.0
+    - name: tx_b
+      parent: lateral
+      rating_kw: 50
+      overload_cost_per_kwh: 1.0
+  value_streams:
+    # avoided upgrade cost on transformer A, $ per kW of peak load. An annual $/kW-year
+    # applied to this run's peak, i.e. treats this heat wave as the year's peak
+    # (illustrative, not a sourced value).
+    - type: capacity_deferral
+      element: tx_a
+      value_per_kw: 40.0
+
+# every home on E-ELEC with NBT (premises.csv); solar homes export, the rest just buy
+premise_data:
+  premises: ../v11/heat_wave/premises.csv
+  timeseries: [../../../examples/data/heat_wave/timeseries.csv]
+  tariff_dir: ../../../examples/data/tariffs
+  programs:
+    nbt: {export_rates_csv: ../../../examples/data/pge_nbt_eec_2026.csv, acc_plus_per_kwh: 0.0088}
+
+house_defaults:
+  poi_limit_kw: 30
+  device_params: # sizes are in premises.csv
+    battery: {eta_charge: 0.96, eta_discharge: 0.96, degradation_cost_per_kwh: 0.015, charge_sources: [solar]}
+    ev: {degradation_cost_per_kwh: 0.0}
+  # left off so the run stays an LP and congestion prices are exact duals. Here one
+  # battery home imports and exports 3.6 kWh in the same hour (an NBT delivery credit
+  # above the import rate), worth $0.01; set true to forbid it (prices then come from
+  # fix-and-resolve).
+  exclusive_import_export: false

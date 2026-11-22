@@ -410,10 +410,10 @@ def test_cli_run_writes_the_coordination_files(tmp_path):
 def test_the_example_shows_each_mechanism_against_the_ideal():
     from pathlib import Path
 
-    from der_opt.scenarios import load_feeder_config
+    from der_opt.scenarios import feeder_from_study, load_study_config
 
     path = Path(__file__).parent.parent.parent / "examples" / "scenarios" / "feeder_coordination.yaml"
-    study = run_feeder_study(build_feeder_scenario(load_feeder_config(path)), counterfactual=False)
+    study = run_feeder_study(feeder_from_study(load_study_config(path)), counterfactual=False)
     table = study.coordination_table()
     assert table.loc["envelopes", "share_of_ideal"] > 0.5 and table.loc["combined", "share_of_ideal"] > 0.9
     assert table.loc["price_signal", "network_saving"] < 0  # the post-window rebound

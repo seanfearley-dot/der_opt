@@ -43,7 +43,7 @@ class ResolvedPremise:
     devices: list[ResolvedDevice]
     element_id: str | None = None
     has_counterfactual: bool = False  # whether it has a counterfactual (R1) run at all
-    extra: dict = field(default_factory=dict)  # descriptive columns for houses.csv
+    extra: dict = field(default_factory=dict)  # descriptive columns for premises.csv
 
     def to_scenario_config(self, time_grid):
         """The single-premise scenario the engine builds from."""

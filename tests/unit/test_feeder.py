@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pandas as pd
 import pytest
 import yaml
 from typer.testing import CliRunner
@@ -70,8 +71,11 @@ def test_a_hard_rating_holds_in_the_coordinated_run_only():
 def test_cli_runs_the_feeder_example(tmp_path):
     result = CliRunner().invoke(app, ["run", str(EXAMPLE), "-o", str(tmp_path)])
     assert result.exit_code == 0, result.stdout
-    for text in ("20 houses on 3 network elements", "Peak loading:", "Congestion prices", "Coordination vs each house"):
+    for text in ("20 premises on 3 network elements", "Peak loading:", "Congestion prices",
+                 "Coordination vs each premise"):
         assert text in result.stdout
-    for name in ("houses.csv", "flows_kw.csv", "loading.csv", "congestion_prices.csv", "dispatch_coordinated.csv", "feeder_loading.png"):
-        assert (tmp_path / name).exists(), name
-    assert yaml.safe_load(EXAMPLE.read_text())["feeder"]  # it really is a feeder scenario
+    for name in ("premises.csv", "flows_kw.csv", "loading.csv", "congestion_prices.csv", "dispatch_coordinated.csv",
+                 "feeder_loading.png"):
+        assert (tmp_path / "feeder" / name).exists(), name
+    assert "bill_coordinated" in pd.read_csv(tmp_path / "feeder" / "premises.csv")
+    assert yaml.safe_load(EXAMPLE.read_text())["analyses"]["feeder"]  # it's a study with a feeder analysis

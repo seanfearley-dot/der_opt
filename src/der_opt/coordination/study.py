@@ -238,7 +238,7 @@ def run_coordination(scenario, base: dict[str, DispatchResult], fixed, congestio
                     streams.append(DREventResponse(config.dr_events.program, mask_by[name], expected_by[name], time_grid))
                 dispatch = _solve_with(p, streams) if streams else base[name]
             dispatches[name] = dispatch
-            row = {"house": name, "signal_charges": 0.0, "dr_incentive": 0.0, "dr_shortfall_kwh": 0.0,
+            row = {"premise_id": name, "signal_charges": 0.0, "dr_incentive": 0.0, "dr_shortfall_kwh": 0.0,
                    "envelope_over_import_kwh": 0.0, "envelope_over_export_kwh": 0.0}
             imp, exp = dispatch.grid_import.to_numpy(), dispatch.grid_export.to_numpy()
             if adder is not None and config.price_signal.paid:
@@ -262,7 +262,7 @@ def run_coordination(scenario, base: dict[str, DispatchResult], fixed, congestio
                     else:
                         row["dr_shortfall_kwh"] += float((np.clip(imp[rows_e] - program.cap_kw, 0, None) * dt).sum())
             rows.append(row)
-        payments = pd.DataFrame(rows).set_index("house") if rows else pd.DataFrame()
+        payments = pd.DataFrame(rows).set_index("premise_id") if rows else pd.DataFrame()
         result.runs[label] = MechanismRun(label, tuple(m for m in MECHANISMS if m in mechs), dispatches, payments,
                                           envelopes, signal, calendar, twin, is_twin)
         memo[mechs] = label

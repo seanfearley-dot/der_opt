@@ -1,0 +1,7 @@
+premise_id,element_id,tariff,export_program,baseline_territory,pv_kw_ac,battery_kwh,battery_kw,ev_battery_kwh,ev_charger_kw,ev_v2x,import_limit_kw,export_limit_kw
+home_01,tx_1,pge_e_elec_2026-06,nbt,,4.8,,,60.0,7.2,0,20,7.5
+home_02,tx_1,pge_e_elec_2026-06,nbt,,,,,82.0,7.2,0,20,0.0
+home_03,tx_1,pge_e_tou_c_2026-06,nem2,R,,,,60.0,7.2,0,20,0.0
+home_04,tx_2,pge_e_elec_2026-06,nbt,,,,,,,,20,0.0
+home_05,tx_2,pge_e_elec_2026-06,nbt,,,,,,,,20,7.5
+home_06,tx_2,pge_e_tou_c_2026-06,nem2,R,7.7,13.5,5.0,,,,20,7.5

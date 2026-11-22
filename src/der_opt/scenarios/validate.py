@@ -32,10 +32,13 @@ class Validation:
     feeder: object | None = None  # the built FeederScenario (a feeder scenario, or a study's feeder analysis)
     resolved: list | None = None  # a study's resolved premises
     portfolio: list | None = None  # a study's portfolio premises (population.portfolio.PortfolioPremise)
+    additions: list | None = None  # what each of a study's add_devices entries chose
 
     @property
     def is_study(self) -> bool:
-        return self.composed is not None and "population" in self.composed.data
+        from der_opt.scenarios.schema import is_study
+
+        return self.composed is not None and is_study(self.composed.data)
 
     @property
     def ok(self) -> bool:
@@ -89,7 +92,9 @@ def _named_files(data) -> list[tuple[str, str]]:
             found.append((where, value))
         elif key in PATH_KEYS and isinstance(value, list) and all(isinstance(v, str) for v in value):
             found.extend((f"{where}[{i}]", v) for i, v in enumerate(value))
-    return [(w, v) for w, v in found if "://" not in v]
+    # a study's template and tariff can be names (no .yaml), which composition made paths
+    named = [(w, v) for w, v in found if not (w.rsplit(".", 1)[-1] in ("template", "tariff") and not Path(v).suffix)]
+    return [(w, v) for w, v in named if "://" not in v]
 
 
 def _spec_files(data) -> list[tuple[str, str | None, str | None]]:
@@ -251,9 +256,11 @@ def _validate_study(v: Validation, cost_tests: bool, before_run: bool, openbca=N
     from der_opt.scenarios.loader import build_premise
 
     study = v.config
+    details: dict = {}
     try:
         with collect_data_warnings(v.report):
-            v.resolved, _, _ = resolve_study(study)
+            v.resolved, _, _ = resolve_study(study, details)
+            v.additions = details.get("add_devices")
             problems = population_problems(v.resolved)
             if problems:
                 raise PopulationError(problems)
@@ -318,6 +325,28 @@ def _check_cost_test_openbca(v: Validation, cost_tests: bool, before_run: bool, 
         v.report.ran("cost test", [Finding(level, "cost test", f"{exc} (needed for --cost-tests)")])
 
 
+OLD_NAMES = {
+    "premise_data": "write a study: these files under `population`, and tariff_dir, programs, income_tier and "
+                    "baseline_code under `tariffs` (`dir` for tariff_dir)",
+    "houses": "write a study, with the houses under `premises` (the same fields; `element` as here)",
+    "house_defaults": "in a study, value_streams is the `objective`; the other settings are a `defaults` entry "
+                      "with no `where`; device_params.<type> and counterfactual policies are `defaults` entries "
+                      "with `where: {type: ...}`; rules go on those entries as a device's `rules`",
+}
+
+
+def _old_names(v: Validation) -> list[Finding]:
+    """The pre-study names, read for one release (docs/POPULATION_MODEL_SPEC.md section 6)."""
+    data = v.composed.data
+    found = [Finding("warning", "old names", f"{name} is the old form, read for one release: {advice} "
+                     "(docs/POPULATION_MODEL_SPEC.md section 6)") for name, advice in OLD_NAMES.items() if name in data]
+    if (data.get("feeder") or {}).get("background_load"):
+        found.append(Finding("warning", "old names", "feeder.background_load is the old form, read for one release: "
+                             "in a study, a premise with `kind: background` (written out under `premises`, or a "
+                             "premises.csv row)"))
+    return found
+
+
 def validate_scenario(path: str | Path, cost_tests: bool = False, build: bool = True,
                       before_run: bool = False, openbca: str | Path | None = None) -> Validation:
     """Runs every no-solve check on a scenario. With cost_tests, a missing OpenBCA or
@@ -354,6 +383,8 @@ def validate_scenario(path: str | Path, cost_tests: bool = False, build: bool = 
                                 for e in exc.errors()])
         return v
     v.report.ran("schema")
+    if v.is_feeder:
+        v.report.ran("old names", _old_names(v))
 
     missing = [Finding("error", "files", f"{where}: {value} doesn't exist")
                for where, value in _named_files(v.composed.data) if not Path(value).exists()]

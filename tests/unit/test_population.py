@@ -159,7 +159,7 @@ def test_a_house_rule_by_type_beats_a_default_by_name():
 
 
 def test_premises_file_devices_record_each_layer():
-    config = load_feeder_config(REPO / "examples/scenarios/feeder_from_files.yaml")
+    config = load_feeder_config(REPO / "tests/fixtures/old_forms/feeder_from_files.yaml")  # v1.1, house_defaults
     resolved, elements, _ = resolve_feeder(config)
     home = next(r for r in resolved if r.premise_id == "home_06")
     battery = next(d for d in home.devices if d.device_id == "battery")
@@ -171,11 +171,15 @@ def test_premises_file_devices_record_each_layer():
 
 @pytest.mark.parametrize("path", EXAMPLES, ids=lambda p: p.stem)
 def test_every_example_resolves_and_resolving_again_changes_nothing(path):
+    from der_opt.scenarios import feeder_from_study, load_study_config
+    from der_opt.scenarios.schema import is_study
+
     data = compose_scenario(path).data
-    if "feeder" in data:
+    if "feeder" in data or is_study(data):
         if "bank" in path.stem:
             pytest.importorskip("xarray")
-        built = build_feeder_scenario(load_feeder_config(path))
+        built = (feeder_from_study(load_study_config(path)) if is_study(data)
+                 else build_feeder_scenario(load_feeder_config(path)))
         assert len(built.resolved) == len(built.premises)
         configs = built.house_configs
     else:

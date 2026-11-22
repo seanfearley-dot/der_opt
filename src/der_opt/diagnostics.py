@@ -11,7 +11,7 @@ about it likely to mislead?
            onto the local clock); doesn't count against a check
 
 Every check works on a DispatchResult, optimized or simulated, so the same checks
-apply to the optimal run, the counterfactual, and every house on a feeder.
+apply to the optimal run, the counterfactual, and every premise on a feeder.
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ class CheckReport:
         return f"{len(passed)} of {len(self.checks_run)} checks clean, {len(self.warnings)} warnings, {len(self.errors)} errors"
 
     def lines(self, max_premises: int = 3) -> list[str]:
-        """Findings for printing. On a feeder, the same finding on many houses is
+        """Findings for printing. On a feeder, the same finding on many premises is
         collapsed into one line naming the first few."""
         grouped: dict[tuple, list[Finding]] = {}
         for finding in self.findings:
@@ -86,7 +86,7 @@ class CheckReport:
             else:
                 shown = "; ".join(f"{f.premise}: {f.message}" for f in group[:max_premises])
                 more = f"; and {len(group) - max_premises} more" if len(group) > max_premises else ""
-                out.append(f"{level.upper()} {check}{where}, {len(group)} houses: {shown}{more}")
+                out.append(f"{level.upper()} {check}{where}, {len(group)} premises: {shown}{more}")
         return out
 
     def to_frame(self) -> pd.DataFrame:

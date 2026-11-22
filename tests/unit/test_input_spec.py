@@ -51,9 +51,9 @@ def test_sample_files_pass_and_the_feeder_example_runs(tmp_path):
         assert report.errors == [] and report.warnings == [], name
     result = runner.invoke(app, ["run", str(REPO / "examples/scenarios/feeder_from_files.yaml"), "-o", str(tmp_path)])
     assert result.exit_code == 0, result.stdout
-    assert "6 houses on 3 network elements" in result.stdout and " 0 errors" in result.stdout
-    houses = pd.read_csv(tmp_path / "houses.csv", index_col=0)
-    assert houses.loc["home_05", "data"] == "metered" and houses.loc["home_06", "export_program"] == "nem2"
+    assert "6 premises on 3 network elements" in result.stdout and " 0 errors" in result.stdout
+    premises = pd.read_csv(tmp_path / "feeder" / "premises.csv", index_col=0)
+    assert premises.loc["home_05", "data"] == "metered" and premises.loc["home_06", "export_program"] == "nem2"
 
 
 # --- time series rules ----------------------------------------------------------------

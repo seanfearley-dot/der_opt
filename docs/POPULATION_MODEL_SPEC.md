@@ -26,7 +26,14 @@
   - section 4a's D and T checks in `validate`, plus a counterfactual fitting its device.
   A one-premise study of the `dr_battery_annual` home gives identical results, cost tests
   included.
-- **Phase 4, to come:** `add_devices`, migration and warnings on old names.
+- **Phase 4, done:** `add_devices` (with `per_kw` shared solar shapes) and premises
+  written out in a study (`premises:`, background ones with `kind: background`); the old
+  names (`houses`, `house_defaults`, `premise_data`, `feeder.background_load`) and 1.1
+  premises files read with a warning; the examples' data in 2.0 files and the feeder
+  examples as studies, each resolving to the same premises as its old form (kept in
+  `tests/fixtures/old_forms/`); "house" retired from output and messages (`houses.csv`
+  is `premises.csv`, with each run's bill). A study's `defaults` add up across
+  `extends`.
 - v0.2: what each analysis needs, checked by `validate` (section 4a). Also covers premises
 without load, series from data sources, background load, per-premise measure costs,
 measures selected by type, and any premise setting as a column.
@@ -273,12 +280,14 @@ add_devices:
   already chose and adds more.
 - **Eligible premises:** those its `where` selects that don't already have a device with
   that `device_id`. Premises that already have one are counted, but left as they are.
+  Metered premises (`import_kw`/`export_kw`) aren't eligible either: their meter already
+  includes their devices. Background premises are never selected.
 - **An added device is like a row in `devices.csv`** (level 4 in section 3). Its source
   is `add_devices[0]`, and later defaults and overrides apply to it as to any device.
 - **Its series:** an added device needs its type's series like any other. A template
   with a `pattern` covers an EV. Added solar needs a data source (PVWatts, or a shared
-  production shape scaled by `kw`), given as a study default. `validate` reports any
-  added device without its series.
+  production shape scaled by `kw`: `per_kw: true` on the data source), given as a study
+  default. `validate` reports any added device without its series.
 - **Reported:** the premises each entry chose are in `device_parameters.csv` and the run
   record, so a what-if can be reproduced or audited.
 

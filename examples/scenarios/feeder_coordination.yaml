@@ -4,7 +4,7 @@
 #   der-opt run examples/scenarios/feeder_coordination.yaml -o out/coordination
 #
 # The homes are the synthetic sample in ../data/spec_sample/ (the same as
-# feeder_from_files.yaml), written out here so each can have its own part:
+# feeder_from_files.yaml), written out in this study so each can have its own part:
 #   home_01  solar and an EV: a participant, optimized
 #   home_02  an EV that charges on plug-in: a participant responding by rule (it pauses
 #            for events and stays within its envelope)
@@ -13,37 +13,26 @@
 #   home_04  no DERs: a participant with nothing to flex
 #   home_05  metered (its devices are in its meter data): not in the program, own bill
 #   home_06  solar and a battery: a participant, optimized
-# A strip mall on tx_2 is background load: fixed, not billed, never flexible.
+# A strip mall on tx_2 is a background premise: fixed, not billed, never flexible.
 # Prices are E-ELEC import and a flat $0.05/kWh export, so every run is an LP. The
 # mechanisms' values (signal, incentive) are illustrative.
 
 extends:
   - ../library/time/2026-07-13T12_72x60min.yaml
-  - ../library/feeder/homes_bill.yaml # the counterfactual policies (EVs on plug-in, batteries self-consume)
+  - ../library/study/homes_bill.yaml # the counterfactual policies (EVs on plug-in, batteries self-consume)
 
 name: feeder_coordination
 
-feeder:
-  elements:
-    - {name: lateral, rating_kw: 100}
-    - {name: tx_1, parent: lateral, rating_kw: 16, overload_cost_per_kwh: 1.0}
-    - {name: tx_2, parent: lateral, rating_kw: 15, overload_cost_per_kwh: 1.0}
-  value_streams:
-    - {type: capacity_deferral, element: tx_1, value_per_kw: 40.0}
-  background_load:
-    - name: strip_mall
-      element: tx_2
-      load: {source: timeseries, path: ../data/spec_sample/background.csv, premise_id: strip_mall, column: load_kw}
+objective: # replaces homes_bill's bill objective: these homes aren't billed on a tariff here
+  - type: energy_arbitrage
+    params:
+      import_price: {type: retail_tariff, path: ../data/tariffs/pge_e_elec_2026-06.yaml}
+      export_price: {type: constant, price: 0.05} # illustrative
 
-house_defaults:
-  value_streams: # replaces homes_bill's bill objective: these homes aren't billed on a tariff here
-    - type: energy_arbitrage
-      params:
-        import_price: {type: retail_tariff, path: ../data/tariffs/pge_e_elec_2026-06.yaml}
-        export_price: {type: constant, price: 0.05} # illustrative
-  poi_limit_kw: 20
+defaults:
+  - set: {premise: {poi_limit_kw: 20}}
 
-houses:
+premises:
   - name: home_01
     element: tx_1
     external_load: {source: timeseries, path: ../data/spec_sample/timeseries.csv, premise_id: home_01, column: load_kw}
@@ -110,23 +99,35 @@ houses:
         name: battery
         params: {capacity_kwh: 13.5, p_max_charge_kw: 5, p_max_discharge_kw: 5, soc_init_frac: 0.5,
                  soc_final_min_frac: 0.5, degradation_cost_per_kwh: 0.015, charge_sources: [solar]}
+  - name: strip_mall # background: fixed, not billed, never flexible
+    element: tx_2
+    kind: background
+    external_load: {source: timeseries, path: ../data/spec_sample/background.csv, premise_id: strip_mall, column: load_kw}
 
-coordination:
-  price_signal:
-    source: schedule # a fixed evening adder on both transformers, like a critical-peak adder
-    schedule:
-      - {element: tx_1, per_kwh: 0.40, hours: "16:00-21:00"} # illustrative
-      - {element: tx_2, per_kwh: 0.40, hours: "16:00-21:00"}
-  envelopes: {} # pro_rata_need shares of each transformer's headroom, a new envelope each hour
-  dr_events:
-    element: tx_1
-    trigger: {above_pct: 80} # call an event where tx_1's forecast loading is above 80%
-    program:
-      program_id: tx_1_peak
-      window: "15:00-22:00"
-      min_hours: 1
-      max_hours: 4
-      max_events_per_month: 8
-      response: incentive
-      incentive_per_kwh: 0.75 # illustrative
-  # no runs: each mechanism alone, plus all three combined
+analyses:
+  feeder:
+    elements:
+      - {name: lateral, rating_kw: 100}
+      - {name: tx_1, parent: lateral, rating_kw: 16, overload_cost_per_kwh: 1.0}
+      - {name: tx_2, parent: lateral, rating_kw: 15, overload_cost_per_kwh: 1.0}
+    value_streams:
+      - {type: capacity_deferral, element: tx_1, value_per_kw: 40.0}
+    coordination:
+      price_signal:
+        source: schedule # a fixed evening adder on both transformers, like a critical-peak adder
+        schedule:
+          - {element: tx_1, per_kwh: 0.40, hours: "16:00-21:00"} # illustrative
+          - {element: tx_2, per_kwh: 0.40, hours: "16:00-21:00"}
+      envelopes: {} # pro_rata_need shares of each transformer's headroom, a new envelope each hour
+      dr_events:
+        element: tx_1
+        trigger: {above_pct: 80} # call an event where tx_1's forecast loading is above 80%
+        program:
+          program_id: tx_1_peak
+          window: "15:00-22:00"
+          min_hours: 1
+          max_hours: 4
+          max_events_per_month: 8
+          response: incentive
+          incentive_per_kwh: 0.75 # illustrative
+      # no runs: each mechanism alone, plus all three combined

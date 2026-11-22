@@ -1,4 +1,4 @@
-"""Feeder scenarios: many houses on a distribution network, from YAML.
+"""Feeder scenarios: many premises on a distribution network, from YAML.
 
 Each house -- written out under `houses:` or built from input-spec files under
 `premise_data:` -- becomes an ordinary single-premise ScenarioConfig (sharing the scenario's time grid and
@@ -93,12 +93,13 @@ def feeder_from_study(study) -> FeederScenario:
                    "value_streams": [v.model_dump() for v in analysis.value_streams]},
         "coordination": analysis.coordination.model_dump(by_alias=True) if analysis.coordination else None,
     })
-    return assemble_feeder(config, resolved, file_elements, file_background, {})
+    explicit = {item.name: item.rules or {} for item in study.premises if item.kind == "premise"}
+    return assemble_feeder(config, resolved, file_elements, file_background, explicit)
 
 
 def assemble_feeder(config: FeederScenarioConfig, resolved, file_elements, file_background,
                     explicit_rules: dict) -> FeederScenario:
-    """Resolved premises on the feeder's network, each built like a one-house run."""
+    """Resolved premises on the feeder's network, each built like a single-premise run."""
     from der_opt.population.compile import PopulationError
     from der_opt.population.report import population_problems
     from der_opt.scenarios.loader import _resolve_external_load
@@ -116,7 +117,7 @@ def assemble_feeder(config: FeederScenarioConfig, resolved, file_elements, file_
     names = [r.premise_id for r in resolved]
     repeated = sorted({n for n in names if names.count(n) > 1})
     if repeated:
-        raise ValueError(f"house names must be unique on a feeder; repeated: {repeated}")
+        raise ValueError(f"premise names must be unique on a feeder; repeated: {repeated}")
     feeder = Feeder(config.name, elements, attachments={r.premise_id: r.element_id for r in resolved})
     house_configs = [r.to_scenario_config(config.time_grid) for r in resolved]
     premises = [build_premise(house_config) for house_config in house_configs]
@@ -207,7 +208,7 @@ class FeederStudy:
             if label in mech and not mech[label].payments.empty:
                 frame = frame.join(mech[label].payments)
             frame.insert(0, "run", label)
-            frames.append(frame.rename_axis("house").reset_index())
+            frames.append(frame.rename_axis("premise_id").reset_index())
         return pd.concat(frames, ignore_index=True)
 
 

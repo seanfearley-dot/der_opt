@@ -46,6 +46,8 @@ devices:
     earlier one key by key, so a scenario writes only what differs
     (`{name: battery, params: {charge_sources: [solar]}}`); a later device of another
     `type` replaces it; new names are added (decision 2, revised in v1.1);
+  - a study's `defaults` are appended: each file's entries after the ones it extends
+    (population model phase 4);
   - every other list replaces the earlier list whole;
   - a value of `null` removes an inherited key, for example `counterfactual: null`;
     with nothing inherited, it's passed to the schema as before.
@@ -115,11 +117,11 @@ error until it's replaced. Templates:
 |---|---|
 | `dr-battery` | one home, full year, battery with a DR program and a `cost_test` section |
 | `home-bill` | one home, full year, bill-optimized solar and battery (NBT or NEM2) |
-| `feeder-from-files` | houses and network from `premises.csv`, `network.csv` and time series |
+| `feeder-from-files` | a study: premises, devices and network from `premises.csv`, `devices.csv`, `network.csv` and time series, with a feeder analysis |
 | `lmp-battery` | a standalone battery on a wholesale price |
 
 With `--library DIR`, the shared parts go into fragment files under `DIR` (time grid,
-battery, prices or billing, DR program, cost-test settings, feeder house defaults), and
+battery, prices or billing, DR program, cost-test settings, study objective and defaults), and
 the scenario extends them. A fragment that already exists is used as it is, never
 overwritten, so the next scenario made with the same library shares it. Without
 `--library`, the scenario is written as one file. The scenario file itself is only

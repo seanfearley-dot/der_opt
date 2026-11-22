@@ -21,9 +21,10 @@ import yaml
 PATH_KEYS = frozenset({
     "path", "csv_path", "export_rates_csv", "tariff", "tariff_dir", "urdb_json_path",
     "scenario_dir", "arrivals_csv", "departures_csv", "set", "file", "premises", "network", "timeseries",
-    "template", "devices", "templates",
+    "template", "devices", "templates", "dir",
 })
 MERGE_BY_NAME = frozenset({"devices"})
+APPENDED = frozenset({"defaults"})  # a study's defaults: each file's entries after the ones it extends
 
 
 class CompositionError(ValueError):
@@ -100,7 +101,8 @@ def resolve_paths(data, base: Path, source: Path, notes: list[str], trail: str =
 def merge(base, over, key: str | None = None):
     """`over` on top of `base`: mappings key by key at every depth; `devices` by name,
     a device with an inherited name merging into it key by key (unless it's another
-    type, which replaces it); every other list (and value) replaced. `null` removes an
+    type, which replaces it); a study's `defaults` appended (later entries win, as
+    within one file); every other list (and value) replaced. `null` removes an
     inherited key."""
     if isinstance(base, dict) and isinstance(over, dict):
         out = dict(base)
@@ -112,6 +114,8 @@ def merge(base, over, key: str | None = None):
             else:
                 out[k] = v
         return out
+    if key in APPENDED and isinstance(base, list) and isinstance(over, list):
+        return [*base, *over]
     if key in MERGE_BY_NAME and isinstance(base, list) and isinstance(over, list):
         out = list(base)
         position = {d.get("name"): i for i, d in enumerate(out) if isinstance(d, dict)}

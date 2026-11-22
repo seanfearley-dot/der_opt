@@ -1,0 +1,7 @@
+premise_id,device_id,type,kw,kwh,v2x
+home_01,solar,solar,4.8,,
+home_01,ev,ev,7.2,60.0,0
+home_02,ev,ev,7.2,82.0,0
+home_03,ev,ev,7.2,60.0,0
+home_06,solar,solar,7.7,,
+home_06,battery,battery,5.0,13.5,

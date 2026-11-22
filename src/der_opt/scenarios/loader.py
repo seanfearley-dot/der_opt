@@ -236,6 +236,15 @@ def load_scenario_config(path: str | Path) -> ScenarioConfig:
     return resolved_config(ScenarioConfig.model_validate(load_composed(path).data))
 
 
+def load_study_config(path: str | Path):
+    """Parses and validates a study file (docs/POPULATION_MODEL_SPEC.md section 4), with
+    what it `extends` merged and its paths resolved. `feeder_from_study` builds its feeder
+    analysis; `der_opt.population.portfolio.portfolio_premises` its portfolio."""
+    from der_opt.scenarios.schema import StudyConfig
+
+    return StudyConfig.model_validate(load_composed(path).data)
+
+
 def resolved_config(config: ScenarioConfig) -> ScenarioConfig:
     """The scenario with every setting resolved by the precedence rule (templates
     expanded); a scenario that's already resolved comes back the same."""

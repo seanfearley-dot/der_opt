@@ -1,6 +1,8 @@
-"""Today's three ways of describing a premise, compiled to resolved premises
-(docs/POPULATION_MODEL_SPEC.md sections 5-6): a single-home scenario, a feeder's
-written-out `houses:`, and `premises.csv` rows under `premise_data`.
+"""Every way of describing a premise, compiled to resolved premises
+(docs/POPULATION_MODEL_SPEC.md sections 3-6): a single-home scenario; a study's
+population files and written-out `premises:`, with its defaults, overrides and
+add_devices; and the old feeder form (`houses:`, `premises.csv` rows under
+`premise_data`), read for one release.
 
 Each setting is resolved by the one precedence rule (built-in, template, defaults, row,
 override). What were special cases are layers:
@@ -13,6 +15,8 @@ override). What were special cases are layers:
 
 from __future__ import annotations
 
+import hashlib
+import math
 from pathlib import Path
 
 import pandas as pd
@@ -237,6 +241,8 @@ def matches(where: dict, premise_id: str, row, device: dict | None = None) -> bo
             value = device.get(key) or ""
         elif key == "premise_id":
             value = premise_id
+        elif key == "kind":
+            value = _text(row.get("kind")) or "premise"
         else:
             value = _text(row.get(key))
         if _text(value) not in options:
@@ -254,6 +260,8 @@ class _Study:
     def __init__(self, study):
         self.study = study
         self.used: set[str] = set()
+        self.known: dict[str, set[str]] = {}  # premise -> its device ids, for checking overrides
+        self.additions: list[dict] = []  # what each add_devices entry chose
 
     def premise_layers(self, premise_id, row) -> list[Layer]:
         layers = []
@@ -287,6 +295,9 @@ class _Study:
         return [Layer(level, source, {k: v for k, v in values.items() if k not in DEVICE_EXTRAS})
                 for level, source, values in self._device_sets(premise_id, row, device)]
 
+    def device_sets(self, premise_id, row, device) -> list[tuple[str, str, dict]]:
+        return list(self._device_sets(premise_id, row, device))
+
     def policies(self, premise_id, row, device) -> list[tuple[str, dict]]:
         return [(source, values["counterfactual"]) for _, source, values in self._device_sets(premise_id, row, device)
                 if "counterfactual" in values]
@@ -309,6 +320,22 @@ class _Study:
             elif device and device not in premises[premise]:
                 found.append(f"{key}: overrides a device {premise} doesn't have ({', '.join(sorted(premises[premise]))})")
         return found
+
+
+def _billing(tariff, program, tier, territory, code, tariffs) -> dict:
+    """A premise's billing from a tariff name and export program (premises.csv columns,
+    or a written-out premise's fields), with the study's (or premise_data's) tariffs."""
+    from der_opt.scenarios.feeder import DEFAULT_TARIFF_DIR
+
+    given = Path(str(tariff))  # a name (a written-out premise's has been made a path by composition) or a file
+    path = given if given.suffix in (".yaml", ".yml") else Path(tariffs.tariff_dir or DEFAULT_TARIFF_DIR) / f"{given.name}.yaml"
+    return {
+        "tariff": str(path),
+        "income_tier": int(tier) if tier is not None else tariffs.income_tier,
+        "program": ({"type": program} | tariffs.programs.get(program, {})) if program else None,
+        "baseline_territory": territory or None,
+        "baseline_code": code or tariffs.baseline_code,
+    }
 
 
 SETTING_COLUMNS = ("participation", "baseline_behavior", "response", "envelope_weight", "exclusive_import_export",
@@ -357,7 +384,7 @@ def _v2_devices(premise, row, ctx, problems) -> list[ResolvedDevice] | None:
     station = row.get("weather_station") or None
     for _, r in ctx["devices"].for_premise(premise).iterrows():
         device_id, kind = r["device_id"], r["type"]
-        label = f"devices.csv row {r['row']}"
+        label = r["row"] if isinstance(r["row"], str) else f"devices.csv row {int(r['row'])}"  # or add_devices[i]
         own: dict = {}
         kw, kwh = _number(r, "kw"), _number(r, "kwh")
         for column in r.index:
@@ -416,6 +443,13 @@ def _v2_devices(premise, row, ctx, problems) -> list[ResolvedDevice] | None:
                             f"{sorted(allowed)}")
             ok = False
             continue
+        shape = device.params.get("available_kw")
+        if kind == "solar" and isinstance(shape, dict) and shape.get("per_kw"):  # a shared shape, per kW of kw
+            if kw is None:
+                problems.append(f"{premise}/{device_id}: its available_kw is per kW (per_kw), so it needs a kw")
+                ok = False
+                continue
+            device.params["available_kw"] = {k: v for k, v in shape.items() if k != "per_kw"} | {"multiply": kw}
         if kind == "flexible_load" and kw is not None:  # kw is the most it can shed: spread over its blocks
             blocks = int(device.params.get("max_blocks", 1))
             device.params |= {"max_blocks": blocks, "block_size_kw": kw / blocks}
@@ -459,6 +493,71 @@ def _v2_devices(premise, row, ctx, problems) -> list[ResolvedDevice] | None:
     return devices if ok else None
 
 
+def _name_or_path(value: str) -> str:
+    """A template or tariff in a study's YAML: a file (.yaml) as given, or a name, which
+    composition has made a path (its last part is the name)."""
+    path = Path(str(value))
+    return str(path) if path.suffix in (".yaml", ".yml") else path.name
+
+
+def _rank(seed: int, device_id: str, premise: str) -> str:
+    """A premise's place in an add_devices entry's random order: its own stream per seed
+    and device, so raising a share keeps the premises already chosen."""
+    return hashlib.sha256(f"{seed}/{device_id}/{premise}".encode()).hexdigest()
+
+
+def _add_devices(study: _Study, premises, devices_file, series):
+    """The devices file with each add_devices entry's rows added (section 3a)."""
+    from der_opt.inputs.spec import DevicesFile
+
+    have: dict[str, set] = {}
+    for _, r in devices_file.table.iterrows():
+        have.setdefault(r["premise_id"], set()).add(r["device_id"])
+    rows = []
+    for i, entry in enumerate(study.study.add_devices):
+        device = dict(entry.device)
+        device_id = str(device["device_id"])
+        selected, already, metered, eligible = [], [], [], []
+        for premise, row in premises.table.iterrows():
+            if (row.get("kind") or "premise") == "background" or not matches(entry.where, premise, row):
+                continue
+            selected.append(premise)
+            if device_id in have.get(premise, set()):
+                already.append(premise)
+            elif series.find("import_kw", premise) is not None:  # its meter already includes its devices
+                metered.append(premise)
+            else:
+                eligible.append(premise)
+        count = math.floor(entry.share * len(eligible) + 0.5)
+        order = sorted(eligible, key=lambda p, seed=entry.seed, d=device_id: _rank(seed, d, p))
+        chosen = [p for p in eligible if p in set(order[:count])]
+        for premise in chosen:
+            have.setdefault(premise, set()).add(device_id)
+            added = {"row": f"add_devices[{i}]", "premise_id": premise}
+            for key, value in device.items():
+                if key == "charge_sources" and isinstance(value, list):
+                    value = ";".join(value)
+                elif key == "v2x":
+                    value = "1" if value in (True, 1, "1", "1.0") else "0"
+                elif key in ("kw", "kwh", "installed_cost", "annual_om") and value is not None:
+                    value = float(value)
+                if key == "template" and value:
+                    value = _name_or_path(value)
+                added[key] = value if key not in ("device_id", "type", "template") else str(value)
+            rows.append(added)
+        study.additions.append({"entry": f"add_devices[{i}]", "device_id": device_id, "type": device["type"],
+                                "share": entry.share, "seed": entry.seed, "selected": len(selected),
+                                "already_have": already, "metered": metered, "eligible": len(eligible),
+                                "chosen": chosen})
+    if not rows:
+        return devices_file
+    table = pd.concat([devices_file.table, pd.DataFrame(rows)], ignore_index=True)
+    for column in ("device_id", "type", "template", "v2x", "charge_sources"):
+        if column in table:
+            table[column] = table[column].fillna("")
+    return DevicesFile(devices_file.path, table, devices_file.report)
+
+
 def _premise_rows(config, study: _Study | None = None, require_element: bool = True):
     """Premises (and optionally the network and background rows) from input-spec
     files: 2.0 with a devices file, or 1.1 with device columns."""
@@ -466,7 +565,6 @@ def _premise_rows(config, study: _Study | None = None, require_element: bool = T
     from der_opt.inputs.spec import read_devices
     from der_opt.network import NetworkElement
     from der_opt.scenarios.data_sources import resolve_array_param
-    from der_opt.scenarios.feeder import DEFAULT_TARIFF_DIR
     from der_opt.scenarios.loader import _build_time_grid
 
     data = config.premise_data
@@ -477,6 +575,13 @@ def _premise_rows(config, study: _Study | None = None, require_element: bool = T
     premises = read_premises(data.premises, network)
     devices_file = read_devices(data.devices, premises) if data.devices else None
     series = _Series(data.timeseries, data.tz)
+    problems: list[str] = []
+    if study is not None and study.study.add_devices:
+        if devices_file is None:
+            problems.append("add_devices: adds rows to the population's devices file; give population.devices "
+                            "(`der-opt convert premises` writes one from a 1.1 premises file)")
+        else:
+            devices_file = _add_devices(study, premises, devices_file, series)
     time_grid = _build_time_grid(config.time_grid)
     default_policies = defaults.counterfactual.policies if defaults.counterfactual is not None else {}
     index: dict = {}
@@ -524,7 +629,7 @@ def _premise_rows(config, study: _Study | None = None, require_element: bool = T
            "templates": templates, "template_folders": data.templates, "rules_for": rules_for, "current": None,
            "study": study}
 
-    out, background, problems = [], {}, []
+    out, background = [], {}
     tags = premises.tags
     for number, (premise, row) in enumerate(premises.table.iterrows(), start=2):  # row 1 is the header
         label = f"premises.csv row {number}"
@@ -571,15 +676,8 @@ def _premise_rows(config, study: _Study | None = None, require_element: bool = T
                 continue
             own[column] = value == "1" if column == "exclusive_import_export" else value
         if row.get("tariff"):
-            program = row.get("export_program") or None
-            tier = _number(row, "income_tier")
-            own["billing"] = {
-                "tariff": str(Path(data.tariff_dir or DEFAULT_TARIFF_DIR) / f"{row['tariff']}.yaml"),
-                "income_tier": int(tier) if tier is not None else data.income_tier,
-                "program": ({"type": program} | data.programs.get(program, {})) if program else None,
-                "baseline_territory": row.get("baseline_territory") or None,
-                "baseline_code": row.get("baseline_code") or data.baseline_code,
-            }
+            own["billing"] = _billing(row["tariff"], row.get("export_program") or None, _number(row, "income_tier"),
+                                      row.get("baseline_territory"), row.get("baseline_code"), data)
         if row.get("customer_class"):
             own["customer_class"] = row["customer_class"]
         extra_layers = study.premise_layers(premise, row) if study is not None else []
@@ -593,12 +691,12 @@ def _premise_rows(config, study: _Study | None = None, require_element: bool = T
         out.append(ResolvedPremise(premise, "premises.csv", settings, sources, devices, element_id=element,
                                    has_counterfactual=defaults.counterfactual is not None
                                    or any(d.counterfactual is not None for d in devices), extra=extra))
-    if study is not None:
-        known = {pid: set() for pid in premises.table.index}
+    if study is not None:  # resolve_study checks the overrides against these
+        for pid in premises.table.index:
+            study.known.setdefault(pid, set())
         if devices_file is not None:
             for _, r in devices_file.table.iterrows():
-                known.setdefault(r["premise_id"], set()).add(r["device_id"])
-        problems += study.unused(known)
+                study.known.setdefault(r["premise_id"], set()).add(r["device_id"])
     if problems:
         raise PopulationError(problems)
 
@@ -619,20 +717,132 @@ def resolve_feeder(config) -> tuple[list[ResolvedPremise], list | None, dict]:
     return [_house(config, house) for house in config.houses] + from_files, elements, background
 
 
-def resolve_study(study) -> tuple[list[ResolvedPremise], list | None, dict]:
-    """A study's population: its tables, with the study's tariffs, objective, defaults
-    and overrides as layers. Returns the premises, the network's elements (if it names a
-    network file) and background rows."""
+def _written(item, study: _Study, tariffs, templates, require_element: bool):
+    """A premise written out in the study: its fields are the row (level 4), with the
+    study's defaults below and overrides above. Returns (premise, None), or (None,
+    (element, load)) for a background premise."""
+    if item.element is None and (require_element or item.kind == "background"):
+        raise ValueError("no element (every premise on a feeder needs one)")
+    if item.kind == "background":
+        if item.devices:
+            raise ValueError("a background premise has no devices")
+        return None, (item.element, _plain(item.external_load))
+    row = {"element_id": item.element or "", "kind": item.kind, "customer_class": item.customer_class or "",
+           "tariff": item.tariff or "", "export_program": item.export_program or "",
+           **{k: getattr(item, k) for k in ROLE_SETTINGS if getattr(item, k) is not None}, **item.tags}
+    label = f"premises.{item.name}"
+    fields = _set_fields(item, ("external_load", "value_streams", "poi_limit_kw", "import_limit_kw", "export_limit_kw",
+                                "exclusive_import_export", "billing", *ROLE_SETTINGS, "customer_class",
+                                "participant_upfront", "participant_annual_om"))
+    if item.tariff:
+        if item.billing is not None:
+            raise ValueError("give its tariff (and export_program) or its billing, not both")
+        fields["billing"] = _billing(item.tariff, item.export_program, item.income_tier, item.baseline_territory,
+                                     item.baseline_code, tariffs)
+    settings, sources = resolve([Layer("built-in", "built-in", dict(BUILT_IN_PREMISE)),
+                                 *study.premise_layers(item.name, row), Layer("row", label, fields)])
+    own_policies = item.counterfactual.policies if item.counterfactual is not None else {}
+    _check_policy_names(item.name, own_policies, item.devices)
+    devices = []
+    for d in item.devices:
+        kind = KINDS[d.type]
+        sets = study.device_sets(item.name, row, {"device_id": d.name, "type": kind,
+                                                  "template": _name_or_path(d.template) if d.template else ""})
+        template = None
+        if d.template:
+            ref = _name_or_path(d.template)
+            template = templates().get(ref)
+            if template is None:
+                if not Path(ref).suffix:
+                    raise ValueError(f"{d.name}: no template {ref!r} in population.templates or the library")
+                template = load_template(ref)  # a path, as in a scenario
+        layers = [Layer("row", label, dict(d.params)),
+                  *[Layer(level, source, {k: v for k, v in values.items() if k not in DEVICE_EXTRAS})
+                    for level, source, values in sets]]
+        cf = [(level, source, values["counterfactual"]) for level, source, values in sets if "counterfactual" in values]
+        policies = [(source, value) for level, source, value in cf if level == "defaults"]
+        policies += [(f"{label}.counterfactual", own_policies.get(d.name))]
+        policies += [(source, value) for level, source, value in cf if level == "override"]
+        rules = [(level, source, {m: {d.name: r} for m, r in values["rules"].items()})
+                 for level, source, values in sets if "rules" in values]
+        rule_layers = [*[r for r in rules if r[0] == "defaults"], ("row", f"{label}.rules", item.rules),
+                       *[r for r in rules if r[0] == "override"]]
+        device = _device(d.name, d.type, layers, template, policies, rule_layers)
+        costs: dict = {}
+        for _, _, values in sets:  # defaults, then overrides
+            costs |= {c: values[c] for c in COSTS if c in values}
+        device.costs = costs
+        devices.append(device)
+    extra = {"data": "written out", **{k: v for k, v in (("tariff", item.tariff), ("export_program",
+                                                                                 item.export_program)) if v}}
+    extra |= dict(item.tags)
+    return ResolvedPremise(item.name, "written out", settings, sources, devices, element_id=item.element,
+                           has_counterfactual=item.counterfactual is not None
+                           or any(d.counterfactual is not None for d in devices), extra=extra), None
+
+
+def resolve_study(study, details: dict | None = None) -> tuple[list[ResolvedPremise], list | None, dict]:
+    """A study's population: premises written out in the study, then its tables, with
+    the study's tariffs, objective, defaults, overrides and add_devices as layers.
+    Returns the premises, the network's elements (if it names a network file) and
+    background premises, as name -> (element, load). `details` (if given) gets what each
+    add_devices entry chose."""
     from types import SimpleNamespace
 
     from der_opt.scenarios.schema import HouseDefaultsConfig, PremiseDataConfig
 
     population, tariffs = study.population, study.tariffs
-    data = PremiseDataConfig(premises=population.premises, devices=population.devices,
-                             timeseries=population.timeseries, network=population.network,
-                             templates=population.templates, tz=population.tz, tariff_dir=tariffs.dir,
-                             programs=tariffs.programs, income_tier=tariffs.income_tier,
+    files = population or SimpleNamespace(premises=None, devices=None, timeseries=[], network=None, templates=None,
+                                          tz="America/Los_Angeles")
+    data = PremiseDataConfig(premises=files.premises or "", devices=files.devices, timeseries=files.timeseries,
+                             network=files.network, templates=files.templates, tz=files.tz,
+                             tariff_dir=tariffs.dir, programs=tariffs.programs, income_tier=tariffs.income_tier,
                              baseline_code=tariffs.baseline_code)
-    stand_in = SimpleNamespace(premise_data=data, house_defaults=HouseDefaultsConfig(), billing=None,
-                               time_grid=study.time_grid, houses=[])
-    return _premise_rows(stand_in, _Study(study), require_element=study.analyses.feeder is not None)
+    st = _Study(study)
+    require_element = study.analyses.feeder is not None
+    index: dict = {}
+
+    def templates():
+        if "all" not in index:
+            index["all"] = _template_index(files.templates)
+        return index["all"]
+
+    out, background, problems = [], {}, []
+    for item in study.premises:
+        try:
+            premise, bg = _written(item, st, data, templates, require_element)
+        except (ValueError, OSError) as exc:
+            problems.append(f"{item.name}: {exc}")
+            st.known[item.name] = {d.name for d in item.devices}
+            continue
+        st.known[item.name] = {d.name for d in item.devices}
+        if premise is not None:
+            out.append(premise)
+        else:
+            background[item.name] = bg
+    elements = None
+    if population is not None:
+        stand_in = SimpleNamespace(premise_data=data, house_defaults=HouseDefaultsConfig(), billing=None,
+                                   time_grid=study.time_grid, houses=[])
+        written = set(st.known)
+        try:
+            from_files, elements, file_background = _premise_rows(stand_in, st, require_element=require_element)
+        except PopulationError as exc:
+            problems += exc.problems
+            from_files, file_background = [], {}
+        both = sorted(written & {*(r.premise_id for r in from_files), *file_background})
+        if both:
+            problems.append(f"{both[0]}: written out in the study and in the population's files ({both})")
+        out += from_files
+        background |= file_background
+    elif study.add_devices:
+        problems.append("add_devices: adds rows to the population's devices file, and the study has no population")
+    if any(r.has_counterfactual for r in out):  # the counterfactual run is the study's: a premise with nothing
+        for r in out:                           # flexible takes part, with no policies
+            r.has_counterfactual = True
+    problems += st.unused(st.known)
+    if details is not None:
+        details["add_devices"] = st.additions
+    if problems:
+        raise PopulationError(problems)
+    return out, elements, background
