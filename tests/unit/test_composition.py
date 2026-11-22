@@ -303,7 +303,7 @@ def test_new_feeder_and_nem2_leave_todos_for_what_they_cant_know(tmp_path):
                                  "--export-rates", str(DATA / "pge_nbt_eec_2026.csv")])
     assert result.exit_code == 0 and "1 TODO" in result.output
     config = yaml.safe_load(feeder.read_text(encoding="utf-8"))
-    assert config["time_grid"]["horizon_steps"] == 96  # the time series file's span
+    assert config["time_grid"]["horizon_steps"] == 8760  # the time series file's span: all of 2026
     assert config["analyses"]["feeder"]["value_streams"][0]["element"] == "lateral"  # the network's root
     assert config["objective"] == "bill" and len(config["defaults"]) == 5  # a study: every premise's bill
     feeder.write_text(feeder.read_text(encoding="utf-8").replace("value_per_kw: TODO", "value_per_kw: 40"),
