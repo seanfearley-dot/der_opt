@@ -252,6 +252,7 @@ section h2{margin:0 0 12px;font-size:16px;font-weight:650}
 .card .value{font-size:20px;font-weight:650;font-variant-numeric:tabular-nums}
 .card .sub{color:var(--muted);font-size:12px}
 .card.good .value{color:var(--good)} .card.bad .value{color:var(--bad)}
+.card.feature{border-width:2px;border-color:var(--accent)} .card.feature .value{font-size:26px}
 .chart{width:100%;margin:6px 0 14px}
 .table-wrap{overflow-x:auto;margin:6px 0 14px}
 .caption{font-weight:600;margin-bottom:4px}

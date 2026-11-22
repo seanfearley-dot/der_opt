@@ -98,3 +98,18 @@ def test_time_charts_zoom_together_and_hover_with_units(tmp_path):
     assert data["charts"][0]["traces"][0]["hovertemplate"] == "%{y:,.2f} kW"
     assert data["charts"][1]["traces"][0]["hovertemplate"] == "%{y:,.2f} kWh"
     assert "linkZoom" in text and "hoverlabel:{bgcolor" in text
+
+
+def test_trc_and_rim_lead_the_summary(tmp_path):
+    from der_opt.reports import scenario
+
+    summary = {"name": "home", "time_grid": {"start": "2026-01-01T00:00:00", "end": "2027-01-01T00:00:00", "steps": 8760,
+                                             "resolution_minutes": 60},
+               "costs": {"optimal": {"bill": 10.0, "total": 10.0}}, "devices": [], "checks": {},
+               "cost_tests": [{"test": t, "openbca_ratio": r, "net_benefits": n, "spm_ratio": r}
+                              for t, r, n in (("PCT", 2.0, 5), ("RIM", 0.8, -30), ("TRC", 1.4, 200), ("PAC", 1.1, 9))]}
+    text = scenario.build(tmp_path, summary).render("x.js")
+    summary_section = text[text.index('<section id="summary">'):text.index("</section>")]
+    assert summary_section.index("TRC ratio") < summary_section.index("RIM ratio") < summary_section.index("Optimal cost")
+    assert summary_section.count('class="card good feature"') == 1 and summary_section.count('class="card bad feature"') == 1
+    assert "PAC ratio" not in summary_section

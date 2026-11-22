@@ -564,7 +564,11 @@ than it imports in a year):
 | | NBT bill | NEM2 bill |
 |---|---|---|
 | Self-consumption battery | $259 | $31 |
-| Bill-optimal dispatch | $233 | $67 (battery nearly idle) |
+| Bill-optimal dispatch | $255 | $67 (battery nearly idle) |
+
+The library battery carries a smoothing cost (`smoothing_cost_per_kw: 0.10`), so the
+optimizer won't cycle it through the grid hour to hour; without it, the NBT bill-optimal
+dispatch reaches $233, by moving the battery in ways no real controller does.
 
 Under NEM2 this house's leftover energy credit (~$3,200) is zeroed at true-up, so the
 only bill value a battery can add is avoiding ~$0.012/kWh of non-bypassable charges.
@@ -1135,9 +1139,10 @@ wrong answer before it was understood:
   only offset generation charges. A household that exports more than it uses runs out
   of generation charges to offset, so extra exports just pile up unusable credit, while
   the charges it actually pays (delivery, non-bypassable, base services) only fall by
-  importing less. In `battery_solar_lbnl_nbt_annual.yaml`, `energy_arbitrage` claims
-  $395/yr of value over self-consumption, but its dispatch's **bill is $89 higher**.
-  `nbt_bill` fixes this: same household, bill $233 vs $259 for self-consumption. Use
+  importing less. In `battery_solar_lbnl_nbt_annual.yaml` (without the battery's
+  smoothing cost), `energy_arbitrage` claims $395/yr of value over self-consumption, but
+  its dispatch's **bill is $89 higher**. `nbt_bill` fixes this: same household, bill
+  $255 vs $259 for self-consumption ($233 without smoothing). Use
   `nbt_bill` whenever a scenario is billed on NBT.
 
 - **`nbt_bill` values leftover credit at zero.** Credit still unused at the end of the

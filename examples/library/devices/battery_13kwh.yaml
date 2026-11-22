@@ -14,3 +14,4 @@ devices:
       soc_init_frac: 0.5
       soc_final_min_frac: 0.5 # ends where it started, so the run's value is real
       degradation_cost_per_kwh: 0.015 # $/kWh of throughput, from the warranty
+      smoothing_cost_per_kw: 0.10 # $/kW of change hour to hour: steady output, no cycling through the grid (steers only; never reported)

@@ -15,6 +15,7 @@ devices:
       soc_departure_min_frac: 0.8 # at every departure the pattern makes
       soc_final_min_frac: 0.8
       degradation_cost_per_kwh: 0.02 # illustrative
+      smoothing_cost_per_kw: 0.10 # $/kW of change hour to hour: steady output, no cycling through the grid (steers only; never reported)
       pattern:
         weekday: {depart: "07:30", arrive: "18:30", miles: 38}
         weekend: {depart: "10:00", arrive: "15:00", miles: 20}

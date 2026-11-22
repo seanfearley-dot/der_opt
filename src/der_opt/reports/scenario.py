@@ -55,11 +55,17 @@ def build(folder: Path, summary: dict, page: Page | None = None) -> Page:
     dr = summary.get("dr")
     if dr and dr.get("incentive_earned") is not None:
         cards.append(Card("DR incentive", money(dr["incentive_earned"]), f"program {dr.get('program')}"))
-    for test in summary.get("cost_tests") or []:
-        if test["test"] in ("TRC", "PAC"):
-            cards.append(Card(f"{test['test']} ratio", number(test.get("openbca_ratio")),
-                              f"net {money(test.get('net_benefits'), 0)}",
-                              "good" if (test.get("openbca_ratio") or 0) >= 1 else "bad"))
+    tests = {t["test"]: t for t in summary.get("cost_tests") or []}
+    featured = []
+    for name, title in (("TRC", "Total Resource Cost"), ("RIM", "Ratepayer Impact")):
+        test = tests.get(name)
+        if test is None:
+            continue
+        ratio = test.get("openbca_ratio")
+        featured.append(Card(f"{name} ratio · {title}", number(ratio),
+                             f"net benefits {money(test.get('net_benefits'), 0)} · SPM convention {number(test.get('spm_ratio'))}",
+                             ("good" if (ratio or 0) >= 1 else "bad") + " feature"))
+    cards = featured + cards  # the cost tests lead the panel
     page.cards(top, cards)
     devices = ", ".join(f"{d['name']} ({d['type']}{', ' + Path(d['template']).stem if d.get('template') else ''})"
                         for d in summary.get("devices") or []) or "no devices"

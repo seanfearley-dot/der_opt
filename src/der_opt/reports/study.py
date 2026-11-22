@@ -13,10 +13,10 @@ from der_opt.results.summary import read_summary
 
 # the portfolio columns shown first, and the metrics its chart can show
 PORTFOLIO_FIRST = ("premise_id", "measure", "note", "optimal_cost", "counterfactual_cost", "value_of_optimization",
-                   "dr_incentive_earned", "counted_R2_season_mean_kw", "TRC_ratio", "TRC_net_benefits", "PAC_ratio",
-                   "PAC_net_benefits")
-METRICS = ("value_of_optimization", "dr_incentive_earned", "counted_R2_season_mean_kw", "TRC_net_benefits",
-           "PAC_net_benefits", "TRC_ratio", "optimal_cost")
+                   "dr_incentive_earned", "counted_R2_season_mean_kw", "TRC_ratio", "TRC_net_benefits", "RIM_ratio",
+                   "RIM_net_benefits")
+METRICS = ("value_of_optimization", "dr_incentive_earned", "counted_R2_season_mean_kw", "TRC_ratio", "TRC_net_benefits",
+           "RIM_ratio", "RIM_net_benefits", "optimal_cost")
 
 
 def build(folder: Path, summary: dict) -> Page:
