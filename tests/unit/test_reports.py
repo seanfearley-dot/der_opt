@@ -83,3 +83,18 @@ def test_a_study_links_its_feeder_and_shares_one_plotly(tmp_path):
         assert f'<section id="{section}">' in feeder, section
     charts = _data(out / "feeder" / "report.html")["charts"]
     assert any(t.get("name") == "envelopes" for c in charts for t in c["traces"])
+
+
+def test_time_charts_zoom_together_and_hover_with_units(tmp_path):
+    page = Page("p")
+    section = page.section("s", "S")
+    axis = page.time_axis("t", pd.date_range("2026-07-13", periods=48, freq="h"))
+    page.chart(section, [{"type": "scatter", "x": axis, "y": [1.0] * 48}], zoom=True, unit="kW")
+    page.chart(section, [{"type": "scatter", "x": axis, "y": [1.0] * 48, "yaxis": "y2"}], zoom=True, unit2="kWh")
+    page.chart(section, [{"type": "bar", "x": ["a"], "y": [1]}])
+    text = page.render("x.js")
+    data = json.loads(re.search(r'id="report-data">(.*?)</script>', text, re.DOTALL)[1])
+    assert [c["sync"] for c in data["charts"]] == [True, True, False]
+    assert data["charts"][0]["traces"][0]["hovertemplate"] == "%{y:,.2f} kW"
+    assert data["charts"][1]["traces"][0]["hovertemplate"] == "%{y:,.2f} kWh"
+    assert "linkZoom" in text and "hoverlabel:{bgcolor" in text

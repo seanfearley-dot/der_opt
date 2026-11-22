@@ -62,7 +62,9 @@ folder's `summary.json` and CSVs.
   its feeder and portfolio pages share it. A page opens without a server, as long as
   `_assets/` stays beside it (or above it, for a study's runs).
 - **Long runs** open on the week with the highest import (or loading), with
-  1-day, 1-week, 1-month and whole-run buttons and a range slider. A time axis is sent
+  1-day, 1-week, 1-month and whole-run buttons and a range slider. A page's time
+  charts zoom together: narrowing one to a day narrows every other to the same day.
+  Hovering shows every series' value at that time, with its unit. A time axis is sent
   once per page, not per trace, so a year of hourly dispatch is about 0.4 MB.
 - **Tables** sort by any column, and long ones have a filter box. Very long ones are
   folded under a summary line.

@@ -111,7 +111,7 @@ def _loading(page: Page, folder: Path, summary: dict, labels: list[str]) -> None
         if rating:
             layout["shapes"] = [{"type": "line", "xref": "paper", "x0": 0, "x1": 1, "y0": rating, "y1": rating,
                                  "line": {"color": "#b91c1c", "dash": "dash", "width": 1}}]
-        page.chart(section, traces, layout, height=340, zoom=True, window=opening_window(flows.max(axis=1)),
+        page.chart(section, traces, layout, height=400, zoom=True, window=opening_window(flows.max(axis=1)), unit="kW",
                    caption=f"{element}" + (f", rating {rating:g} kW" if rating else ""))
     page.text(section, "Flow through each element, kW (backfeed negative); the dashed line is its rating. Mechanism "
                        "runs are in the legend.")
@@ -128,8 +128,8 @@ def _congestion(page: Page, folder: Path, summary: dict) -> None:
     axis = page.time_axis("t", prices.index)
     traces = [{"type": "scatter", "mode": "lines", "name": c, "x": axis, "y": _round(prices[c], 4),
                "line": {"width": 1.4, "shape": "hv"}} for c in prices.columns if (prices[c].abs() > 1e-3).any()]
-    page.chart(section, traces, {"yaxis": {"title": "$/kWh"}}, height=300, zoom=True,
-               window=opening_window(prices.abs().max(axis=1)))
+    page.chart(section, traces, {"yaxis": {"title": "$/kWh"}}, height=360, zoom=True,
+               window=opening_window(prices.abs().max(axis=1)), unit="$/kWh")
 
 
 def _bills(page: Page, folder: Path, labels: list[str]) -> None:

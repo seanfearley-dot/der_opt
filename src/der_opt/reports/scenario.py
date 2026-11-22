@@ -122,7 +122,7 @@ def _dispatch(page: Page, folder: Path, summary: dict) -> None:
     page.text(section, "Power at the meter, kW: import positive, export negative. "
               + ("It opens on the week with the highest import; " if window else "")
               + "zoom with the buttons or the slider, and click a legend entry to hide it.")
-    page.chart(section, traces, {"yaxis": {"title": "kW"}}, height=380, zoom=True, window=window)
+    page.chart(section, traces, {"yaxis": {"title": "kW"}}, height=420, zoom=True, window=window, unit="kW")
 
     if dispatch is None:
         return
@@ -149,7 +149,7 @@ def _dispatch(page: Page, folder: Path, summary: dict) -> None:
                            "(right axis). Counterfactual lines are in the legend.")
         page.chart(section, traces, {"yaxis": {"title": "kW"}, "yaxis2": {"title": "kWh", "overlaying": "y",
                                                                            "side": "right", "showgrid": False}},
-                   height=380, zoom=True, window=window)
+                   height=420, zoom=True, window=window, unit="kW", unit2="kWh")
 
     if cf_in is not None and cf_out is not None and len(net) >= 48:
         change = (net - (cf_in - cf_out))

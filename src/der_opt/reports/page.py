@@ -144,12 +144,21 @@ class Page:
         return {"axis": name}
 
     def chart(self, section: Section, traces: list[dict], layout: dict | None = None, height: int = 360,
-              zoom: bool = False, window: tuple[str, str] | None = None, caption: str = "") -> None:
+              zoom: bool = False, window: tuple[str, str] | None = None, caption: str = "", unit: str = "",
+              unit2: str = "") -> None:
         """A Plotly chart. `zoom` adds day/week/month/all buttons and a range slider;
-        `window` is the range it opens on. A color "ink" follows the page's theme."""
+        `window` is the range it opens on. A color "ink" follows the page's theme. With
+        `unit` (and `unit2` for the right-hand axis), hovering shows each value with it."""
         chart_id = f"chart{len(self.charts)}"
         layout = dict(layout or {})
+        if unit or unit2:
+            for trace in traces:
+                if "hovertemplate" not in trace and trace.get("type", "scatter") in ("scatter", "bar"):
+                    shown = unit2 if trace.get("yaxis") == "y2" else unit
+                    trace["hovertemplate"] = "%{y:,.2f}" + (f" {shown}" if shown else "")
         if zoom:
+            layout.setdefault("legend", {"orientation": "h", "x": 0, "xanchor": "left", "y": -0.32, "yanchor": "top"})
+            layout.setdefault("margin", {"l": 56, "r": 20, "t": 40, "b": 90})
             xaxis = layout.setdefault("xaxis", {})
             if window is not None:
                 xaxis["range"] = list(window)
@@ -159,7 +168,7 @@ class Page:
                 {"count": 1, "label": "1 month", "step": "month", "stepmode": "backward"},
                 {"step": "all", "label": "all"}]}
             xaxis["rangeslider"] = {"visible": True, "thickness": 0.06}
-        self.charts.append({"id": chart_id, "traces": traces, "layout": layout})
+        self.charts.append({"id": chart_id, "traces": traces, "layout": layout, "sync": zoom})
         if caption:
             section.parts.append(f'<div class="caption">{html.escape(caption)}</div>')
         section.parts.append(f'<div class="chart" id="{chart_id}" style="height:{height}px"></div>')
@@ -269,7 +278,7 @@ if(!cache[value.axis])cache[value.axis]=axisValues(axes[value.axis]);return cach
 function themed(layout){const css=getComputedStyle(document.documentElement);const v=n=>css.getPropertyValue(n).trim();
 const base={paper_bgcolor:"rgba(0,0,0,0)",plot_bgcolor:"rgba(0,0,0,0)",font:{color:v("--ink"),size:12},
 margin:{l:56,r:20,t:40,b:40},legend:{orientation:"h",y:1.02,yanchor:"bottom",x:1,xanchor:"right"},
-hovermode:"x unified"};
+hovermode:"x unified",hoverlabel:{bgcolor:v("--panel"),bordercolor:v("--line"),font:{color:v("--ink"),size:12}}};
 const out=Object.assign({},base,layout);for(const key of Object.keys(out)){if(/^[xy]axis\d*$/.test(key)){
 out[key]=Object.assign({gridcolor:v("--grid"),zerolinecolor:v("--line"),linecolor:v("--line")},out[key]);
 if(out[key].rangeselector)out[key].rangeselector=Object.assign({bgcolor:v("--chip"),activecolor:v("--line")},
@@ -280,7 +289,15 @@ const ink=getComputedStyle(document.documentElement).getPropertyValue("--ink").t
 for(const chart of data.charts){const traces=chart.traces.map(t=>{const c=Object.assign({},t);c.x=expand(c.x,data.axes,cache);
 if(c.line&&c.line.color==="ink")c.line=Object.assign({},c.line,{color:ink});
 c.y=expand(c.y,data.axes,cache);return c;});
-Plotly.newPlot(chart.id,traces,themed(chart.layout),{responsive:true,displaylogo:false});}}
+Plotly.newPlot(chart.id,traces,themed(chart.layout),{responsive:true,displaylogo:false});}
+linkZoom(data.charts.filter(c=>c.sync).map(c=>document.getElementById(c.id)));}
+function linkZoom(charts){let busy=false;
+for(const chart of charts){chart.on("plotly_relayout",ev=>{if(busy)return;let update=null;
+if(ev["xaxis.range[0]"]!==undefined)update={"xaxis.range":[ev["xaxis.range[0]"],ev["xaxis.range[1]"]]};
+else if(ev["xaxis.range"])update={"xaxis.range":ev["xaxis.range"]};
+else if(ev["xaxis.autorange"])update={"xaxis.autorange":true};
+if(!update)return;busy=true;
+Promise.all(charts.filter(c=>c!==chart).map(c=>Plotly.relayout(c,update))).finally(()=>{busy=false;});});}}
 function sortTables(){document.querySelectorAll("table.sortable").forEach(table=>{table.querySelectorAll("th").forEach((th,i)=>{
 th.addEventListener("click",()=>{const body=table.tBodies[0];const rows=[...body.rows];const asc=th.dataset.dir!=="asc";
 table.querySelectorAll("th").forEach(h=>delete h.dataset.dir);th.dataset.dir=asc?"asc":"desc";
