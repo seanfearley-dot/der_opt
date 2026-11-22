@@ -17,6 +17,7 @@ dependencies = [
     "typer",
     "matplotlib",
     "requests",
+    "plotly>=5",  # report.html charts (docs/REPORTS.md)
 ]
 
 [project.optional-dependencies]

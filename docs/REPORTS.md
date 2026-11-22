@@ -52,10 +52,38 @@ avoided-cost series alone is about 27 MB, plus OpenBCA's database (8 MB), so abo
 `--keep-openbca`. `export_openbca` on the run's `measure_impacts/` writes the inputs
 again.
 
-## 2. `report.html` (next)
+## 2. `report.html` (built)
 
-One page per output folder that opens without a server, rebuilt by
-`der-opt report OUT` without solving again.
+One page per output folder, written at the end of every `run -o` and rebuilt by
+`der-opt report OUT` (`--open` opens it) without solving again. It's built from the
+folder's `summary.json` and CSVs.
+- **Charts** are Plotly, interactive: zoom, hover, legend entries to hide. plotly.js
+  (4.8 MB) sits once in the output tree's `_assets/`; a study puts it at its root, so
+  its feeder and portfolio pages share it. A page opens without a server, as long as
+  `_assets/` stays beside it (or above it, for a study's runs).
+- **Long runs** open on the week with the highest import (or loading), with
+  1-day, 1-week, 1-month and whole-run buttons and a range slider. A time axis is sent
+  once per page, not per trace, so a year of hourly dispatch is about 0.4 MB.
+- **Tables** sort by any column, and long ones have a filter box. Very long ones are
+  folded under a summary line.
+- **Light and dark** follow the system setting.
+
+What each page shows:
+- **Single home:** headline cards (optimal and counterfactual cost, value of
+  optimization, bills, DR incentive, TRC and PAC ratios); the value breakdown; the meter
+  and each device's power and stored energy (counterfactual dotted); where optimization
+  moved load, by hour and day; energy by month; DR capacity by month and the events;
+  screening values; cost tests (ratios, both conventions); bills; checks; every setting
+  with its source.
+- **Feeder:** cards (costs by run, network saving, who pays more); premises by element;
+  costs by run; peak flow by element and run, and each element's flow over time with
+  its rating; congestion prices; each premise's bill change under coordination and its
+  bills by run; the coordination runs against the ideal; checks; settings.
+- **Study:** cards (premises, device types, analyses); the feeder analysis's headline
+  figures, linked to its page; the portfolio (a bar per premise for a chosen measure,
+  and the table, each premise linked to its page); the population by element, the
+  premises table, and what `add_devices` chose; checks; settings. Each run's page links
+  back to the study's.
 
 ## 3. `der-opt ui` (after)
 

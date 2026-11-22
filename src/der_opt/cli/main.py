@@ -255,6 +255,7 @@ def _run_feeder(scenario: Path, output_dir: Path | None, no_counterfactual: bool
 
         plt.close("all")  # charts are saved; free them (matters when runs are scripted in a loop)
         typer.echo(f"\nWrote CSVs, charts, summary.json and run_record.json to {output_dir}")
+        _report(output_dir)
 
 
 def _print_coordination(study) -> None:
@@ -441,6 +442,9 @@ def _run_study(study_path: Path, output_dir: Path | None, no_counterfactual: boo
     validation = None if no_validate else _validate_first(study_path, cost_tests, openbca_path)
     output_dir = output_dir or Path("out") / study.name
     output_dir.mkdir(parents=True, exist_ok=True)
+    from der_opt.reports.page import ensure_assets
+
+    ensure_assets(output_dir)  # one copy of plotly.js for the study's reports and every run's inside it
     report = validation.report if validation is not None else CheckReport()
     details: dict = {}
     resolved = validation.resolved if validation is not None else resolve_study(study, details)[0]
@@ -505,9 +509,46 @@ def _run_study(study_path: Path, output_dir: Path | None, no_counterfactual: boo
     write_run_record(output_dir, study_path, study.model_dump(mode="json"), report, results, composed)
     portfolio = (premises, failed, table) if study.analyses.portfolio is not None else (None, None, None)
     write_summary(output_dir, study_summary(study, resolved, additions, *portfolio, report=report))
+    from der_opt.reports import write_reports
+
+    write_reports(output_dir)  # again for the runs inside, now with links back to the study's page
+    typer.echo(f"\nWrote premises.csv, device_parameters.csv, summary.json and run_record.json to {output_dir}")
+    typer.echo(f"Report: {output_dir / 'report.html'}")
     if study.analyses.portfolio is not None and failed:
         raise typer.Exit(code=1)
-    typer.echo(f"\nWrote premises.csv, device_parameters.csv, summary.json and run_record.json to {output_dir}")
+
+
+def _report(output_dir: Path) -> None:
+    """The run's report.html (docs/REPORTS.md section 2)."""
+    from der_opt.reports import write_report
+
+    try:
+        path = write_report(output_dir)
+    except Exception as exc:  # noqa: BLE001 -- a report that can't be drawn mustn't lose the run's results
+        typer.echo(f"Report: not written ({type(exc).__name__}: {exc}); `der-opt report {output_dir}` retries it")
+        return
+    if path is not None:
+        typer.echo(f"Report: {path}")
+
+
+@app.command()
+def report(
+    folder: Path = typer.Argument(..., help="A `der-opt run -o` folder (a single home, a feeder or a study)"),
+    open_it: bool = typer.Option(False, "--open", help="Open the report in your browser"),
+) -> None:
+    """Write report.html for a run's folder from its summary.json and CSVs, without
+    solving again. For a study, also its feeder's and each portfolio premise's."""
+    from der_opt.reports import write_reports
+
+    written = write_reports(folder)
+    if not written:
+        raise typer.BadParameter(f"{folder} has no summary.json (it's written by `der-opt run -o`)")
+    for path in written:
+        typer.echo(f"Wrote {path}")
+    if open_it:
+        import webbrowser
+
+        webbrowser.open(written[-1].resolve().as_uri())
 
 
 def _print_additions(additions) -> None:
@@ -759,6 +800,7 @@ def _run_scenario(scenario: Path, output_dir: Path | None = None, duals: bool = 
         typer.echo(f"\nWrote CSVs, charts, summary.json and run_record.json to {output_dir}")
         if cost_tests:
             _cost_tests(output_dir, openbca_path, keep_openbca)
+        _report(output_dir)
 
 
 @app.command()

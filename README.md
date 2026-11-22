@@ -123,6 +123,7 @@ Files written with `-o`:
 | `bill_cycles.csv`, `counterfactual_bill_cycles.csv` | per billing cycle: kWh, charges by bucket, credits earned and applied, amount due, credit balances (with `billing`) |
 | `checks.csv` | every check finding: level, check, message, run, premise |
 | `summary.json` | the numbers the run prints, as data, for reports and scripts ([docs/REPORTS.md](docs/REPORTS.md)) |
+| `report.html` | one interactive page of everything above: charts you can zoom from the whole run to a day, sortable tables (`der-opt report OUT` rebuilds it; plotly.js is in `_assets/`) |
 | `run_record.json` | what produced the result: the scenario as resolved, a SHA-256 of every input file it names, the git commit (and whether there were uncommitted changes), Python and package versions, headline results, and the checks; with `extends`, a SHA-256 of every fragment |
 | `scenario.yaml` | a copy of the scenario file as run |
 | `scenario.resolved.yaml` | the scenario with everything it extends merged in and every path absolute |
