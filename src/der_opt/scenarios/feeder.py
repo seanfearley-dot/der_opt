@@ -1,7 +1,7 @@
 """Feeder scenarios: many houses on a distribution network, from YAML.
 
-Each house -- written out under `houses:` or generated under `synthetic_houses:` --
-becomes an ordinary single-premise ScenarioConfig (sharing the scenario's time grid and
+Each house -- written out under `houses:` or built from input-spec files under
+`premise_data:` -- becomes an ordinary single-premise ScenarioConfig (sharing the scenario's time grid and
 billing), so devices, bills and counterfactual policies are built by the same code as
 a one-house run. run_feeder_study then compares up to three dispatches of the same
 houses on the same network:
@@ -26,7 +26,6 @@ from der_opt.network import (
     NetworkElement,
     element_flows,
 )
-from der_opt.network.synthetic import synthetic_houses
 from der_opt.premise import Premise
 from der_opt.pricing import value_breakdown
 from der_opt.results.schema import DispatchResult
@@ -65,7 +64,7 @@ class FeederScenario:
     house_configs: list[ScenarioConfig]
     premises: list[Premise]
     network_streams: list
-    houses: pd.DataFrame  # one row per house: element, devices, synthetic draws
+    houses: pd.DataFrame  # one row per house: element, devices, sizes
     roles: dict = field(default_factory=dict)  # house -> coordination Role
     background: dict = field(default_factory=dict)  # name -> (element, kW): background load
     explicit_rules: dict = field(default_factory=dict)  # house -> rules as written on it
@@ -96,28 +95,6 @@ def _house_scenario(config: FeederScenarioConfig, house: HouseConfig) -> Scenari
         counterfactual=counterfactual,
         billing=house.billing if house.billing is not None else config.billing,
     )
-
-
-def _generated_houses(config: FeederScenarioConfig) -> tuple[list[HouseConfig], list[dict]]:
-    time_grid = _build_time_grid(config.time_grid)
-    house_configs, rows = [], []
-    for group in config.synthetic_houses:
-        generated = synthetic_houses(
-            time_grid, group.count, seed=group.seed, name_prefix=group.name_prefix or f"{group.element}_h",
-            solar_share=group.solar_share, battery_share=group.battery_share, ev_share=group.ev_share,
-            ev_v2x=group.ev_v2x, t_min_c=group.t_min_c, t_max_c=group.t_max_c,
-        )
-        for house in generated:
-            devices = []
-            if house.solar:
-                devices.append(DeviceConfig(type="solar", name="solar", params=house.solar))
-            if house.battery:
-                devices.append(DeviceConfig(type="battery", name="battery", params=house.battery | {"charge_sources": ["solar"]}))
-            if house.ev:
-                devices.append(DeviceConfig(type="ev_v2x", name="ev", params=house.ev))
-            house_configs.append(HouseConfig(name=house.name, element=group.element, devices=devices, external_load=house.load_kw.tolist()))
-            rows.append({"house": house.name, "synthetic": True, "peak_load_kw": round(float(house.load_kw.max()), 2), **house.traits})
-    return house_configs, rows
 
 
 # behavior defaults for houses built from premise_data; sizes come from the premises
@@ -220,7 +197,7 @@ def _premise_houses(config: FeederScenarioConfig) -> tuple[list[HouseConfig], li
             name=premise, element=element, devices=devices, external_load=external, billing=billing,
             import_limit_kw=number(row, "import_limit_kw"), export_limit_kw=number(row, "export_limit_kw"),
         ))
-        rows.append({"house": premise, "synthetic": False, "data": "metered" if imported else "gross",
+        rows.append({"house": premise, "data": "metered" if imported else "gross",
                      **{k: v for k, v in sizes.items() if v is not None}, "tariff": row.get("tariff") or "",
                      "export_program": row.get("export_program") or ""})
     if problems:
@@ -236,11 +213,9 @@ def _premise_houses(config: FeederScenarioConfig) -> tuple[list[HouseConfig], li
 
 
 def build_feeder_scenario(config: FeederScenarioConfig) -> FeederScenario:
-    generated, rows = _generated_houses(config)
-    from_files, file_rows, file_elements = _premise_houses(config)
-    house_list = list(config.houses) + generated + from_files
-    rows = rows + file_rows
-    explicit_rows = [{"house": house.name, "synthetic": False} for house in config.houses]
+    from_files, rows, file_elements = _premise_houses(config)
+    house_list = list(config.houses) + from_files
+    explicit_rows = [{"house": house.name, "data": "written out"} for house in config.houses]
     if file_elements is not None and config.feeder.elements:
         raise ValueError("network elements come from premise_data.network or feeder.elements, not both")
     elements = file_elements if file_elements is not None else [

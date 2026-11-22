@@ -305,22 +305,6 @@ class PremiseDataConfig(BaseModel):
     baseline_code: str = "basic"
 
 
-class SyntheticHousesConfig(BaseModel):
-    """Generated houses on one element; see der_opt.network.synthetic. Devices are
-    named solar, battery and ev."""
-
-    element: str
-    count: int
-    seed: int = 0
-    name_prefix: str | None = None  # default "<element>_h"
-    solar_share: float = 0.4
-    battery_share: float = 0.3  # of the solar homes
-    ev_share: float = 0.4
-    ev_v2x: bool = False
-    t_min_c: float = 22.0
-    t_max_c: float = 40.0
-
-
 # --- feeder coordination (docs/COORDINATION_SPEC.md v1.0) -----------------------------
 
 
@@ -393,7 +377,6 @@ class FeederScenarioConfig(BaseModel):
     feeder: FeederConfig
     house_defaults: HouseDefaultsConfig = Field(default_factory=HouseDefaultsConfig)
     houses: list[HouseConfig] = Field(default_factory=list)
-    synthetic_houses: list[SyntheticHousesConfig] = Field(default_factory=list)
     premise_data: PremiseDataConfig | None = None
     billing: BillingConfig | None = None
     coordination: CoordinationConfig | None = None

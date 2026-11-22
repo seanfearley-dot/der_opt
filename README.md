@@ -778,8 +778,9 @@ feeder:
     - {name: tx_a, parent: lateral, rating_kw: 50, overload_cost_per_kwh: 1.0}
   value_streams:
     - {type: capacity_deferral, element: tx_a, value_per_kw: 40.0}
-synthetic_houses:              # generated houses (no data needed), or list them under houses:
-  - {element: tx_a, count: 10, seed: 1, ev_share: 0.7, solar_share: 0.4, battery_share: 0.5}
+premise_data:                  # houses from input-spec files, or list them under houses:
+  premises: ../data/heat_wave/premises.csv
+  timeseries: [../data/heat_wave/timeseries.csv]
 house_defaults:                # applied to every house that doesn't set its own
   value_streams: [{type: nbt_bill}]
   poi_limit_kw: 30
@@ -794,16 +795,20 @@ billing: {...}                 # shared by every house
   It takes an annual $/kW-year and applies it to the run's peak, so use it on a horizon
   that contains the element's annual peak.
 * **Houses** under `houses:` take the same fields as a one-house scenario plus
-  `element`. **`synthetic_houses`** generates them (`der_opt.network.synthetic`): base
-  load, morning and evening occupancy bumps, air conditioning that follows a heat-wave
-  temperature with a few hours' lag, and, by share, rooftop solar, an EV that drives
-  each day and must be back at 90% by its departure, and a solar-only-charging battery
-  that must end where it started. The ranges are judgment calls for an inland
-  California summer, not fitted to data.
+  `element`. **`premise_data`** builds them from `premises.csv` and time series files
+  (see Input data). The example homes in `examples/data/heat_wave/` and
+  `examples/data/new_subdivision/` are synthetic, written in that format. Each has:
+  - base load, with morning and evening peaks and air conditioning that follows a
+    heat-wave temperature;
+  - rooftop solar, on some homes;
+  - an EV that drives each day, on some homes;
+  - a solar-only-charging battery that must end where it started, on some homes.
+
+  The ranges are judgment calls for an inland California summer, not fitted to data.
 * **Congestion prices** are the duals of each element's flow: the cost of one more kWh
   through it in each hour. They're exact while the model is an LP.
 
-Output (`-o`): `houses.csv` (devices, the generated draws, each run's bill),
+Output (`-o`): `houses.csv` (devices, sizes, each run's bill),
 `flows_kw.csv`, `loading.csv` (peak, % of rating, hours and kWh over),
 `congestion_prices.csv`, `dispatch_<run>.csv` per house, and `feeder_loading.png`.
 
@@ -812,8 +817,8 @@ homes:
 
 | | coordinated | independent | plug-in charging |
 |---|---|---|---|
-| Transformer A peak (50 kW rating) | 37.7 kW | 81.1 kW (6 h over) | 68.0 kW (8 h over) |
-| Customer bills, 20 homes | $1,398 | $1,397 | $1,468 |
+| Transformer A peak (50 kW rating) | 37.7 kW | 81.1 kW (5 h over) | 66.7 kW (6 h over) |
+| Customer bills, 20 homes | $1,385 | $1,384 | $1,448 |
 
 Each home optimizing its own bill is *worse* for the transformer than plug-in
 charging: every EV waits for the same off-peak start at midnight. Coordination holds
@@ -833,19 +838,19 @@ Two modeling choices matter here:
   together. It reports which houses pay more, but doesn't compensate them; that's for
   a settlement mechanism (not built yet).
 
-`feeder_bank_planning_trace.yaml` puts the same machinery under a whole primary bank: the
-bank's existing load is one device-less house whose `external_load` is loadcast's 1-in-10
-design year (`trace: poe10`, peak 1,990 kW on 4 Aug 2026 at 16:00), and a new 40-home
-subdivision (80% EVs) joins on two 75 kW transformers. Over 3-6 Aug:
+`feeder_bank_planning_trace.yaml` puts the same machinery under a whole primary bank. The
+bank's existing load is `background_load` from loadcast's 1-in-10 design year (`trace:
+poe10`, peak 1,990 kW on 4 Aug 2026 at 16:00). A new 40-home subdivision (80% EVs) joins
+on two 75 kW transformers. Over 3-6 Aug:
 
 | | coordinated | independent | plug-in charging |
 |---|---|---|---|
 | Bank peak (2,000 kW rating) | 2,069 kW (1 h over) | 2,086 kW (1 h over) | 2,102 kW (2 h over) |
-| New transformer A peak (75 kW) | 105 kW | 209 kW | 167 kW |
-| Customer bills, 40 new homes | $3,330 | $3,290 | $3,631 |
+| New transformer A peak (75 kW) | 105 kW | 207 kW | 167 kW |
+| Customer bills, 40 new homes | $3,276 | $3,236 | $3,546 |
 
 The bank's own 4 pm peak leaves the new homes little room, but what binds first is their
-service transformers. Coordination costs 13 homes $40 in total for a $1,282 network saving.
+service transformers. Coordination costs 13 homes $40 in total for a $1,149 network saving.
 The existing load is background load here (fixed, not billed), the new homes' synthetic weather is
 not the trace's weather, and loadcast's bank load includes its losses while the new homes'
 doesn't -- a sizing study, not a single consistent day.
@@ -1010,7 +1015,7 @@ src/der_opt/
   avoided_costs/ avoided cost sets and first-year screening values
   cost_test/     the measure impact package for cost tests (OpenBCA)
   integrations/  LBNL load, EV model, PVWatts, PG&E NBT export rates, CAISO LMP
-  network/       feeder topology, multi-premise dispatch, congestion prices, synthetic houses
+  network/       feeder topology, multi-premise dispatch, congestion prices
   coordination/  participation, price signals, operating envelopes, rule-based responses, feeder DR
   scenarios/     YAML schema, loader, extends and paths, validate, templates (der-opt new), feeder scenarios
   viz/           heatmap, dispatch, value stack, duals, comparison, feeder loading charts

@@ -43,7 +43,7 @@ KINDS = [
     Kind("other", "Other", many=True),
 ]
 METER_KEYS = {"poi_limit_kw", "import_limit_kw", "export_limit_kw", "exclusive_import_export"}
-FEEDER_KEYS = {"house_defaults", "feeder", "houses", "synthetic_houses", "premise_data"}
+FEEDER_KEYS = {"house_defaults", "feeder", "houses", "premise_data"}
 
 
 @dataclass

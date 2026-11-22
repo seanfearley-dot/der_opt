@@ -1,9 +1,11 @@
-# Twenty synthetic homes on two 50 kW service transformers through a three-day heat
-# wave -- the first multi-premise (feeder) scenario. Run with:
+# Twenty homes on two 50 kW service transformers through a three-day heat wave -- the
+# first multi-premise (feeder) scenario. Run with:
 #   der-opt run examples/scenarios/feeder_ev_heat_wave.yaml -o out/feeder
 #
-# Needs no external data: the houses are generated (see der_opt.network.synthetic).
-# Transformer A has high EV adoption, B low. The run compares three dispatches of the
+# The homes are synthetic, in the input data spec: ../data/heat_wave/premises.csv
+# sizes each one's solar, battery and EV; timeseries.csv has its load (with AC
+# following the heat wave), solar, and EV plug-in and driving. Transformer A has high
+# EV adoption, B low. The run compares three dispatches of the
 # same homes: coordinated (one optimization over all homes and both transformers),
 # independent (each home optimizing its own bill, blind to the transformer), and
 # today's rule-based behavior (EVs charge on plug-in, batteries self-consume).
@@ -11,7 +13,6 @@
 extends:
   - ../library/time/2026-07-13T12_72x60min.yaml
   - ../library/feeder/homes_bill.yaml # each home's own bill; EVs charge on plug-in, batteries self-consume in R1
-  - ../library/billing/pge_e_elec_2026-06_nbt.yaml # every home on E-ELEC with NBT (solar homes export; the rest just buy)
 
 name: two_transformer_heat_wave
 
@@ -37,26 +38,19 @@ feeder:
       element: tx_a
       value_per_kw: 40.0
 
-synthetic_houses:
-  - element: tx_a
-    count: 10
-    seed: 1
-    ev_share: 0.7
-    solar_share: 0.4
-    battery_share: 0.5 # of the solar homes
-    t_min_c: 23
-    t_max_c: 41
-  - element: tx_b
-    count: 10
-    seed: 2
-    ev_share: 0.2
-    solar_share: 0.4
-    battery_share: 0.5
-    t_min_c: 23
-    t_max_c: 41
+# every home on E-ELEC with NBT (premises.csv); solar homes export, the rest just buy
+premise_data:
+  premises: ../data/heat_wave/premises.csv
+  timeseries: [../data/heat_wave/timeseries.csv]
+  tariff_dir: ../data/tariffs
+  programs:
+    nbt: {export_rates_csv: ../data/pge_nbt_eec_2026.csv, acc_plus_per_kwh: 0.0088}
 
 house_defaults:
   poi_limit_kw: 30
+  device_params: # sizes are in premises.csv
+    battery: {eta_charge: 0.96, eta_discharge: 0.96, degradation_cost_per_kwh: 0.015, charge_sources: [solar]}
+    ev: {degradation_cost_per_kwh: 0.0}
   # left off so the run stays an LP and congestion prices are exact duals. Here one
   # battery home imports and exports 3.6 kWh in the same hour (an NBT delivery credit
   # above the import rate), worth $0.01; set true to forbid it (prices then come from

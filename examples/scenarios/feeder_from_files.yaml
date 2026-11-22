@@ -4,7 +4,7 @@
 # Check your own files first:
 #   der-opt check-data data/timeseries.csv --premises data/premises.csv --network data/network.csv
 #
-# ../data/spec_sample/ is synthetic (made with der_opt.network.synthetic):
+# ../data/spec_sample/ is synthetic (generated, not real premises):
 # home_05 is metered (import_kw/export_kw); the rest are gross load with solar, a
 # battery or an EV as premises.csv sizes them. Tariffs and export programs are per
 # premise; device behavior is set here, under house_defaults.device_params.
