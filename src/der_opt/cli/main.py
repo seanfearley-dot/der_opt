@@ -248,10 +248,13 @@ def _run_feeder(scenario: Path, output_dir: Path | None, no_counterfactual: bool
             for label, run in runs.items()
         }
         _write_checks(output_dir, scenario, config, report, results, composed)
+        from der_opt.results.summary import feeder_summary, write_summary
+
+        write_summary(output_dir, feeder_summary(built, study, summaries, report))
         import matplotlib.pyplot as plt
 
         plt.close("all")  # charts are saved; free them (matters when runs are scripted in a loop)
-        typer.echo(f"\nWrote CSVs, charts and run_record.json to {output_dir}")
+        typer.echo(f"\nWrote CSVs, charts, summary.json and run_record.json to {output_dir}")
 
 
 def _print_coordination(study) -> None:
@@ -384,6 +387,9 @@ def run(
         None, "--openbca", help="OpenBCA checkout for --cost-tests (default: from `der-opt setup openbca`)"),
     no_validate: bool = typer.Option(
         False, "--no-validate", help="Skip the checks `der-opt validate` runs before solving"),
+    keep_openbca: bool = typer.Option(
+        False, "--keep-openbca", help="With --cost-tests: keep OpenBCA's working files (about 36 MB a test), "
+        "not only its results"),
 ) -> None:
     """Solve a scenario or a study and print a summary. Runs `der-opt validate`'s checks
     first and stops on any error, before solving anything.
@@ -405,13 +411,13 @@ def run(
     from der_opt.scenarios.schema import is_study
 
     if is_study(sections):
-        _run_study(scenario, output_dir, no_counterfactual, cost_tests, openbca_path, no_validate)
+        _run_study(scenario, output_dir, no_counterfactual, cost_tests, openbca_path, no_validate, keep_openbca)
         return
-    _run_scenario(scenario, output_dir, duals, no_counterfactual, cost_tests, openbca_path, no_validate)
+    _run_scenario(scenario, output_dir, duals, no_counterfactual, cost_tests, openbca_path, no_validate, keep_openbca)
 
 
 def _run_study(study_path: Path, output_dir: Path | None, no_counterfactual: bool, cost_tests: bool,
-               openbca_path: Path | None, no_validate: bool) -> None:
+               openbca_path: Path | None, no_validate: bool, keep_openbca: bool = False) -> None:
     """A study's analyses (docs/POPULATION_MODEL_SPEC.md section 4), each in its own folder."""
     import contextlib
     import io
@@ -475,7 +481,7 @@ def _run_study(study_path: Path, output_dir: Path | None, no_counterfactual: boo
             try:
                 with contextlib.redirect_stdout(captured):
                     _run_scenario(scenario_file, sub, no_counterfactual=no_counterfactual, cost_tests=cost_tests,
-                                  openbca_path=openbca_path, no_validate=True)
+                                  openbca_path=openbca_path, no_validate=True, keep_openbca=keep_openbca)
             except Exception as exc:  # noqa: BLE001 -- one premise failing doesn't stop the portfolio
                 failed.append(item.premise_id)
                 item.note = f"failed: {type(exc).__name__}: {exc}"
@@ -494,11 +500,14 @@ def _run_study(study_path: Path, output_dir: Path | None, no_counterfactual: boo
         typer.echo("  Totals: " + "; ".join(f"{c} {total[c]:,.2f}" for c in shown if pd.notna(total.get(c))))
         typer.echo(f"  Wrote {folder / 'portfolio.csv'} (one row per premise, and a total)")
         results["portfolio"] = {"premises": len(premises), "failed": failed}
-        if failed:
-            write_run_record(output_dir, study_path, study.model_dump(mode="json"), report, results, composed)
-            raise typer.Exit(code=1)
+    from der_opt.results.summary import study_summary, write_summary
+
     write_run_record(output_dir, study_path, study.model_dump(mode="json"), report, results, composed)
-    typer.echo(f"\nWrote premises.csv, device_parameters.csv and run_record.json to {output_dir}")
+    portfolio = (premises, failed, table) if study.analyses.portfolio is not None else (None, None, None)
+    write_summary(output_dir, study_summary(study, resolved, additions, *portfolio, report=report))
+    if study.analyses.portfolio is not None and failed:
+        raise typer.Exit(code=1)
+    typer.echo(f"\nWrote premises.csv, device_parameters.csv, summary.json and run_record.json to {output_dir}")
 
 
 def _print_additions(additions) -> None:
@@ -510,7 +519,8 @@ def _print_additions(additions) -> None:
 
 
 def _run_scenario(scenario: Path, output_dir: Path | None = None, duals: bool = False, no_counterfactual: bool = False,
-                  cost_tests: bool = False, openbca_path: Path | None = None, no_validate: bool = False) -> None:
+                  cost_tests: bool = False, openbca_path: Path | None = None, no_validate: bool = False,
+                  keep_openbca: bool = False) -> None:
     """One scenario: a single home, or a feeder."""
     import pandas as pd
 
@@ -574,8 +584,11 @@ def _run_scenario(scenario: Path, output_dir: Path | None = None, duals: bool = 
     typer.echo(f"Status: {dispatch.solver_status}")
     from der_opt.devices.ev_pattern import scenario_patterns
 
+    ev_patterns = []
     for name, pattern, expanded in scenario_patterns(config.devices, premise.time_grid):
-        typer.echo(f"EV {name} (daily pattern): {expanded.summary(premise.time_grid, pattern.kwh_per_mile)}")
+        described = expanded.summary(premise.time_grid, pattern.kwh_per_mile)
+        ev_patterns.append({"device": name, "summary": described})
+        typer.echo(f"EV {name} (daily pattern): {described}")
 
     breakdown = value_breakdown(premise, dispatch)
     twin = " (no DR events: the non-responding twin, R2)" if config.dr is not None else ""
@@ -630,7 +643,7 @@ def _run_scenario(scenario: Path, output_dir: Path | None = None, duals: bool = 
         _print_dr(dr_study, config, bills.get("optimal"))
         report.extend(dr_study.checks)
 
-    screening, impact_runs = None, None
+    screening, impact_runs, screening_info = None, None, None
     set_path = (config.cost_test.avoided_costs.set if config.cost_test is not None
                 else config.avoided_costs.set if config.avoided_costs is not None else None)
     if set_path is not None:
@@ -646,6 +659,8 @@ def _run_scenario(scenario: Path, output_dir: Path | None = None, duals: bool = 
                                      with_.grid_import - with_.grid_export, premise.time_grid.dt_hours, capacity_kw)
         chosen = config.cost_test.capacity_value.label if config.cost_test else "R2/import/counted"
         _print_screening(screening, acs, without_label, chosen)
+        screening_info = {"set_id": acs.manifest.set_id, "dollars": acs.manifest.dollars.basis,
+                          "measure_vs": without_label, "capacity_valued": chosen}
         report.ran("avoided cost set")
 
     if validation is None:  # validation ran these
@@ -734,12 +749,16 @@ def _run_scenario(scenario: Path, output_dir: Path | None = None, duals: bool = 
             write_impact_package(output_dir, config, without_label, without, with_, premise.time_grid,
                                  dr_study, package_bills, tz=config.dr.tz if config.dr else "America/Los_Angeles")
         _write_checks(output_dir, scenario, config, report, results, composed)
+        from der_opt.results.summary import scenario_summary, write_summary
+
+        write_summary(output_dir, scenario_summary(config, premise, dispatch, breakdown, counterfactual, cf_breakdown,
+                                                   bills, dr_study, screening, screening_info, ev_patterns, report))
         import matplotlib.pyplot as plt
 
         plt.close("all")  # charts are saved; free them (matters when runs are scripted in a loop)
-        typer.echo(f"\nWrote CSVs, charts and run_record.json to {output_dir}")
+        typer.echo(f"\nWrote CSVs, charts, summary.json and run_record.json to {output_dir}")
         if cost_tests:
-            _cost_tests(output_dir, openbca_path)
+            _cost_tests(output_dir, openbca_path, keep_openbca)
 
 
 @app.command()
@@ -1075,7 +1094,7 @@ def check_data(
         raise typer.Exit(code=1)
     typer.echo("\nPasses the spec.")
 
-def _cost_tests(run_dir: Path, openbca_path: Path | None) -> None:
+def _cost_tests(run_dir: Path, openbca_path: Path | None, keep_openbca: bool = False) -> None:
     """Export the measure impact package in run_dir to OpenBCA, run it, print results."""
     import json
     import subprocess
@@ -1115,7 +1134,17 @@ def _cost_tests(run_dir: Path, openbca_path: Path | None) -> None:
     if (effect.abs() > 0.005).any():
         typer.echo("  If OpenBCA discounted annual cost fields at each test's rate, net benefits would change by: "
                    + ", ".join(f"{t} {'+' if v >= 0 else '-'}${abs(v):,.2f}" for t, v in effect.items() if abs(v) > 0.005))
-    typer.echo(f"  Wrote {out / 'cost_tests.csv'}; OpenBCA's own outputs are in {out}/<test>/output/")
+    from der_opt.results.summary import update_summary
+
+    update_summary(run_dir, cost_tests=table)
+    if keep_openbca:
+        typer.echo(f"  Wrote {out / 'cost_tests.csv'}; OpenBCA's own outputs are in {out}/<test>/output/")
+        return
+    from der_opt.cost_test.openbca import remove_working_files
+
+    freed = remove_working_files(exported)
+    typer.echo(f"  Wrote {out / 'cost_tests.csv'}; OpenBCA's results are in {out}/<test>/output/ "
+               f"(its working files, {freed / 1e6:,.0f} MB, were removed; --keep-openbca keeps them)")
 
 
 @app.command()
@@ -1123,11 +1152,13 @@ def openbca(
     run_dir: Path = typer.Argument(..., help="A `der-opt run -o` folder with a measure_impacts/ package"),
     openbca_path: Path | None = typer.Option(
         None, "--openbca", help="An OpenBCA checkout (default: the one `der-opt setup openbca` set up)"),
+    keep_openbca: bool = typer.Option(
+        False, "--keep-openbca", help="Keep OpenBCA's working files (about 36 MB a test), not only its results"),
 ) -> None:
     """Run the cost tests in OpenBCA from a measure impact package (docs/COST_TEST_SPEC.md):
     writes OpenBCA's input tables for each test, runs OpenBCA's core on them, and reports
     OpenBCA's results next to an SPM-convention re-tally of the same values."""
-    _cost_tests(run_dir, openbca_path)
+    _cost_tests(run_dir, openbca_path, keep_openbca)
 
 
 convert_app = typer.Typer(help="Convert input files to the current input data spec")

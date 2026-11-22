@@ -361,6 +361,34 @@ def run_openbca(exported: list[ExportedTest], openbca_dir: str | Path, runner: P
                                + (result.stderr or result.stdout)[-2000:])
 
 
+# what each test folder keeps once OpenBCA has run: its settings, its results and its log
+KEPT = ("test.json", "output/jst_ratio.csv", "output/streams.csv", "output/results_summary_by_id.csv",
+        "output/openbca.log")
+
+
+def remove_working_files(exported: list[ExportedTest]) -> int:
+    """Deletes what OpenBCA needed to run but a reader doesn't: its copy of the inputs
+    (the avoided-cost series alone is ~27 MB a test), its database and its project
+    cache. The results, settings and log stay; `export_openbca` on the run's
+    measure_impacts/ writes the inputs again. Returns the bytes freed."""
+    import shutil
+
+    freed = 0
+    for item in exported:
+        folder = Path(item.folder)
+        for path in sorted(folder.rglob("*"), reverse=True):  # files before their folders
+            relative = path.relative_to(folder).as_posix()
+            if path.is_file() and relative not in KEPT:
+                freed += path.stat().st_size
+                path.unlink()
+            elif path.is_dir() and not any(path.iterdir()):
+                path.rmdir()
+        cache = folder / "input_project" / ".cache"
+        if cache.exists():
+            shutil.rmtree(cache)
+    return freed
+
+
 def tally(exported: list[ExportedTest]) -> pd.DataFrame:
     """Per test: OpenBCA's own totals and ratio, and the SPM-convention re-tally of the
     same streams, where each stream counts by its sign: a positive present value is a
