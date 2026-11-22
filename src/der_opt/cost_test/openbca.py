@@ -1,13 +1,13 @@
 """The OpenBCA export (docs/COST_TEST_SPEC.md v1.1, section 3): from a measure impact
 package and its avoided cost set, OpenBCA's input tables for each test, run through
-OpenBCA's own core (its "integrated" pathway), plus an SPM-convention re-tally.
+OpenBCA's own core (its "integrated" pathway). The results are OpenBCA's own.
 
 Mapping, tested against OpenBCA commit 7e13b36:
   - one OpenBCA configuration per test: cost treatment PCT, RIM, CA TRC (TRC), USI
     (PAC), USI + Non-USI (SCT); its own discount rate; its own stream inclusion
   - two measure rows: `<id>` carries the hours the measure lowers load plus all costs,
     capacity, bills and incentives; `<id>-increases` carries only the hours it raises
-    load, so the re-tally can count them as costs (OpenBCA itself nets them)
+    load, so they can be read on their own in OpenBCA's streams (its totals net them)
   - energy: a dimensioned ELECTRIC load shape in standard time, Feb 29 dropped;
     avoided costs re-dated to the analysis year's calendar by month, day and hour
   - DR capacity: "Peak Capacity - Annual" streams, one per capacity component; the
@@ -390,19 +390,15 @@ def remove_working_files(exported: list[ExportedTest]) -> int:
 
 
 def tally(exported: list[ExportedTest]) -> pd.DataFrame:
-    """Per test: OpenBCA's own totals and ratio, and the SPM-convention re-tally of the
-    same streams, where each stream counts by its sign: a positive present value is a
-    benefit, a negative one a cost. That moves load increases and RIM's lost revenue to
-    costs, and a participant's incentive (positive in PCT) to benefits. Every dollar
-    comes from OpenBCA; only the classification differs."""
+    """Per test: OpenBCA's own totals, net benefits and ratio (jst_ratio.csv), as it
+    reports them, and how net benefits would change if it discounted annual costs."""
     rows = []
     for item in exported:
         out = item.folder / "output"
-        ratio = pd.read_csv(out / "jst_ratio.csv").iloc[0].fillna(0.0)
+        # as OpenBCA reports them: a figure it leaves blank stays blank (NaN), and its costs
+        # come signed as costs are negative, so they're flipped to read as positive
+        reported = pd.read_csv(out / "jst_ratio.csv").iloc[0]
         streams = pd.read_csv(out / "streams.csv")
-        pv = streams.groupby(["id", "impact_category", "value_stream"])["present_value"].sum().fillna(0.0)
-        benefits, costs = float(pv[pv > 0].sum()), float(-pv[pv < 0].sum())
-        openbca_benefits, openbca_costs = float(ratio["total_benefits"]), float(-ratio["total_costs"])
         # OpenBCA leaves annual cost fields undiscounted (its convention, kept by decision
         # 2026-11-20): how net benefits would change if they were discounted at the test's
         # rate (they carry their sign: a cost in RIM, a participant benefit in PCT)
@@ -412,10 +408,10 @@ def tally(exported: list[ExportedTest]) -> pd.DataFrame:
         annual = streams[streams["value_stream"].str.endswith("_annual_dollar_per_year")
                          & streams["impact_category"].isin(COST_CATEGORIES)]["present_value"].fillna(0.0).sum()
         rows.append({
-            "test": item.test, "openbca_benefits": openbca_benefits, "openbca_costs": openbca_costs,
+            "test": item.test, "openbca_benefits": float(reported["total_benefits"]),
+            "openbca_costs": float(-reported["total_costs"]),
             "net_change_if_annual_discounted": float(-annual * (1 - annuity)),
-            "net_benefits": openbca_benefits - openbca_costs,
-            "openbca_ratio": openbca_benefits / openbca_costs if openbca_costs > 0 else np.nan,
-            "spm_benefits": benefits, "spm_costs": costs, "spm_ratio": benefits / costs if costs > 0 else np.nan,
+            "net_benefits": float(reported["net_benefits"]),
+            "openbca_ratio": float(reported["jst_ratio"]),
         })
     return pd.DataFrame(rows)

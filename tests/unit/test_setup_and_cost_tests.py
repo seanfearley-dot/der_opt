@@ -104,4 +104,4 @@ def test_one_command_runs_the_cost_tests(tmp_path):
     result = runner.invoke(app, ["run", str(REPO / "examples/scenarios/dr_battery_annual.yaml"), "--cost-tests",
                                  "--openbca", os.environ["OPENBCA_DIR"], "-o", str(out)])
     assert result.exit_code == 0, result.output
-    assert "SPM convention" in result.output and (out / "openbca" / "cost_tests.csv").exists()
+    assert "Present values in $" in result.output and "SPM" not in result.output and (out / "openbca" / "cost_tests.csv").exists()

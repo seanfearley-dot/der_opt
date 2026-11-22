@@ -111,7 +111,7 @@ sequenceDiagram
         OB-->>T: results, streams
     end
     CLI->>T: read results
-    Note over CLI: OpenBCA totals, unchanged<br/>SPM re-tally by sign<br/>net if annual costs discounted
+    Note over CLI: OpenBCA results, unchanged<br/>net if annual costs discounted
     CLI->>T: cost_tests.csv
     CLI-->>U: results and notes
 ```

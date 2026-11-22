@@ -807,10 +807,9 @@ der-opt openbca out/dr_battery_annual                                          #
 
 This writes OpenBCA's input tables for each test into `out/dr/openbca/<test>/` (CSV,
 readable). It runs OpenBCA's own core on them, through its table ("integrated") pathway,
-and prints each test's OpenBCA totals and ratio. Next to them goes an SPM-convention
-re-tally of the same values, where each stream counts by its sign, so load increases and
-lost revenue are costs and a participant's incentive is a benefit. `cost_tests.csv` has
-both. Once the tests are tallied, each test's folder keeps its settings, OpenBCA's result
+and prints each test's benefits, costs, net benefits and ratio, as OpenBCA reports them.
+`cost_tests.csv` has them, with how net benefits would change if OpenBCA discounted annual
+cost fields. Once the tests are tallied, each test's folder keeps its settings, OpenBCA's result
 CSVs and its log; OpenBCA's copy of the inputs and its database (about 36 MB a test) are
 deleted unless you pass `--keep-openbca`.
 

@@ -106,7 +106,7 @@ def test_trc_and_rim_lead_the_summary(tmp_path):
     summary = {"name": "home", "time_grid": {"start": "2026-01-01T00:00:00", "end": "2027-01-01T00:00:00", "steps": 8760,
                                              "resolution_minutes": 60},
                "costs": {"optimal": {"bill": 10.0, "total": 10.0}}, "devices": [], "checks": {},
-               "cost_tests": [{"test": t, "openbca_ratio": r, "net_benefits": n, "spm_ratio": r}
+               "cost_tests": [{"test": t, "openbca_ratio": r, "net_benefits": n}
                               for t, r, n in (("PCT", 2.0, 5), ("RIM", 0.8, -30), ("TRC", 1.4, 200), ("PAC", 1.1, 9))]}
     text = scenario.build(tmp_path, summary).render("x.js")
     summary_section = text[text.index('<section id="summary">'):text.index("</section>")]

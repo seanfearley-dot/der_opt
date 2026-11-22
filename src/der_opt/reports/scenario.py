@@ -63,7 +63,7 @@ def build(folder: Path, summary: dict, page: Page | None = None) -> Page:
             continue
         ratio = test.get("openbca_ratio")
         featured.append(Card(f"{name} ratio · {title}", number(ratio),
-                             f"net benefits {money(test.get('net_benefits'), 0)} · SPM convention {number(test.get('spm_ratio'))}",
+                             f"OpenBCA · net benefits {money(test.get('net_benefits'), 0)}",
                              ("good" if (ratio or 0) >= 1 else "bad") + " feature"))
     cards = featured + cards  # the cost tests lead the panel
     page.cards(top, cards)
@@ -251,22 +251,20 @@ def _cost_tests(page: Page, summary: dict) -> None:
         return
     section = page.section("cost-tests", "Cost tests")
     frame = pd.DataFrame(tests)
+    frame = frame.drop(columns=[c for c in frame.columns if c.startswith("spm_")])  # folders written before 2026-11-22
     page.chart(section, [
         {"type": "bar", "name": "OpenBCA ratio", "x": frame["test"].tolist(), "y": _round(frame["openbca_ratio"], 3),
-         "marker": {"color": OPTIMAL}},
-        {"type": "bar", "name": "SPM-convention ratio", "x": frame["test"].tolist(), "y": _round(frame["spm_ratio"], 3),
-         "marker": {"color": COUNTERFACTUAL}}],
+         "marker": {"color": OPTIMAL}}],
         {"barmode": "group", "yaxis": {"title": "benefit-cost ratio"}, "hovermode": "closest",
          "shapes": [{"type": "line", "xref": "paper", "x0": 0, "x1": 1, "y0": 1, "y1": 1,
                      "line": {"dash": "dot", "width": 1}}]}, height=300)
     shown = frame.rename(columns={"openbca_benefits": "benefits", "openbca_costs": "costs", "openbca_ratio": "ratio",
-                                  "net_benefits": "net benefits", "spm_benefits": "SPM benefits", "spm_costs": "SPM costs",
-                                  "spm_ratio": "SPM ratio",
+                                  "net_benefits": "net benefits",
                                   "net_change_if_annual_discounted": "net change if annual costs discounted"})
-    page.table(section, shown, formats={c: money for c in ("benefits", "costs", "net benefits", "SPM benefits",
-                                                           "SPM costs", "net change if annual costs discounted")})
-    page.text(section, "Present values in $. OpenBCA's totals, then an SPM-convention re-tally of the same streams "
-                       "(each counted by its sign).")
+    page.table(section, shown, formats={c: money for c in ("benefits", "costs", "net benefits",
+                                                           "net change if annual costs discounted")})
+    page.text(section, "Present values in $, OpenBCA's results as it reports them. The last column is how net "
+                       "benefits would change if OpenBCA discounted annual cost fields (it doesn't).")
 
 
 def _bills(page: Page, summary: dict) -> None:

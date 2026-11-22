@@ -1,9 +1,11 @@
 # der-opt measure impact export specification (for cost tests)
 
-**Version 1.1 — approved 2026-11-20.** Implemented: the impact package and the OpenBCA
+**Version 1.2 — approved 2026-11-22.** Implemented: the impact package and the OpenBCA
 export (`der_opt.cost_test`, `der-opt openbca`). Change it only by a new
-version, approved the same way. (1.1 switches the export from Excel templates to
-OpenBCA's input tables; 1.0 approved 2026-11-20; drafts 0.1-0.3 led to 1.0.)
+version, approved the same way. (1.2 drops der-opt's re-tally of OpenBCA's streams and
+reports OpenBCA's results alone, its own ratio included; 1.1 switched the export from
+Excel templates to OpenBCA's input tables; 1.0 approved 2026-11-20; drafts 0.1-0.3 led
+to 1.0.)
 
 ## Division of labor
 
@@ -67,8 +69,8 @@ Two things in how OpenBCA scores a run matter here:
 - **Only four categories count as costs:** admin, utility incentive, measure cost and tax
   incentive. Everything else is a benefit, so **negative streams are netted into
   benefits**. That covers increased supply costs, bill increases, and RIM's lost
-  revenue. Net benefits are unaffected, but **benefit-cost ratios differ from the SPM's
-  convention**.
+  revenue. Counting them as costs instead would leave net benefits the same and change
+  the ratios. der-opt reports OpenBCA's classification as it is (decision, 2026-11-22).
 - **Possible upstream bug:** the tax-incentive rows list `USI + Non-USI` twice (factors 0
   and −1) and have no `USI` row. The effect looks correct (0 contributes nothing), but
   it's worth reporting to the maintainers.
@@ -92,10 +94,8 @@ Two things in how OpenBCA scores a run matter here:
   it per test.
 - **Costs:** `incremental_cost_*` for measure costs, `admin_cost_*` for admin, and
   `host_customer_tax_incentive_upfront_dollar` for tax credits.
-- **Results:** OpenBCA's own output. der-opt also re-tallies OpenBCA's per-stream values
-  (`final_value_calculations_ts`) with **negative streams counted as costs**, to give
-  SPM-convention benefit-cost ratios next to OpenBCA's. The values all come from
-  OpenBCA; only the classification differs.
+- **Results:** OpenBCA's own output: each test's benefits, costs, net benefits and
+  ratio, from its `jst_ratio.csv`, as it reports them.
 
 ### What implementing the export found (OpenBCA 7e13b36)
 
@@ -107,8 +107,8 @@ Two things in how OpenBCA scores a run matter here:
   therefore in MWh.
 - **Annual cost fields aren't discounted.** OpenBCA's core leaves the discount factor
   off annual admin, O&M and utility incentives ("costs are accrued on an ongoing
-  basis"). Benefits are discounted, so measures with ongoing costs score lower than the
-  SPM would score them. **Decision (2026-11-20): keep OpenBCA's convention.** Every
+  basis"). Benefits are discounted, so measures with ongoing costs score lower than they
+  would with every stream discounted. **Decision (2026-11-20): keep OpenBCA's convention.** Every
   export notes it and reports, per test, how net benefits would change if annual cost
   fields were discounted at that test's rate (`net_change_if_annual_discounted`).
 - **Load increases on their own row.** The measure is exported as two OpenBCA rows: the
@@ -161,9 +161,10 @@ sweeps and quick comparisons without a round trip through OpenBCA (decision 1).
   commit and rechecked when OpenBCA changes.
 - **Tax credits:** OpenBCA's cost-treatment setting decides their treatment.
 - **Later-year bills:** escalated, carried as a custom stream.
-- **Negative streams:** OpenBCA's values and ratios. der-opt also re-tallies OpenBCA's
-  per-stream output with negative streams (load increases, bill increases, lost revenue)
-  counted as costs, giving SPM-convention ratios alongside.
+- **Negative streams:** OpenBCA's values and ratios, as it reports them. (Until 1.2,
+  der-opt also re-tallied OpenBCA's streams with negative streams counted as costs and
+  showed those ratios alongside, labeled "SPM convention". Dropped 2026-11-22: der-opt
+  relies on OpenBCA.)
 - **Impact degradation:** 0 for now.
 - **First-year screening values:** der-opt keeps them, labeled as screening, not test
   results.

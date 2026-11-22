@@ -129,7 +129,10 @@ def test_openbca_gets_absolute_paths_when_called_with_relative_ones(exported, ru
 def test_openbca_runs_and_reconciles(exported, run_dir):
     run_openbca(exported, OPENBCA_DIR, run_dir / "openbca" / "run_core.py")
     table = tally(exported).set_index("test")
-    assert table.loc["PCT", "spm_benefits"] > 0  # the DR incentive, a participant benefit
+    for test in table.index:  # OpenBCA's own figures, as it reports them
+        own = pd.read_csv(run_dir / "openbca" / test / "output" / "jst_ratio.csv").iloc[0]
+        assert table.loc[test, "openbca_ratio"] == pytest.approx(own["jst_ratio"], nan_ok=True)
+        assert table.loc[test, "net_benefits"] == pytest.approx(own["net_benefits"], nan_ok=True)
     # PAC counts 10 x $15 admin and 10 x the DR incentive undiscounted; at 7.5% they'd be
     # worth 7.38/10 as much
     annual = 10 * 15 + 10 * yaml.safe_load((run_dir / "measure_impacts" / "measure.yaml").read_text(

@@ -29,8 +29,8 @@ By kind:
   counterfactual by value stream, with totals, and `value_of_optimization`),
   `counterfactual_policies`, `bills` (each run's bill summary), `dr` (the DR summary and
   capacity by month), `screening` (the avoided cost set, the reference, and values by
-  category and part), and `cost_tests` (each test's OpenBCA and SPM-convention
-  benefits, costs, ratio and net benefits) once they've run.
+  category and part), and `cost_tests` (each test's benefits, costs, ratio and net
+  benefits, as OpenBCA reports them) once they've run.
 - **`feeder`:** `premises`, `elements`, `mix` (premises and devices by element),
   `background`, `runs` (total, customer bills, degradation and network costs per run),
   `loading` (per run and element: peak, its time, % of rating, hours and kWh over),
@@ -72,10 +72,10 @@ folder's `summary.json` and CSVs.
 
 What each page shows:
 - **Single home:** headline cards (optimal and counterfactual cost, value of
-  optimization, bills, DR incentive, TRC and PAC ratios); the value breakdown; the meter
+  optimization, bills, DR incentive, TRC and RIM ratios, leading the panel); the value breakdown; the meter
   and each device's power and stored energy (counterfactual dotted); where optimization
   moved load, by hour and day; energy by month; DR capacity by month and the events;
-  screening values; cost tests (ratios, both conventions); bills; checks; every setting
+  screening values; cost tests (OpenBCA's results); bills; checks; every setting
   with its source.
 - **Feeder:** cards (costs by run, network saving, who pays more); premises by element;
   costs by run; peak flow by element and run, and each element's flow over time with
