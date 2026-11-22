@@ -131,6 +131,18 @@ Files written with `-o`:
 State columns (`soc`, `temp`) are the value at the **start** of each period in both
 the optimal and counterfactual CSVs.
 
+### The local app: `der-opt ui`
+
+```bash
+der-opt ui          # this folder's scenarios, studies and runs, at http://localhost:8700/
+```
+
+It lists every scenario and study file and every run under `out/`. For a file it has an
+editor that checks as it saves, the population with each setting's source, a preview of
+which premises a `where` selector picks, the merged file, and a run queue whose logs
+stream in and whose reports open in place. It works on the files themselves, on this
+machine only ([docs/REPORTS.md](docs/REPORTS.md) section 3).
+
 ### Starting a scenario, and checking it before a long solve
 
 The quickest start is to pick blocks from a library:

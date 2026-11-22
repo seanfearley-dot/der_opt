@@ -85,7 +85,36 @@ What each page shows:
   premises table, and what `add_devices` chose; checks; settings. Each run's page links
   back to the study's.
 
-## 3. `der-opt ui` (after)
+## 3. `der-opt ui` (built: first version)
 
-A local web app built around studies: a population browser, a study editor with live
-validation, a run queue, and the reports.
+```bash
+der-opt ui                 # the current folder; opens http://localhost:8700/
+der-opt ui path/to/project --port 8710 --no-open
+```
+
+A local web app on the project's own files. There's no database: what it shows is
+read from the files each time, and what it saves is the YAML you'd edit by hand.
+- **Scenarios and runs:** every scenario and study file in the project (any YAML with a
+  name and a scenario's or study's sections, including one built wholly from blocks),
+  and every run folder under `out/`, each opening its report.
+- **A file:**
+  - **Edit:** the YAML as written, saved with ⌘S / Ctrl+S, then checked;
+  - **Check:** `der-opt validate`'s findings, what it extends, and what `add_devices`
+    chose;
+  - **Population:** the premises table and every setting with its source, plus a
+    selector preview: type a `where` (as in `defaults` or `add_devices`) and see which
+    premises or devices it picks;
+  - **Merged:** the file with its blocks merged in and paths resolved;
+  - **Run:** queue it, with the output folder and `run`'s options.
+- **Run queue:** runs go one at a time, as `der-opt run` in a subprocess. Each one's
+  log streams in, and when it's done its report opens from the same server. The queue
+  lasts while the app runs; the output folders stay.
+
+Safety: it listens on 127.0.0.1 only and answers only requests naming localhost. Every
+change (save, run, cancel) carries a token from the page, so another site open in the
+browser can't drive it. Every path must be inside the project folder. It's for one
+person on their own machine; sharing it on a network would need sign-in, which isn't
+built.
+
+Not yet: building a study from blocks and templates in forms, and editing `defaults`,
+`overrides` and `add_devices` as forms rather than YAML.

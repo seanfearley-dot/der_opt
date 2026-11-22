@@ -551,6 +551,22 @@ def report(
         webbrowser.open(written[-1].resolve().as_uri())
 
 
+@app.command()
+def ui(
+    folder: Path = typer.Argument(Path("."), help="The project folder: its scenario files, and runs under out/"),
+    port: int = typer.Option(8700, help="Port on localhost"),
+    no_open: bool = typer.Option(False, "--no-open", help="Don't open a browser"),
+) -> None:
+    """The local app: browse and edit scenarios and studies, check them, preview a
+    population and its selectors, queue runs and open their reports. It runs on this
+    machine only (localhost) and works on the project's files, nothing else."""
+    from der_opt.ui import serve
+
+    if not folder.is_dir():
+        raise typer.BadParameter(f"{folder} isn't a folder")
+    serve(folder, port=port, open_browser=not no_open)
+
+
 def _print_additions(additions) -> None:
     """What each of a study's add_devices entries chose."""
     for entry in additions or []:
