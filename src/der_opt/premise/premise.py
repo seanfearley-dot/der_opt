@@ -143,10 +143,17 @@ class Premise:
         stream_cost = sum(stream.total_cost_expr(model, self) for stream in self.value_streams)
         return device_cost + stream_cost
 
+    def control_cost_expr(self, model: pyo.ConcreteModel):
+        """Costs that shape the dispatch but aren't real dollars (device smoothing):
+        in the objective, never in a reported cost. Call once per model: it adds the
+        variables it needs."""
+        return sum(device.control_cost_expr(model) for device in self.devices)
+
     def build_standalone_model(self) -> pyo.ConcreteModel:
         model = pyo.ConcreteModel()
         self.register(model)
-        model.obj = pyo.Objective(expr=self.total_cost_expr(model), sense=pyo.minimize)
+        self._control_cost = self.control_cost_expr(model)
+        model.obj = pyo.Objective(expr=self.total_cost_expr(model) + self._control_cost, sense=pyo.minimize)
         return model
 
     def solve(self, solver_config: SolverConfig | None = None):
@@ -156,5 +163,6 @@ class Premise:
         model = self.build_standalone_model()
         backend = get_solver(solver_config or SolverConfig())
         solver_result = backend.solve(model)
-        dispatch = build_dispatch_result(self, model, solver_result)
+        dispatch = build_dispatch_result(self, model, solver_result,
+                                         objective_value=pyo.value(model.obj) - pyo.value(self._control_cost))
         return dispatch, model, backend

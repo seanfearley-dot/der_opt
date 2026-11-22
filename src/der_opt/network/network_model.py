@@ -257,6 +257,7 @@ class NetworkDispatchModel:
 
         self._network_cost_expr = network_cost
         tie_break = sum(_tie_break_expr(p, self.tie_break_per_kwh_hour) for p in self.premises)
+        tie_break = tie_break + sum(p.control_cost_expr(model) for p in self.premises)  # smoothing: unreported too
         model.obj = pyo.Objective(
             expr=sum(premise.total_cost_expr(model) for premise in self.premises) + network_cost + tie_break,
             sense=pyo.minimize,
@@ -343,8 +344,8 @@ def solve_independently(
     results = {}
     for premise in premises:
         model = premise.build_standalone_model()
-        tie_break = _tie_break_expr(premise, tie_break_per_kwh_hour)
-        model.obj.expr = model.obj.expr + tie_break
+        tie_break = _tie_break_expr(premise, tie_break_per_kwh_hour) + premise._control_cost  # neither is reported
+        model.obj.expr = model.obj.expr + _tie_break_expr(premise, tie_break_per_kwh_hour)
         solver_result = get_solver(solver_config or SolverConfig()).solve(model)
         results[premise.name] = build_dispatch_result(
             premise, model, solver_result, objective_value=pyo.value(model.obj) - pyo.value(tie_break)

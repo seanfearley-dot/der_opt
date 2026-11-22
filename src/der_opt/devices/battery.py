@@ -39,6 +39,7 @@ class BatteryStorage(Device):
         soc_final_min_frac: float | None = None,
         degradation_cost_per_kwh: float = 0.0,
         charge_sources: list[SolarPV] | None = None,
+        smoothing_cost_per_kw: float = 0.0,
     ):
         super().__init__(name, time_grid)
         self.capacity_kwh = capacity_kwh
@@ -54,6 +55,7 @@ class BatteryStorage(Device):
         )
         self.degradation_cost_per_kwh = degradation_cost_per_kwh
         self.charge_sources = list(charge_sources) if charge_sources else []
+        self.smoothing_cost_per_kw = smoothing_cost_per_kw
 
     def build_vars(self, model: pyo.ConcreteModel) -> None:
         periods = self.time_grid.periods
@@ -118,6 +120,12 @@ class BatteryStorage(Device):
 
     def initial_state(self) -> dict:
         return {"soc": self.soc_init}
+
+    def control_cost_expr(self, model: pyo.ConcreteModel):
+        """`smoothing_cost_per_kw`: $ per kW of change in net power between periods,
+        which settles near-ties toward steady output. Not a real cost: left out of
+        every reported cost and value."""
+        return self._smoothing_cost(model, self.smoothing_cost_per_kw)
 
     def cost_expr(self, model: pyo.ConcreteModel, t: int):
         dt = self.time_grid.dt_hours

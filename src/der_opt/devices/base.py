@@ -54,6 +54,28 @@ class Device(ABC):
         """Any device-intrinsic cost at period t (e.g. degradation). Zero by default."""
         return 0
 
+    def control_cost_expr(self, model: pyo.ConcreteModel) -> Any:
+        """A cost that shapes the dispatch but isn't a real dollar (smoothing): it's in
+        the objective, and left out of every reported cost. Zero by default."""
+        return 0
+
+    def _smoothing_cost(self, model: pyo.ConcreteModel, cost_per_kw: float) -> Any:
+        """`cost_per_kw` x the total change in net power from each period to the next:
+        |net[t] - net[t-1]| written as an LP (one variable and two constraints per
+        period). It settles near-ties toward steady output; it isn't a cost the owner
+        pays."""
+        if not cost_per_kw:
+            return 0
+        steps = range(1, self.time_grid.horizon_steps)
+        change = pyo.Var(steps, domain=pyo.NonNegativeReals)
+        model.add_component(self._component_name("power_change"), change)
+        net = lambda t: self.net_power_expr(model, t)
+        model.add_component(self._component_name("power_change_up"),
+                            pyo.Constraint(steps, rule=lambda _m, t: change[t] >= net(t) - net(t - 1)))
+        model.add_component(self._component_name("power_change_down"),
+                            pyo.Constraint(steps, rule=lambda _m, t: change[t] >= net(t - 1) - net(t)))
+        return cost_per_kw * sum(change[t] for t in steps)
+
     def register(self, model: pyo.ConcreteModel) -> None:
         self.build_vars(model)
         self.build_constraints(model)

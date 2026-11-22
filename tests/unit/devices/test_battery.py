@@ -1,3 +1,5 @@
+import numpy as np
+import pandas as pd
 import pyomo.environ as pyo
 import pytest
 
@@ -77,3 +79,42 @@ def test_battery_degradation_cost_appears_in_realized_cost():
     model.obj = pyo.Objective(expr=battery.cost_expr(model, 0), sense=pyo.minimize)
     get_solver(SolverConfig(name="highs")).solve(model)
     assert pyo.value(model.obj) == pytest.approx(0.5 * 2.0 * 1.0)
+
+
+def _evening(smoothing: float):
+    """A full battery and an evening whose export prices zig-zag by a few cents: the
+    near-tie a smoothing cost settles."""
+    from datetime import datetime
+
+    from der_opt.premise import EnergyArbitrage, Premise
+    from der_opt.pricing.sources import ConstantPriceSeries, CSVPriceSeries
+
+    tg = TimeGrid(resolution_minutes=60, horizon_steps=6, start=datetime(2026, 8, 13, 16))
+    index = pd.DatetimeIndex(tg.timestamps())
+    export = CSVPriceSeries(pd.Series([1.015, 1.13, 1.154, 1.13, 1.154, 1.08], index=index))
+    battery = BatteryStorage("battery", tg, capacity_kwh=13.5, p_max_charge_kw=5, p_max_discharge_kw=5,
+                             soc_init_frac=1.0, smoothing_cost_per_kw=smoothing)
+    premise = Premise("home", tg, devices=[battery], external_load=[0.0] * 6, poi_limit_kw=20,
+                      value_streams=[EnergyArbitrage(ConstantPriceSeries(0.55), export, tg)])
+    dispatch, _, _ = premise.solve()
+    return dispatch
+
+
+def test_a_smoothing_cost_steadies_output_and_is_never_reported():
+    rough, smooth = _evening(0.0), _evening(0.05)
+    def wiggle(d):
+        return float(np.abs(np.diff(d.device_dispatch["battery.net_power"].to_numpy())).sum())
+    assert wiggle(smooth) < wiggle(rough) - 1.0
+    # the reported objective is the real money only: no smoothing in it
+    revenue = (smooth.grid_export * pd.Series([1.015, 1.13, 1.154, 1.13, 1.154, 1.08], index=smooth.grid_export.index)
+               ).sum() - 0.55 * smooth.grid_import.sum()
+    assert smooth.objective_value == pytest.approx(-revenue, abs=1e-6)
+    assert "battery.power_change" not in smooth.device_dispatch.columns
+
+
+def test_no_smoothing_adds_nothing_to_the_model():
+    tg = TimeGrid(resolution_minutes=60, horizon_steps=4)
+    model = pyo.ConcreteModel()
+    battery = BatteryStorage("battery", tg, capacity_kwh=10, p_max_charge_kw=5, p_max_discharge_kw=5)
+    battery.register(model)
+    assert battery.control_cost_expr(model) == 0 and not hasattr(model, "battery_power_change")

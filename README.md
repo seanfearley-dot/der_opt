@@ -296,10 +296,16 @@ A template's counterfactual policy gives the scenario a counterfactual run.
 | `type` | Required params | Optional params (default) |
 |---|---|---|
 | `solar` | `available_kw` *array* | — |
-| `battery` | `capacity_kwh`, `p_max_charge_kw`, `p_max_discharge_kw` | `eta_charge` (0.95), `eta_discharge` (0.95), `soc_min_frac` (0), `soc_max_frac` (1), `soc_init_frac` (0.5), `soc_final_min_frac`, `degradation_cost_per_kwh` (0), `charge_sources` |
-| `ev_v2x` | `capacity_kwh`, `p_max_charge_kw`, `p_max_discharge_kw`, and either `pattern` (a daily pattern, below) or `connected` *array* (0/1 plug-in schedule) | same SOC/efficiency/degradation params as battery, plus `departure_period` (int or list; default: every step where `connected` goes from 1 to 0), `soc_departure_min_frac` (float or list), `charge_sources`, `driving_kwh` *array* (kWh used driving each period; without it SOC is frozen while away) |
+| `battery` | `capacity_kwh`, `p_max_charge_kw`, `p_max_discharge_kw` | `eta_charge` (0.95), `eta_discharge` (0.95), `soc_min_frac` (0), `soc_max_frac` (1), `soc_init_frac` (0.5), `soc_final_min_frac`, `degradation_cost_per_kwh` (0), `charge_sources`, `smoothing_cost_per_kw` (0) |
+| `ev_v2x` | `capacity_kwh`, `p_max_charge_kw`, `p_max_discharge_kw`, and either `pattern` (a daily pattern, below) or `connected` *array* (0/1 plug-in schedule) | same SOC/efficiency/degradation params as battery, plus `departure_period` (int or list; default: every step where `connected` goes from 1 to 0), `soc_departure_min_frac` (float or list), `charge_sources`, `smoothing_cost_per_kw`, `driving_kwh` *array* (kWh used driving each period; without it SOC is frozen while away) |
 | `thermostat` | `thermal_resistance_r`, `thermal_capacitance_c`, `ambient_temp_c` *array*, `comfort_min_c`, `comfort_max_c`, `cop`, `p_max_kw`, `initial_temp_c` | `mode` (`cooling` / `heating`) |
 | `curtailable_load` | `baseline_load_kw` *array*, `block_size_kw`, `max_blocks` | — |
+
+`smoothing_cost_per_kw` is $ per kW of change in a battery's (or V2X EV's) power from one
+step to the next. It settles near-ties toward steady output: without it, the optimizer
+will swing the battery hour to hour to catch a cent's difference in price. It steers the
+dispatch only and is left out of every reported cost and value. A large value makes runs
+with on/off variables (`exclusive_import_export`, DR) much slower.
 
 - **Meter limits.** `import_limit_kw` and `export_limit_kw` are separate because they
   usually differ: import is the service rating, export what the interconnection allows.
