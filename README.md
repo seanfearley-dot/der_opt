@@ -984,6 +984,68 @@ together 95%. The evening price signal and the DR events, each alone, *add* $95 
 network cost: participants move charging to just after the window, which makes a new
 peak on tx_1.
 
+## Studies: a population and its analyses
+
+A study keeps the population (who the premises are and what they have) apart from the
+analyses run on it ([docs/POPULATION_MODEL_SPEC.md](docs/POPULATION_MODEL_SPEC.md)).
+`der-opt run` and `der-opt validate` recognize a study by its `population` section:
+
+```yaml
+name: two_homes
+time_grid: {resolution_minutes: 60, horizon_steps: 8760, start: "2026-01-01T00:00:00"}
+population:
+  premises: data/premises.csv                # premise_id, element_id, customer_class, tariff, tags...
+  devices: data/devices.csv                  # premise_id, device_id, type, template, kw, kwh, installed_cost...
+  timeseries: [data/timeseries.csv]
+  templates: [../library/devices]            # default: the library's devices/
+tariffs: {dir: ../data/tariffs, programs: {nbt: {...}}}
+objective: bill                              # or a list of value streams; each premise's own optimization
+defaults:                                    # applied in order; a later one wins
+  - set: {premise: {poi_limit_kw: 20}}       # no `where`: every premise
+  - where: {type: battery}                   # device keys: type, template, device_id
+    set: {device: {counterfactual: {type: self_consumption}}}
+  - where: {type: battery, segment: late}    # premise columns and tags; a list means any of
+    set: {device: {degradation_cost_per_kwh: 0.03}}
+overrides:                                   # one premise or device; beats every default
+  home_a/battery: {device: {installed_cost: 9000, eta_charge: 0.9}}
+  home_b: {premise: {participant_upfront: 250}}
+analyses:
+  feeder:                                    # every premise on one network
+    elements: [{name: tx, rating_kw: 12}]    # or population.network
+    coordination: {envelopes: {}}
+  portfolio:                                 # each selected premise on its own
+    select: {segment: late}                  # default: every premise
+    measure: {type: [battery]}               # the devices DR's R3 and the cost tests remove
+    dr: {program: {...}, events: {...}}      # customer_class comes from each premise
+    avoided_costs: {set: ../data/avoided_costs/synthetic_2026}
+    cost_test: {...}                         # needs a run covering a whole calendar year
+```
+
+Precedence, lowest to highest: built-in defaults, the device's template, the study's
+`defaults`, the population row, then `overrides`. A device's `installed_cost` and
+`annual_om` come from its row, a default or an override. In the portfolio, a premise's
+participant cost is the cost test's base, plus its measure devices' costs, plus its own
+`participant_upfront` / `participant_annual_om`. `validate` reports every problem by
+premise before anything is solved: an override of a premise or device that isn't there,
+a parameter a device doesn't have, a counterfactual that doesn't fit its device (a
+`self_consumption` solar), DR without a premise's `customer_class`, and cost tests on
+less than a year.
+
+`der-opt run study.yaml -o out/` writes:
+- `premises.csv` and `device_parameters.csv`: what every premise resolved to, and where
+  each setting came from;
+- `feeder/`: the feeder analysis's outputs, as a feeder scenario writes them;
+- `portfolio/<premise_id>/`: each premise's scenario.yaml and its outputs, as a
+  single-home run writes them (report.txt holds what it printed);
+- `portfolio/portfolio.csv`: one row per premise (costs, bills, DR incentive and counted
+  kW, screening values, cost-test ratios and net benefits) and a total row (sums; ratios
+  aren't summed);
+- `run_record.json`.
+
+A premise that fails in the portfolio is reported and the rest still run (exit code 1).
+A one-premise study of the `dr_battery_annual` home gives that example's results exactly,
+cost tests included.
+
 ## Modeling caveats worth knowing
 
 These all came up while building the examples — each produced a plausible-looking but

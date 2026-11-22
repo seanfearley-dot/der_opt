@@ -29,7 +29,13 @@ class Validation:
     composed: ComposedScenario | None = None
     config: object | None = None  # ScenarioConfig or FeederScenarioConfig
     premise: object | None = None  # the built Premise (single-premise scenarios)
-    feeder: object | None = None  # the built FeederScenario
+    feeder: object | None = None  # the built FeederScenario (a feeder scenario, or a study's feeder analysis)
+    resolved: list | None = None  # a study's resolved premises
+    portfolio: list | None = None  # a study's portfolio premises (population.portfolio.PortfolioPremise)
+
+    @property
+    def is_study(self) -> bool:
+        return self.composed is not None and "population" in self.composed.data
 
     @property
     def ok(self) -> bool:
@@ -37,7 +43,7 @@ class Validation:
 
     @property
     def is_feeder(self) -> bool:
-        return self.composed is not None and "feeder" in self.composed.data
+        return self.composed is not None and "feeder" in self.composed.data and not self.is_study
 
     def fail(self, check: str, message: str) -> None:
         self.report.ran(check, [Finding("error", check, message)])
@@ -92,7 +98,7 @@ def _spec_files(data) -> list[tuple[str, str | None, str | None]]:
     for _, _, value in _walk(data):
         if isinstance(value, dict) and "timeseries" in (value.get("source"), value.get("type")) and value.get("path"):
             files.append((value["path"], None, None))
-    pdata = data.get("premise_data")
+    pdata = data.get("premise_data") or data.get("population")
     if isinstance(pdata, dict):
         premises, network = pdata.get("premises"), pdata.get("network")
         for ts in pdata.get("timeseries") or []:
@@ -208,6 +214,16 @@ def _check_cost_test(v: Validation, cost_tests: bool, check_openbca: bool, openb
         return
     level = "error" if cost_tests else "warning"
     found = []
+    if v.premise is not None:  # the measure impact package is for whole calendar years
+        import pandas as pd
+
+        index = pd.DatetimeIndex(v.premise.time_grid.timestamps())
+        year = index[0].year
+        whole = pd.date_range(f"{year}-01-01", f"{year + 1}-01-01", freq=f"{v.premise.time_grid.resolution_minutes}min",
+                              inclusive="left")
+        if len(index) != len(whole) or index[0] != whole[0]:
+            found.append(Finding("error", "cost test", f"cost_test needs a run covering all of {year} "
+                                 f"(this one covers {index[0]} to {index[-1]})"))
     if v.config.cost_test.discount_rates is None:
         found.append(Finding(level, "cost test", "cost_test.discount_rates (utility, participant, societal) are "
                              "needed to run the cost tests in OpenBCA"))
@@ -217,6 +233,89 @@ def _check_cost_test(v: Validation, cost_tests: bool, check_openbca: bool, openb
     except FileNotFoundError as exc:
         found.append(Finding(level, "cost test", f"{exc} (needed for --cost-tests and `der-opt openbca`)"))
     v.report.ran("cost test", found)
+
+
+def _population_findings(exc) -> list[Finding]:
+    return [Finding("error", "population", problem.split(": ", 1)[-1], premise=problem.split(": ", 1)[0])
+            for problem in exc.problems]
+
+
+def _validate_study(v: Validation, cost_tests: bool, before_run: bool, openbca=None) -> None:
+    """A study: its population, its feeder analysis built in full, and each portfolio
+    premise built with its DR calendar and cost-test settings (section 4a)."""
+    from der_opt.coordination.study import check_coordination
+    from der_opt.population.compile import PopulationError, resolve_study
+    from der_opt.population.portfolio import portfolio_premises
+    from der_opt.population.report import population_problems
+    from der_opt.scenarios.feeder import feeder_from_study
+    from der_opt.scenarios.loader import build_premise
+
+    study = v.config
+    try:
+        with collect_data_warnings(v.report):
+            v.resolved, _, _ = resolve_study(study)
+            problems = population_problems(v.resolved)
+            if problems:
+                raise PopulationError(problems)
+    except PopulationError as exc:
+        v.report.ran("population", _population_findings(exc))
+        return
+    v.report.ran("population")
+    if study.analyses.feeder is not None:
+        try:
+            with collect_data_warnings(v.report):
+                v.feeder = feeder_from_study(study)
+        except PopulationError as exc:
+            v.report.ran("feeder analysis", _population_findings(exc))
+        except Exception as exc:  # noqa: BLE001 -- anything the build rejects is a study error
+            v.fail("feeder analysis", f"{type(exc).__name__}: {exc}")
+        else:
+            v.report.ran("feeder analysis", check_coordination(v.feeder))
+    if study.analyses.portfolio is None:
+        return
+    premises, problems = portfolio_premises(study, v.resolved)
+    v.portfolio = premises
+    found = [Finding("error", "portfolio", p.split(": ", 1)[-1], premise=p.split(": ", 1)[0]) for p in problems]
+    for item in premises:
+        if item.config is None:
+            found.append(Finding("info", "portfolio", item.note, premise=item.premise_id))
+            continue
+        sub = Validation(v.path, config=item.config, composed=v.composed)
+        try:
+            with collect_data_warnings(sub.report):
+                sub.premise = build_premise(item.config)
+        except Exception as exc:  # noqa: BLE001
+            found.append(Finding("error", "portfolio", f"{type(exc).__name__}: {exc}", premise=item.premise_id))
+            continue
+        _check_billing(sub)
+        _check_dr(sub)
+        _check_cost_test(sub, cost_tests, check_openbca=False)
+        cost = item.config.cost_test
+        if cost is not None and cost.participant_costs.upfront == 0 and cost.participant_costs.annual_om == 0:
+            found.append(Finding("warning", "portfolio", "the measure has no participant costs (no installed_cost "
+                                 "or participant_upfront): it's priced at $0", premise=item.premise_id))
+        found += [Finding(f.level, f.check, f.message, premise=item.premise_id) for f in sub.report.findings
+                  if f.level != "info"]
+    v.report.ran("portfolio", found)
+    first = next((item.config for item in premises if item.config is not None), None)
+    if first is not None:
+        sub = Validation(v.path, config=first, composed=v.composed)
+        _check_avoided_costs(sub)  # the set is the study's: once is enough
+        v.report.extend(sub.report)
+        if first.cost_test is not None:
+            _check_cost_test_openbca(v, cost_tests, before_run, openbca)
+
+
+def _check_cost_test_openbca(v: Validation, cost_tests: bool, before_run: bool, openbca=None) -> None:
+    from der_opt.settings import openbca_dir
+
+    if not (cost_tests or not before_run):
+        return
+    try:
+        openbca_dir(openbca)
+    except FileNotFoundError as exc:
+        level = "error" if cost_tests else "warning"
+        v.report.ran("cost test", [Finding(level, "cost test", f"{exc} (needed for --cost-tests)")])
 
 
 def validate_scenario(path: str | Path, cost_tests: bool = False, build: bool = True,
@@ -245,7 +344,9 @@ def validate_scenario(path: str | Path, cost_tests: bool = False, build: bool = 
     if placeholders:
         return v
 
-    schema = FeederScenarioConfig if v.is_feeder else ScenarioConfig
+    from der_opt.scenarios.schema import StudyConfig
+
+    schema = StudyConfig if v.is_study else FeederScenarioConfig if v.is_feeder else ScenarioConfig
     try:
         v.config = schema.model_validate(v.composed.data)
     except ValidationError as exc:
@@ -260,6 +361,10 @@ def validate_scenario(path: str | Path, cost_tests: bool = False, build: bool = 
     if missing:
         return v
     _check_spec_files(v, quality=not before_run)
+    if v.is_study:
+        if not v.report.errors and build:
+            _validate_study(v, cost_tests, before_run, openbca)
+        return v
     if not v.is_feeder:
         _check_avoided_costs(v)
         _check_devices(v)

@@ -15,11 +15,18 @@
   - `validate` reporting every population problem by premise, and writing
     `premises.csv` and `device_parameters.csv` (`--population`);
   - `der-opt convert premises`. Converted v1.1 files build identical premises.
-- **Phases 3-4, to come:**
-  - phase 3: studies (population and analyses in separate files), study defaults with
-    `where` selectors and overrides, and the portfolio analysis with measure selectors
-    and costs (section 4a's D and T checks come with it);
-  - phase 4: `add_devices`, migration and warnings on old names.
+- **Phase 3, done:** studies. A study file holds the population (its files), the
+  objective, `defaults` with `where` selectors, `overrides` by premise or
+  premise/device, and the analyses:
+  - the feeder analysis, on every premise;
+  - the portfolio analysis: each selected premise on its own, with its measure picked by
+    a device selector, DR (customer_class from the premise), screening values and cost
+    tests (participant costs from the base, the measure devices and the premise), and a
+    summary table;
+  - section 4a's D and T checks in `validate`, plus a counterfactual fitting its device.
+  A one-premise study of the `dr_battery_annual` home gives identical results, cost tests
+  included.
+- **Phase 4, to come:** `add_devices`, migration and warnings on old names.
 - v0.2: what each analysis needs, checked by `validate` (section 4a). Also covers premises
 without load, series from data sources, background load, per-premise measure costs,
 measures selected by type, and any premise setting as a column.

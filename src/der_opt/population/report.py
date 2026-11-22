@@ -13,6 +13,9 @@ import pandas as pd
 from der_opt.population.resolved import ROLE_SETTINGS, ResolvedPremise
 
 BILL_STREAMS = {"bill", "nbt_bill", "nem2_bill"}
+# the device kinds each counterfactual policy works on
+POLICY_KINDS = {"self_consumption": {"battery", "ev"}, "rule_based_ev": {"ev"}, "setpoint": {"thermostat"},
+                "no_flexibility": {"solar", "battery", "ev", "thermostat", "flexible_load"}}
 
 
 def premises_table(resolved: list[ResolvedPremise], built: list | None = None) -> pd.DataFrame:
@@ -76,6 +79,12 @@ def population_problems(resolved: list[ResolvedPremise]) -> list[str]:
     problems = []
     tariffs: dict = {}
     for r in resolved:
+        for device in r.devices:
+            policy = (device.counterfactual or {}).get("type")
+            if policy is not None and device.kind not in POLICY_KINDS.get(policy, set()):
+                fits = sorted(p for p, kinds in POLICY_KINDS.items() if device.kind in kinds)
+                problems.append(f"{r.premise_id}/{device.device_id}: a {device.kind} can't take counterfactual "
+                                f"{policy!r} (from {device.counterfactual_source}); it takes {fits}")
         streams = {s.get("type") for s in r.settings.get("value_streams") or []}
         billing = r.settings.get("billing")
         if streams & BILL_STREAMS and not billing:

@@ -125,7 +125,7 @@ def resolve_scenario(config) -> ResolvedPremise:
     return ResolvedPremise(config.name, "scenario", settings, sources, devices, has_counterfactual=has_cf)
 
 
-def _house_layers(config, house_fields: dict, label: str) -> tuple[dict, dict]:
+def _house_layers(config, house_fields: dict, label: str, extra: list[Layer] | None = None) -> tuple[dict, dict]:
     defaults = config.house_defaults
     layers = [Layer("built-in", "built-in", dict(BUILT_IN_PREMISE))]
     default_values = _set_fields(defaults, ("value_streams", "poi_limit_kw", "import_limit_kw", "export_limit_kw",
@@ -134,7 +134,7 @@ def _house_layers(config, house_fields: dict, label: str) -> tuple[dict, dict]:
         layers.append(Layer("defaults", "billing", {"billing": _plain(config.billing)}))
     layers.append(Layer("defaults", "house_defaults", default_values))
     layers.append(Layer("row", label, house_fields))
-    return resolve(layers)
+    return resolve([*layers, *(extra or [])])
 
 
 def _house(config, house) -> ResolvedPremise:
@@ -218,6 +218,99 @@ class _Series:
         return None
 
 
+def _text(value) -> str:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def matches(where: dict, premise_id: str, row, device: dict | None = None) -> bool:
+    """Whether a `where` selector picks this premise (and device). Premise keys are its
+    columns and tags; device keys are type, template and device_id. A list is any of."""
+    for key, wanted in (where or {}).items():
+        options = {_text(w) for w in (wanted if isinstance(wanted, list) else [wanted])}
+        if key in ("type", "template", "device_id"):
+            if device is None:
+                return False
+            value = device.get(key) or ""
+        elif key == "premise_id":
+            value = premise_id
+        else:
+            value = _text(row.get(key))
+        if _text(value) not in options:
+            return False
+    return True
+
+
+DEVICE_EXTRAS = ("counterfactual", "rules", "installed_cost", "annual_om")  # device settings that aren't parameters
+COSTS = ("installed_cost", "annual_om")
+
+
+class _Study:
+    """A study's defaults and overrides, as precedence layers (section 3)."""
+
+    def __init__(self, study):
+        self.study = study
+        self.used: set[str] = set()
+
+    def premise_layers(self, premise_id, row) -> list[Layer]:
+        layers = []
+        objective = self.study.objective
+        if objective is not None:
+            streams = [{"type": "bill"}] if objective == "bill" else [_plain(v) for v in objective]
+            layers.append(Layer("defaults", "objective", {"value_streams": streams}))
+        for i, default in enumerate(self.study.defaults):
+            values = default.set.get("premise")
+            if values and matches(default.where, premise_id, row):
+                layers.append(Layer("defaults", f"defaults[{i}]", dict(values)))
+        override = self.study.overrides.get(premise_id, {})
+        if override.get("premise"):
+            self.used.add(premise_id)
+            layers.append(Layer("override", f"override:{premise_id}", dict(override["premise"])))
+        return layers
+
+    def _device_sets(self, premise_id, row, device):
+        for i, default in enumerate(self.study.defaults):
+            values = default.set.get("device")
+            if values and matches(default.where, premise_id, row, device):
+                yield "defaults", f"defaults[{i}]", values
+        key = f"{premise_id}/{device['device_id']}"
+        for name, values in ((key, self.study.overrides.get(key, {}).get("device")),
+                             (key, (self.study.overrides.get(premise_id, {}).get("devices") or {}).get(device["device_id"]))):
+            if values:
+                self.used.add(name)
+                yield "override", f"override:{name}", values
+
+    def device_layers(self, premise_id, row, device) -> list[Layer]:
+        return [Layer(level, source, {k: v for k, v in values.items() if k not in DEVICE_EXTRAS})
+                for level, source, values in self._device_sets(premise_id, row, device)]
+
+    def policies(self, premise_id, row, device) -> list[tuple[str, dict]]:
+        return [(source, values["counterfactual"]) for _, source, values in self._device_sets(premise_id, row, device)
+                if "counterfactual" in values]
+
+    def costs(self, premise_id, row, device) -> list[tuple[str, dict]]:
+        return [(source, {c: values[c] for c in COSTS if c in values})
+                for _, source, values in self._device_sets(premise_id, row, device) if any(c in values for c in COSTS)]
+
+    def rules(self, premise_id, row, device) -> list[tuple[str, str, dict]]:
+        return [(level, source, {m: {device["device_id"]: r} for m, r in values["rules"].items()})
+                for level, source, values in self._device_sets(premise_id, row, device) if "rules" in values]
+
+    def unused(self, premises: dict) -> list[str]:
+        """Overrides that name no premise or device."""
+        found = []
+        for key in self.study.overrides:
+            premise, _, device = key.partition("/")
+            if premise not in premises:
+                found.append(f"{key}: overrides a premise that isn't in the population")
+            elif device and device not in premises[premise]:
+                found.append(f"{key}: overrides a device {premise} doesn't have ({', '.join(sorted(premises[premise]))})")
+        return found
+
+
 SETTING_COLUMNS = ("participation", "baseline_behavior", "response", "envelope_weight", "exclusive_import_export",
                    "poi_limit_kw", "import_limit_kw", "export_limit_kw")
 
@@ -227,16 +320,17 @@ def _v11_devices(premise, row, label, ctx, problems) -> list[ResolvedDevice] | N
     devices = []
     pv = ctx["series"].find("pv_kw", premise)
     if pv is not None:
-        devices.append(_device("solar", "solar", ctx["layers"]("solar", {"available_kw": pv}, label, v11=True), None,
-                               ctx["policies"]("solar", "solar"), ctx["rules"]))
+        devices.append(_device("solar", "solar", ctx["layers"]("solar", {"available_kw": pv}, label, v11=True,
+                                                             device_id="solar"), None,
+                               ctx["policies"]("solar", "solar"), ctx["rules_for"]("solar", "solar")))
     elif sizes["pv_kw_ac"] is not None:
         problems.append(f"{premise}: pv_kw_ac is set but there's no pv_kw time series for it")
         return None
     if sizes["battery_kwh"] is not None:
         battery = _device("battery", "battery", ctx["layers"]("battery", {
             "capacity_kwh": sizes["battery_kwh"], "p_max_charge_kw": sizes["battery_kw"],
-            "p_max_discharge_kw": sizes["battery_kw"]}, label, v11=True), None,
-            ctx["policies"]("battery", "battery"), ctx["rules"])
+            "p_max_discharge_kw": sizes["battery_kw"]}, label, v11=True, device_id="battery"), None,
+            ctx["policies"]("battery", "battery"), ctx["rules_for"]("battery", "battery"))
         if "charge_sources" in battery.params and pv is None:  # nothing to charge from
             battery.params.pop("charge_sources")
             battery.sources.pop("charge_sources", None)
@@ -250,7 +344,8 @@ def _v11_devices(premise, row, label, ctx, problems) -> list[ResolvedDevice] | N
         devices.append(_device("ev", "ev_v2x", ctx["layers"]("ev", {
             "capacity_kwh": sizes["ev_battery_kwh"], "p_max_charge_kw": sizes["ev_charger_kw"],
             "p_max_discharge_kw": sizes["ev_charger_kw"] if v2x else 0.0,
-            **ctx["plug_in"](connected, driving)}, label, v11=True), None, ctx["policies"]("ev", "ev"), ctx["rules"]))
+            **ctx["plug_in"](connected, driving)}, label, v11=True, device_id="ev"), None, ctx["policies"]("ev", "ev"),
+            ctx["rules_for"]("ev", "ev")))
     return devices
 
 
@@ -307,8 +402,20 @@ def _v2_devices(premise, row, ctx, problems) -> list[ResolvedDevice] | None:
                                 f"{ctx['template_folders'] or 'the library'}")
                 ok = False
                 continue
-        device = _device(device_id, DEVICE_TYPES[kind], ctx["layers"](kind, own, label), template,
-                         ctx["policies"](device_id, kind), ctx["rules"])
+        template_name = r.get("template") or None
+        device = _device(device_id, DEVICE_TYPES[kind], ctx["layers"](kind, own, label, device_id=device_id,
+                                                                       template=template_name), template,
+                         ctx["policies"](device_id, kind, template_name), ctx["rules_for"](device_id, kind, template_name))
+        from der_opt.inputs.spec import device_parameters
+
+        allowed = set(device_parameters(kind)) | ({"pattern"} if kind == "ev" else set())
+        unknown = sorted(set(device.params) - allowed)
+        if unknown:
+            problems.append(f"{premise}/{device_id}: a {kind} has no parameter(s) {unknown} (from "
+                            f"{', '.join(sorted({device.sources.get(u, '?') for u in unknown}))}); it takes "
+                            f"{sorted(allowed)}")
+            ok = False
+            continue
         if kind == "flexible_load" and kw is not None:  # kw is the most it can shed: spread over its blocks
             blocks = int(device.params.get("max_blocks", 1))
             device.params |= {"max_blocks": blocks, "block_size_kw": kw / blocks}
@@ -323,7 +430,15 @@ def _v2_devices(premise, row, ctx, problems) -> list[ResolvedDevice] | None:
             problems.append(f"{premise}/{device_id}: an EV needs ev_connected and ev_driving_kwh series, or a "
                             "pattern from its template")
             ok = False
-        costs = {c: _number(r, c) for c in ("installed_cost", "annual_om") if _number(r, c) is not None}
+        costs = {c: _number(r, c) for c in COSTS if _number(r, c) is not None}
+        if ctx["study"] is not None:  # study defaults and overrides, stronger than the row only as overrides
+            premise_id, prow = ctx["current"]
+            info = {"device_id": device_id, "type": kind, "template": template_name or ""}
+            for source, values in ctx["study"].costs(premise_id, prow, info):
+                if source.startswith("override:"):
+                    costs |= values
+                else:
+                    costs = {**values, **costs}
         device.costs = costs
         devices.append(device)
     names = {d.device_id for d in devices}
@@ -344,7 +459,7 @@ def _v2_devices(premise, row, ctx, problems) -> list[ResolvedDevice] | None:
     return devices if ok else None
 
 
-def _premise_rows(config):
+def _premise_rows(config, study: _Study | None = None, require_element: bool = True):
     """Premises (and optionally the network and background rows) from input-spec
     files: 2.0 with a devices file, or 1.1 with device columns."""
     from der_opt.inputs import read_network, read_premises
@@ -371,16 +486,34 @@ def _premise_rows(config):
             index["all"] = _template_index(data.templates)
         return index["all"]
 
-    def layers(kind, own, label, v11=False):
+    def device_info(device_id, kind, template=None):
+        return {"device_id": device_id, "type": kind, "template": template or ""}
+
+    def layers(kind, own, label, v11=False, device_id=None, template=None):
         built_in = DEVICE_DEFAULTS.get(kind, {})
         name = "built-in (v1.1 premises device defaults)" if v11 else "built-in (premises device defaults)"
-        return [Layer("built-in", name, built_in),
-                Layer("defaults", f"house_defaults.device_params.{kind}", defaults.device_params.get(kind, {})),
-                Layer("row", label, own)]
+        out = [Layer("built-in", name, built_in),
+               Layer("defaults", f"house_defaults.device_params.{kind}", defaults.device_params.get(kind, {})),
+               Layer("row", label, own)]
+        if study is not None:
+            premise_id, row = ctx["current"]
+            out += study.device_layers(premise_id, row, device_info(device_id or kind, kind, template))
+        return out
 
-    def policies(device_id, kind):
+    def policies(device_id, kind, template=None):
         policy = default_policies.get(device_id, default_policies.get(kind))
-        return [("house_defaults.counterfactual", policy)]
+        out = [("house_defaults.counterfactual", policy)]
+        if study is not None:
+            premise_id, row = ctx["current"]
+            out += study.policies(premise_id, row, device_info(device_id, kind, template))
+        return out
+
+    def rules_for(device_id, kind, template=None):
+        out = [("defaults", "house_defaults.rules", defaults.rules)]
+        if study is not None:
+            premise_id, row = ctx["current"]
+            out += study.rules(premise_id, row, device_info(device_id, kind, template))
+        return out
 
     def plug_in(connected, driving):
         plugged = resolve_array_param(connected, time_grid)
@@ -388,16 +521,17 @@ def _premise_rows(config):
         return {"connected": [float(x) for x in plugged], "driving_kwh": driving, "departure_period": departures}
 
     ctx = {"series": series, "layers": layers, "policies": policies, "plug_in": plug_in, "devices": devices_file,
-           "templates": templates, "template_folders": data.templates,
-           "rules": [("defaults", "house_defaults.rules", defaults.rules)]}
+           "templates": templates, "template_folders": data.templates, "rules_for": rules_for, "current": None,
+           "study": study}
 
     out, background, problems = [], {}, []
     tags = premises.tags
     for number, (premise, row) in enumerate(premises.table.iterrows(), start=2):  # row 1 is the header
         label = f"premises.csv row {number}"
+        ctx["current"] = (premise, row)
         kind = row.get("kind") or "premise"
         element = row.get("element_id") or None
-        if element is None:
+        if element is None and (require_element or kind == "background"):
             problems.append(f"{premise}: no element_id (every premise on a feeder needs one)")
             continue
         load, imported = series.find("load_kw", premise), series.find("import_kw", premise)
@@ -446,9 +580,10 @@ def _premise_rows(config):
                 "baseline_territory": row.get("baseline_territory") or None,
                 "baseline_code": row.get("baseline_code") or data.baseline_code,
             }
-        settings, sources = _house_layers(config, own, label)
         if row.get("customer_class"):
-            settings["customer_class"], sources["customer_class"] = row["customer_class"], label
+            own["customer_class"] = row["customer_class"]
+        extra_layers = study.premise_layers(premise, row) if study is not None else []
+        settings, sources = _house_layers(config, own, label, extra_layers)
         extra = {"data": "metered" if imported is not None else ("no load" if external is None else "gross")}
         if devices_file is None:
             extra |= {c: _number(row, c) for c in ("pv_kw_ac", "battery_kwh", "battery_kw", "ev_battery_kwh",
@@ -458,6 +593,12 @@ def _premise_rows(config):
         out.append(ResolvedPremise(premise, "premises.csv", settings, sources, devices, element_id=element,
                                    has_counterfactual=defaults.counterfactual is not None
                                    or any(d.counterfactual is not None for d in devices), extra=extra))
+    if study is not None:
+        known = {pid: set() for pid in premises.table.index}
+        if devices_file is not None:
+            for _, r in devices_file.table.iterrows():
+                known.setdefault(r["premise_id"], set()).add(r["device_id"])
+        problems += study.unused(known)
     if problems:
         raise PopulationError(problems)
 
@@ -476,3 +617,22 @@ def resolve_feeder(config) -> tuple[list[ResolvedPremise], list | None, dict]:
     as name -> (element, load data source)."""
     from_files, elements, background = _premise_rows(config)
     return [_house(config, house) for house in config.houses] + from_files, elements, background
+
+
+def resolve_study(study) -> tuple[list[ResolvedPremise], list | None, dict]:
+    """A study's population: its tables, with the study's tariffs, objective, defaults
+    and overrides as layers. Returns the premises, the network's elements (if it names a
+    network file) and background rows."""
+    from types import SimpleNamespace
+
+    from der_opt.scenarios.schema import HouseDefaultsConfig, PremiseDataConfig
+
+    population, tariffs = study.population, study.tariffs
+    data = PremiseDataConfig(premises=population.premises, devices=population.devices,
+                             timeseries=population.timeseries, network=population.network,
+                             templates=population.templates, tz=population.tz, tariff_dir=tariffs.dir,
+                             programs=tariffs.programs, income_tier=tariffs.income_tier,
+                             baseline_code=tariffs.baseline_code)
+    stand_in = SimpleNamespace(premise_data=data, house_defaults=HouseDefaultsConfig(), billing=None,
+                               time_grid=study.time_grid, houses=[])
+    return _premise_rows(stand_in, _Study(study), require_element=study.analyses.feeder is not None)

@@ -385,3 +385,65 @@ class FeederScenarioConfig(BaseModel):
     premise_data: PremiseDataConfig | None = None
     billing: BillingConfig | None = None
     coordination: CoordinationConfig | None = None
+
+
+# --- studies (docs/POPULATION_MODEL_SPEC.md section 4) ------------------------------
+
+
+class PopulationFilesConfig(BaseModel):
+    """The population's files (input data spec 2.0)."""
+
+    premises: str
+    devices: str | None = None
+    timeseries: list[str] = Field(default_factory=list)
+    network: str | None = None  # network.csv; or the feeder analysis's elements
+    templates: list[str] | None = None  # template folders; default the library's devices/
+    tz: str = "America/Los_Angeles"
+
+
+class TariffsConfig(BaseModel):
+    dir: str | None = None  # where premises' `tariff` names are found; default der-opt's example tariffs
+    programs: dict[str, dict[str, Any]] = Field(default_factory=dict)  # nbt: {...}, nem2: {...}
+    income_tier: int = 3
+    baseline_code: str = "basic"
+
+
+class StudyDefault(BaseModel):
+    """`set` for the premises (and devices) `where` selects; no `where` is everyone."""
+
+    where: dict[str, Any] = Field(default_factory=dict)  # premise columns and tags; type, template, device_id
+    set: dict[str, dict[str, Any]]  # premise: {...} and/or device: {...}
+
+
+class FeederAnalysisConfig(BaseModel):
+    elements: list[NetworkElementConfig] = Field(default_factory=list)  # or population.network
+    value_streams: list[NetworkValueStreamConfig] = Field(default_factory=list)
+    coordination: CoordinationConfig | None = None
+
+
+class PortfolioAnalysisConfig(BaseModel):
+    """Each selected premise on its own: DR, screening values and the measure impact
+    package (cost tests), as a single-home scenario would run them."""
+
+    select: dict[str, Any] = Field(default_factory=dict)  # a where selector; default every premise
+    measure: dict[str, Any] | None = None  # a device selector: {type: [battery]}, {template: [...]}, {device_id: [...]}
+    dr: dict[str, Any] | None = None  # the dr section, less customer_class and measure_devices (from each premise)
+    avoided_costs: AvoidedCostsConfig | None = None
+    cost_test: dict[str, Any] | None = None  # the cost_test section, less measure_devices and participant costs
+
+
+class AnalysesConfig(BaseModel):
+    feeder: FeederAnalysisConfig | None = None
+    portfolio: PortfolioAnalysisConfig | None = None
+
+
+class StudyConfig(BaseModel):
+    name: str
+    time_grid: TimeGridConfig
+    population: PopulationFilesConfig
+    tariffs: TariffsConfig = Field(default_factory=TariffsConfig)
+    objective: Literal["bill"] | list[ValueStreamConfig] | None = None  # each premise's own optimization
+    defaults: list[StudyDefault] = Field(default_factory=list)
+    overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)  # premise or premise/device -> {premise|device: {...}}
+    analyses: AnalysesConfig
+    weather_case: str | None = None

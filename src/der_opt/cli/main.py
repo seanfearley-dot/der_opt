@@ -370,7 +370,7 @@ def _write_dr(study, output_dir: Path) -> None:
 
 @app.command()
 def run(
-    scenario: Path = typer.Argument(..., help="Path to a scenario YAML file"),
+    scenario: Path = typer.Argument(..., help="Path to a scenario or study YAML file"),
     output_dir: Path | None = typer.Option(
         None, "--output-dir", "-o", help="Directory to write dispatch CSVs and charts to"
     ),
@@ -386,12 +386,118 @@ def run(
     no_validate: bool = typer.Option(
         False, "--no-validate", help="Skip the checks `der-opt validate` runs before solving"),
 ) -> None:
-    """Solve a scenario and print a summary. Runs `der-opt validate`'s checks first and
-    stops on any error, before solving anything. If the scenario has a `counterfactual`
-    section, also simulates that rule-based baseline and reports the value of
-    optimization. A scenario with a `feeder` section is a multi-house run: it compares
-    coordinated, independent and rule-based dispatch on the network. With
-    --output-dir, writes CSVs and charts for everything printed."""
+    """Solve a scenario or a study and print a summary. Runs `der-opt validate`'s checks
+    first and stops on any error, before solving anything.
+
+    - A single-home scenario: optimal and (with a `counterfactual` section) rule-based
+      runs, bills, DR, screening values and the measure impact package.
+    - A scenario with a `feeder` section: coordinated, independent and rule-based runs
+      on the network, and any coordination runs.
+    - A study (a `population` section, docs/POPULATION_MODEL_SPEC.md): its feeder and
+      portfolio analyses, each in its own folder under -o.
+
+    With --output-dir, writes CSVs and charts for everything printed."""
+    from der_opt.scenarios.compose import CompositionError, compose_scenario
+
+    try:
+        sections = compose_scenario(scenario).data
+    except CompositionError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    if "population" in sections:
+        _run_study(scenario, output_dir, no_counterfactual, cost_tests, openbca_path, no_validate)
+        return
+    _run_scenario(scenario, output_dir, duals, no_counterfactual, cost_tests, openbca_path, no_validate)
+
+
+def _run_study(study_path: Path, output_dir: Path | None, no_counterfactual: bool, cost_tests: bool,
+               openbca_path: Path | None, no_validate: bool) -> None:
+    """A study's analyses (docs/POPULATION_MODEL_SPEC.md section 4), each in its own folder."""
+    import contextlib
+    import io
+    from types import SimpleNamespace
+
+    import yaml
+
+    from der_opt.diagnostics import CheckReport
+    from der_opt.population.compile import resolve_study
+    from der_opt.population.portfolio import portfolio_premises, summarize
+    from der_opt.population.report import parameters_table, premises_table
+    from der_opt.run_record import write_run_record
+    from der_opt.scenarios.compose import load_composed
+    from der_opt.scenarios.feeder import feeder_from_study
+    from der_opt.scenarios.schema import StudyConfig
+
+    composed = load_composed(study_path)
+    study = StudyConfig.model_validate(composed.data)
+    if cost_tests and (study.analyses.portfolio is None or study.analyses.portfolio.cost_test is None):
+        raise typer.BadParameter("--cost-tests needs a portfolio analysis with a cost_test section")
+    validation = None if no_validate else _validate_first(study_path, cost_tests, openbca_path)
+    output_dir = output_dir or Path("out") / study.name
+    output_dir.mkdir(parents=True, exist_ok=True)
+    report = validation.report if validation is not None else CheckReport()
+    resolved = validation.resolved if validation is not None else resolve_study(study)[0]
+    feeder = validation.feeder if validation is not None else None
+    typer.echo(f"Study: {study.name}: {len(resolved)} premises")
+    built = feeder.premises if feeder is not None else None
+    premises_table(resolved, built).to_csv(output_dir / "premises.csv", index=False)
+    parameters_table(resolved).to_csv(output_dir / "device_parameters.csv", index=False)
+    results: dict = {"premises": len(resolved), "analyses": [k for k in ("feeder", "portfolio")
+                                                             if getattr(study.analyses, k) is not None]}
+
+    if study.analyses.feeder is not None:
+        typer.echo("\n=== Feeder analysis")
+        feeder = feeder or feeder_from_study(study)
+        stand_in = SimpleNamespace(report=CheckReport(), config=feeder.config, feeder=feeder, composed=composed)
+        _run_feeder(study_path, output_dir / "feeder", no_counterfactual, stand_in)
+
+    if study.analyses.portfolio is not None:
+        typer.echo("\n=== Portfolio analysis")
+        premises = (validation.portfolio if validation is not None and validation.portfolio is not None
+                    else portfolio_premises(study, resolved)[0])
+        folder = output_dir / "portfolio"
+        failed = []
+        for item in premises:
+            if item.config is None:
+                typer.echo(f"  {item.premise_id}: {item.note}")
+                continue
+            sub = folder / item.premise_id
+            sub.mkdir(parents=True, exist_ok=True)
+            scenario_file = sub / "scenario.yaml"
+            text = yaml.safe_dump(item.config.model_dump(mode="json", exclude_none=True, by_alias=True), sort_keys=False)
+            scenario_file.write_text(text, encoding="utf-8")
+            captured = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(captured):
+                    _run_scenario(scenario_file, sub, no_counterfactual=no_counterfactual, cost_tests=cost_tests,
+                                  openbca_path=openbca_path, no_validate=True)
+            except Exception as exc:  # noqa: BLE001 -- one premise failing doesn't stop the portfolio
+                failed.append(item.premise_id)
+                item.note = f"failed: {type(exc).__name__}: {exc}"
+                typer.echo(f"  {item.premise_id}: {item.note}")
+            finally:
+                (sub / "report.txt").write_text(captured.getvalue(), encoding="utf-8")
+            if item.premise_id not in failed:
+                typer.echo(f"  {item.premise_id}: measure {', '.join(item.measure) or '-'}; report in {sub / 'report.txt'}")
+        table = summarize(folder, premises)
+        folder.mkdir(parents=True, exist_ok=True)
+        table.to_csv(folder / "portfolio.csv", index=False)
+        total = table.iloc[-1]
+        shown = [c for c in table.columns if c.startswith(("value_of_optimization", "dr_incentive", "counted_",
+                                                            "screening"))
+                 and c.endswith(("optimization", "earned", "season_mean_kw", "total"))]
+        typer.echo("  Totals: " + "; ".join(f"{c} {total[c]:,.2f}" for c in shown if pd.notna(total.get(c))))
+        typer.echo(f"  Wrote {folder / 'portfolio.csv'} (one row per premise, and a total)")
+        results["portfolio"] = {"premises": len(premises), "failed": failed}
+        if failed:
+            write_run_record(output_dir, study_path, study.model_dump(mode="json"), report, results, composed)
+            raise typer.Exit(code=1)
+    write_run_record(output_dir, study_path, study.model_dump(mode="json"), report, results, composed)
+    typer.echo(f"\nWrote premises.csv, device_parameters.csv and run_record.json to {output_dir}")
+
+
+def _run_scenario(scenario: Path, output_dir: Path | None = None, duals: bool = False, no_counterfactual: bool = False,
+                  cost_tests: bool = False, openbca_path: Path | None = None, no_validate: bool = False) -> None:
+    """One scenario: a single home, or a feeder."""
     import pandas as pd
 
     from der_opt.pricing import extract_duals, value_breakdown

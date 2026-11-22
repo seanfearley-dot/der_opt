@@ -74,11 +74,34 @@ def build_feeder_scenario(config: FeederScenarioConfig) -> FeederScenario:
     """Every premise resolved (docs/POPULATION_MODEL_SPEC.md), then built like a one-house
     run, on the feeder's network."""
     from der_opt.population.compile import resolve_feeder
-    from der_opt.scenarios.loader import _resolve_external_load
 
     resolved, file_elements, file_background = resolve_feeder(config)
+    explicit = {house.name: house.rules or {} for house in config.houses}
+    return assemble_feeder(config, resolved, file_elements, file_background, explicit)
+
+
+def feeder_from_study(study) -> FeederScenario:
+    """A study's feeder analysis: its population on its network
+    (docs/POPULATION_MODEL_SPEC.md section 4)."""
+    from der_opt.population.compile import resolve_study
+
+    analysis = study.analyses.feeder
+    resolved, file_elements, file_background = resolve_study(study)
+    config = FeederScenarioConfig.model_validate({
+        "name": study.name, "time_grid": study.time_grid.model_dump(),
+        "feeder": {"elements": [e.model_dump() for e in analysis.elements],
+                   "value_streams": [v.model_dump() for v in analysis.value_streams]},
+        "coordination": analysis.coordination.model_dump(by_alias=True) if analysis.coordination else None,
+    })
+    return assemble_feeder(config, resolved, file_elements, file_background, {})
+
+
+def assemble_feeder(config: FeederScenarioConfig, resolved, file_elements, file_background,
+                    explicit_rules: dict) -> FeederScenario:
+    """Resolved premises on the feeder's network, each built like a one-house run."""
     from der_opt.population.compile import PopulationError
     from der_opt.population.report import population_problems
+    from der_opt.scenarios.loader import _resolve_external_load
 
     problems = population_problems(resolved)
     if problems:
@@ -115,8 +138,7 @@ def build_feeder_scenario(config: FeederScenarioConfig) -> FeederScenario:
     houses.insert(1, "devices", [", ".join(d.device_id for d in r.devices) or "-" for r in resolved])
     houses.insert(2, "group", [roles[r.premise_id].group for r in resolved])
     houses.insert(3, "baseline_behavior", [roles[r.premise_id].baseline_behavior for r in resolved])
-    explicit = {house.name: house.rules or {} for house in config.houses}
-    return FeederScenario(config, feeder, house_configs, premises, streams, houses, roles, background, explicit,
+    return FeederScenario(config, feeder, house_configs, premises, streams, houses, roles, background, explicit_rules,
                           resolved)
 
 
