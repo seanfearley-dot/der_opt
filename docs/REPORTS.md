@@ -85,7 +85,7 @@ What each page shows:
   premises table, and what `add_devices` chose; checks; settings. Each run's page links
   back to the study's.
 
-## 3. `der-opt ui` (built: first version)
+## 3. `der-opt ui` (built)
 
 ```bash
 der-opt ui                 # the current folder; opens http://localhost:8700/
@@ -106,15 +106,27 @@ read from the files each time, and what it saves is the YAML you'd edit by hand.
     premises or devices it picks;
   - **Merged:** the file with its blocks merged in and paths resolved;
   - **Run:** queue it, with the output folder and `run`'s options.
+- **Study settings** (a study's tab): its own `defaults`, `overrides` and
+  `add_devices`, each entry as rows of a setting and its value, with setting names
+  suggested (premise settings, device parameters, premises and devices to override,
+  templates). A value is YAML (`0.9`, `[solar]`, `{type: self_consumption}`). Each
+  `where` shows what it picks as you type. Entries can be added, removed and reordered.
+  Saving checks every entry first (a value that isn't YAML, an add_devices entry
+  without its device_id) and writes nothing if one is wrong; then it rewrites only
+  those three sections, as the examples write them, and checks the study. Comments
+  above the sections stay; comments inside them don't. Defaults inherited from the
+  blocks the study extends are listed, read-only.
+- **New:** a file from a template (`der-opt new`'s templates, with only that template's
+  fields, and the project's CSVs, tariffs and avoided cost sets suggested), or a
+  single-home scenario from library blocks, picked by kind, with a live check that the
+  picks fit together. It never overwrites a file, and opens the new one on its Check
+  tab.
 - **Run queue:** runs go one at a time, as `der-opt run` in a subprocess. Each one's
   log streams in, and when it's done its report opens from the same server. The queue
   lasts while the app runs; the output folders stay.
 
 Safety: it listens on 127.0.0.1 only and answers only requests naming localhost. Every
-change (save, run, cancel) carries a token from the page, so another site open in the
-browser can't drive it. Every path must be inside the project folder. It's for one
-person on their own machine; sharing it on a network would need sign-in, which isn't
-built.
-
-Not yet: building a study from blocks and templates in forms, and editing `defaults`,
-`overrides` and `add_devices` as forms rather than YAML.
+change (save, run, cancel, new file) carries a token from the page, so another site
+open in the browser can't drive it. Every path must be inside the project folder. It's
+for one person on their own machine; sharing it on a network would need sign-in, which
+isn't built.

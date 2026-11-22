@@ -68,15 +68,16 @@ def _when(stamp: float | str | None) -> str:
     return datetime.fromtimestamp(stamp).strftime("%Y-%m-%d %H:%M")
 
 
-def layout(project: Project, title: str, body: str, token: str, active: str = "") -> str:
+def layout(project: Project, title: str, body: str, token: str, active: str = "", extra: str = "") -> str:
     nav = "".join(f'<a href="{h}" class="{"on" if active == k else ""}">{t}</a>'
-                  for k, h, t in (("home", "/", "Scenarios and runs"), ("jobs", "/jobs", "Run queue")))
+                  for k, h, t in (("home", "/", "Scenarios and runs"), ("new", "/new", "New"),
+                                  ("jobs", "/jobs", "Run queue")))
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="token" content="{esc(token)}">
-<title>{esc(title)} · der-opt</title><style>{CSS}{APP_CSS}</style></head>
+<title>{esc(title)} · der-opt</title><style>{CSS}{APP_CSS}{FORM_CSS}</style></head>
 <body><header class="bar"><a class="brand" href="/">der-opt</a><nav class="top">{nav}</nav>
 <span class="where" title="the project folder">{esc(project.root)}</span></header>
-<main class="page">{body}</main><script>{APP_JS}</script></body></html>"""
+<main class="page">{body}</main><script>{APP_JS}</script>{extra}</body></html>"""
 
 
 # --- home ----------------------------------------------------------------------------
@@ -110,8 +111,18 @@ it, browse its population, or run it.</p>{table(rows, file_links, filter=True, e
 
 
 def file_page(project: Project, relative: str, token: str) -> str:
+    from der_opt.scenarios.compose import CompositionError, compose_scenario
+    from der_opt.scenarios.schema import is_study
+
     path = project.inside(relative)
     text = path.read_text(encoding="utf-8")
+    try:
+        study = is_study(compose_scenario(path).data)
+    except (CompositionError, OSError, yaml.YAMLError):
+        study = is_study(yaml.safe_load(text) or {})
+    settings_tab = '<button data-tab="settings">Study settings</button>' if study else ""
+    settings_pane = (f'<section data-pane="settings" hidden><div data-lazy="/fragment/study-settings?path={q(relative)}">'
+                     '</div></section>' if study else "")
     output = project.default_output(relative)
     report = project.inside(output) / "report.html"
     last = (f'<a class="button ghost" href="/files/{q(output)}/report.html">Last run\'s report</a>'
@@ -121,7 +132,7 @@ def file_page(project: Project, relative: str, token: str) -> str:
 <h1>{esc(Path(relative).name)}</h1>
 <div class="tabs" data-tabs>
   <button data-tab="edit" class="on">Edit</button><button data-tab="check">Check</button>
-  <button data-tab="population">Population</button><button data-tab="merged">Merged</button>
+  {settings_tab}<button data-tab="population">Population</button><button data-tab="merged">Merged</button>
   <button data-tab="run">Run</button>{last}
 </div>
 <section data-pane="edit">
@@ -134,6 +145,7 @@ def file_page(project: Project, relative: str, token: str) -> str:
   <div id="saved"></div>
 </section>
 <section data-pane="check" hidden><div data-lazy="/fragment/check?path={q(relative)}"></div></section>
+{settings_pane}
 <section data-pane="population" hidden><div data-lazy="/fragment/population?path={q(relative)}"></div></section>
 <section data-pane="merged" hidden><div data-lazy="/fragment/merged?path={q(relative)}"></div></section>
 <section data-pane="run" hidden>
@@ -147,7 +159,9 @@ def file_page(project: Project, relative: str, token: str) -> str:
     <span class="note">Runs one at a time, as <code>der-opt run</code> would; the output folder gets its report.</span></div>
   </form>
 </section>"""
-    return layout(project, Path(relative).name, body, token)
+    from der_opt.ui.forms import STUDY_JS
+
+    return layout(project, Path(relative).name, body, token, extra=STUDY_JS if study else "")
 
 
 def findings(report) -> str:
@@ -222,7 +236,7 @@ def population_fragment(project: Project, relative: str) -> str:
 <details><summary>Every setting and where it came from</summary>{table(parameters_table(premises), filter=True)}</details>"""
 
 
-def where_fragment(project: Project, relative: str, text: str) -> str:
+def where_fragment(project: Project, relative: str, text: str, compact: bool = False) -> str:
     from der_opt.population.compile import matches
     from der_opt.population.portfolio import _row
 
@@ -251,6 +265,10 @@ def where_fragment(project: Project, relative: str, text: str) -> str:
                          "devices": ", ".join(d.device_id for d in r.devices)})
     what = "devices" if device_keys else "premises"
     count = sum(len(r["devices"].split(", ")) for r in rows) if device_keys else len(rows)
+    if compact:
+        picked = ", ".join(f"{r['premise_id']}" + (f" ({r['devices']})" if device_keys else "") for r in rows[:12])
+        more = f" and {len(rows) - 12} more" if len(rows) > 12 else ""
+        return f'<span class="status ok">picks {count} {what}</span> <span class="note">{esc(picked)}{more}</span>'
     return (f'<p class="status ok">{count} {what} at {len(rows)} of {len(premises)} premises.</p>'
             + table(pd.DataFrame(rows), filter=len(rows) > 10, empty="It picks nothing."))
 
@@ -351,7 +369,7 @@ const t=i.parentElement.querySelector("table");i.addEventListener("input",()=>{c
 for(const r of t.tBodies[0].rows)r.style.display=r.textContent.toLowerCase().includes(s)?"":"none";});});}
 async function fill(el,url){el.classList.add("busy");try{const r=await fetch(url);el.innerHTML=await r.text();}
 catch(e){el.textContent="Couldn't reach the app: "+e;}el.classList.remove("busy");init(el);}
-function init(root){sortable(root);
+function init(root){sortable(root);if(window.initStudyForm)initStudyForm();
 root.querySelectorAll("[data-load]").forEach(el=>{if(el.dataset.ready)return;el.dataset.ready=1;
 if(el.dataset.every){const tick=async()=>{await fill(el,el.dataset.load);el.dataset.ready=1;
 if(el.dataset.until&&el.querySelector("[data-"+el.dataset.until+"]"))return;setTimeout(tick,+el.dataset.every);};
@@ -369,9 +387,28 @@ tabs.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));
 document.querySelectorAll("[data-pane]").forEach(p=>{const on=p.dataset.pane===b.dataset.tab;p.hidden=!on;
 const lazy=p.querySelector("[data-lazy]");if(on&&lazy&&(!lazy.dataset.done||b.dataset.tab==="check")){
 lazy.dataset.done=1;fill(lazy,lazy.dataset.lazy);}});}));});}
+window.addEventListener("load",()=>{const h=location.hash.slice(1);const b=h&&document.querySelector(
+'button[data-tab="'+h+'"]');if(b)b.click();});
 document.addEventListener("keydown",e=>{if((e.metaKey||e.ctrlKey)&&e.key==="s"){const f=document.querySelector(
 "form[data-post='/save']");if(f){e.preventDefault();f.requestSubmit();}}});
 document.addEventListener("keydown",e=>{const t=e.target;if(t.tagName==="TEXTAREA"&&e.key==="Tab"){e.preventDefault();
 const s=t.selectionStart;t.setRangeText("  ",s,t.selectionEnd,"end");}});
 init(document);
+"""
+
+FORM_CSS = """
+fieldset{border:1px solid var(--line);border-radius:8px;margin:10px 0;padding:8px 12px}
+legend{color:var(--muted);font-weight:600;padding:0 4px}
+label.check span{display:inline}
+select{font:inherit;padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
+.group{margin-bottom:18px}.entry{border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin:8px 0}
+.cardhead{display:flex;gap:6px;align-items:center}.grow{flex:1}
+.kv{display:flex;flex-direction:column;gap:4px;margin:4px 0 8px}.kv>button{align-self:flex-start}.kvrow{display:flex;gap:6px}
+.kvrow .key{width:240px}.kvrow .val{flex:1}
+button.small{padding:2px 8px;font-size:12px}input.short{width:80px}
+.label{color:var(--muted);font-size:12px;margin-top:6px}.pick{font-size:12px;min-height:16px}
+.check-box{margin:10px 0}
+[hidden]{display:none!important}
+form.grid>label{display:grid;grid-template-columns:170px minmax(0,520px) auto;gap:10px;align-items:center}
+form.grid>label input,form.grid>label select{width:100%}
 """
