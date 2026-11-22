@@ -94,7 +94,11 @@ def _resolve_timeseries(time_grid: TimeGrid, **kwargs) -> np.ndarray:
 
     data = read_timeseries(kwargs["path"])
     premise = kwargs.get("premise_id")
-    series = data.local_series(kwargs["column"], premise, kwargs.get("tz", "America/Los_Angeles"))
+    series = data.local_series(kwargs["column"], premise, kwargs.get("tz", "America/Los_Angeles"),
+                               device_id=kwargs.get("device_id"), station=kwargs.get("weather_station"))
+    premise = premise or kwargs.get("weather_station")
+    if kwargs.get("device_id"):
+        premise = f"{premise}/{kwargs['device_id']}"
     end = time_grid.start + (time_grid.horizon_steps * time_grid.dt_hours) * pd.Timedelta(hours=1)
     last_step = series.index[-1] + pd.Timedelta(minutes=data.interval_minutes)
     if series.index[0] > pd.Timestamp(time_grid.start) or last_step < end:

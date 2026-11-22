@@ -99,6 +99,8 @@ def _spec_files(data) -> list[tuple[str, str | None, str | None]]:
             files.append((ts, premises, network))
         if premises:
             files.append((premises, None, network))
+        if pdata.get("devices"):
+            files.append((pdata["devices"], premises, network))
         if network:
             files.append((network, None, None))
     return list(dict.fromkeys(files))
@@ -271,7 +273,13 @@ def validate_scenario(path: str | Path, cost_tests: bool = False, build: bool = 
             else:
                 v.premise = build_premise(v.config)
     except Exception as exc:  # noqa: BLE001 -- anything the build rejects is a scenario error
-        v.fail("build", f"{type(exc).__name__}: {exc}")
+        from der_opt.population.compile import PopulationError
+
+        if isinstance(exc, PopulationError):  # one finding per problem, each naming its premise
+            v.report.ran("population", [Finding("error", "population", problem.split(": ", 1)[-1],
+                                                 premise=problem.split(": ", 1)[0]) for problem in exc.problems])
+        else:
+            v.fail("build", f"{type(exc).__name__}: {exc}")
         return v
     v.report.ran("build")
     if v.is_feeder:

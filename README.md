@@ -557,7 +557,7 @@ None of this has been checked against a real bill yet — that's the real test.
 ## Input data: the spec format
 
 Real premises come in as CSV files in one format, defined in
-[docs/INPUT_DATA_SPEC.md](docs/INPUT_DATA_SPEC.md) (v1.1, approved). Produce that format
+[docs/INPUT_DATA_SPEC.md](docs/INPUT_DATA_SPEC.md) (v2.0, approved). Produce that format
 from your own pipeline; nothing else needs configuring per file. In short:
 
 * **Time series:** `timestamp, premise_id, <values>`, one row per premise per interval.
@@ -565,19 +565,47 @@ from your own pipeline; nothing else needs configuring per file. In short:
   (`2026-07-13T00:00:00-07:00`). Values are average kW (`load_kw`, `pv_kw`,
   `import_kw`, `export_kw`), plus `ev_connected` (0/1), `ev_driving_kwh`, and
   `import_price_per_kwh` / `export_price_per_kwh` (prices go in a file without
-  `premise_id`). Each premise is either **gross** (`load_kw`, plus `pv_kw` if it has
+  `premise_id`). An optional `device_id` column keys a device's own series, so two EVs
+  at one premise each have theirs.
+  - `outdoor_temp_c` feeds thermostats; a weather file can be keyed by
+    `weather_station`, and a premise picks its station with a `weather_station` tag.
+  - `flexible_kw` is a flexible load's baseline. Each premise is either **gross** (`load_kw`, plus `pv_kw` if it has
   solar) or **metered** (`import_kw`/`export_kw`), never both. A missing value is an
   empty cell, never 0. The interval is 5, 15, 30 or 60 minutes, with every interval
   present.
-* **`premises.csv`:** one row per premise: `element_id`, `tariff`, `export_program`,
-  `customer_class`, `baseline_territory`, solar/battery/EV sizes, `import_limit_kw`,
-  `export_limit_kw`.
+* **`premises.csv`:** one row per premise:
+  - `element_id`, `tariff`, `export_program`, `customer_class`, `baseline_territory`,
+    `import_limit_kw` and `export_limit_kw`;
+  - `kind: background` for load that isn't a customer;
+  - premise settings as columns (`participation`, `baseline_behavior`, `response`,
+    `exclusive_import_export`, `load: none`…);
+  - any other column as a tag.
+* **`devices.csv` (2.0):** one row per device, with `premise_id`, `device_id`, `type`
+  (`solar`, `battery`, `ev`, `thermostat`, `flexible_load`), an optional `template` by
+  name, `kw` and `kwh` sizes, `v2x`, `installed_cost` and `annual_om`, `charge_sources`,
+  and any device parameter by name. The scenario's `premise_data` names it with
+  `devices:`, and the folders to find templates in with `templates:` (default: your
+  library's `devices/`).
+
+  A 1.1 premises file with device columns still works. `der-opt convert premises
+  premises.csv --timeseries timeseries.csv --out new/` writes the 2.0 pair, which builds
+  identical premises.
 * **`network.csv`:** one row per transformer or section: `element_id`, `parent_id`,
   `rating_kw`, `overload_cost_per_kwh`.
 
 ```bash
 der-opt check-data data/timeseries.csv --premises data/premises.csv --network data/network.csv
+der-opt check-data data/devices.csv --premises data/premises.csv
+der-opt validate scenario.yaml --population out/population   # premises.csv and device_parameters.csv
 ```
+
+`validate` on a feeder prints each element's premises and devices by type. With
+`--population`, it writes two tables before anything is solved; every run with `-o`
+writes them too:
+- `premises.csv`: each premise's settings and technology mix;
+- `device_parameters.csv`: every setting of every premise and device, with its value and
+  where it came from (`devices.csv row 4`, `template:commuter`,
+  `house_defaults.device_params.battery`).
 
 `check-data` names every rule a file breaks (exit code 1) and warns about suspect
 data: empty cells, a day or more without consumption, 12 h unchanged, spikes, a home

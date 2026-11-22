@@ -136,7 +136,7 @@ def test_house_defaults_fill_in_per_device_and_setting():
                      {"poi_limit_kw": 30, "response": "rules",
                       "counterfactual": {"policies": {"battery": {"type": "self_consumption"}}},
                       "rules": {"dr_event": {"battery": {"action": "discharge", "max_kw": 2}}}})
-    (house,), _ = resolve_feeder(config)
+    (house,), _, _ = resolve_feeder(config)
     assert house.settings["poi_limit_kw"] == 15 and house.sources["poi_limit_kw"] == "houses.h1"
     assert house.settings["response"] == "rules" and house.sources["response"] == "house_defaults"
     assert house.sources["value_streams"] == "house_defaults"
@@ -154,13 +154,13 @@ def test_a_house_rule_by_type_beats_a_default_by_name():
     config = _feeder([{"name": "h1", "element": "tx", "external_load": [1] * 4, "devices": [BATTERY],
                        "rules": {"dr_event": {"battery": {"action": "none"}}}}],
                      {"rules": {"dr_event": {"battery": {"action": "discharge", "to": "export"}}}})
-    (house,), _ = resolve_feeder(config)
+    (house,), _, _ = resolve_feeder(config)
     assert "dr_event" not in house.devices[0].rules  # `none` from the stronger layer: no rule
 
 
 def test_premises_file_devices_record_each_layer():
     config = load_feeder_config(REPO / "examples/scenarios/feeder_from_files.yaml")
-    resolved, elements = resolve_feeder(config)
+    resolved, elements, _ = resolve_feeder(config)
     home = next(r for r in resolved if r.premise_id == "home_06")
     battery = next(d for d in home.devices if d.device_id == "battery")
     assert battery.sources["capacity_kwh"] == "premises.csv row 7"

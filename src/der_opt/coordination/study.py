@@ -351,6 +351,13 @@ def check_coordination(scenario) -> list:
                 if missing:
                     found.append(Finding("error", "coordination", f"envelopes {quantity}: method weights needs "
                                          f"envelope_weight for {missing[:5]}"))
+            if method.method == "service_size":
+                limit = "import_limit_kw" if quantity == "import" else "export_limit_kw"
+                missing = [p.name for p in scenario.premises if roles[p.name].participant
+                           and getattr(p, limit) is None]
+                if missing:
+                    found.append(Finding("error", "coordination", f"envelopes {quantity}: method service_size needs "
+                                         f"{limit} (or poi_limit_kw) for {missing[:5]}"))
             if method.method == "fixed" and method.kw is None:
                 found.append(Finding("error", "coordination", f"envelopes {quantity}: method fixed needs kw"))
             if method.method == "file" and method.path is None:

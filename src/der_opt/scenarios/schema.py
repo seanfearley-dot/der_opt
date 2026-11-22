@@ -301,6 +301,8 @@ class PremiseDataConfig(BaseModel):
     premises: str  # premises.csv
     timeseries: list[str]  # one or more time series files; a premise's columns can span files
     network: str | None = None  # network.csv, instead of feeder.elements
+    devices: str | None = None  # devices.csv (input data spec 2.0), one row per device
+    templates: list[str] | None = None  # folders of device templates; default the library's devices/
     tz: str = "America/Los_Angeles"  # the local clock the run works on
     tariff_dir: str | None = None  # where premises' `tariff` names are looked up; default der-opt's example tariffs
     programs: dict[str, dict[str, Any]] = Field(default_factory=dict)  # nbt: {...}, nem2: {...}

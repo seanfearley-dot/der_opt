@@ -164,9 +164,191 @@ def _number(row, column):
     return None if value is None or pd.isna(value) else float(value)
 
 
+class PopulationError(ValueError):
+    """Every problem found in a population's files, each a separate line."""
+
+    def __init__(self, problems: list[str]):
+        self.problems = problems
+        super().__init__("premise_data problems:\n" + "\n".join(f"  - {p}" for p in problems))
+
+
+def _template_index(folders) -> dict[str, Template]:
+    """Templates by name, from every folder given (or the library's devices/ folder)."""
+    from der_opt.settings import library_dir
+
+    if not folders:
+        folders = [library_dir()[0] / "devices"]
+    found: dict[str, Template] = {}
+    for folder in folders:
+        for path in sorted(Path(folder).glob("*.yaml")):
+            try:
+                template = load_template(path)
+            except ValueError:
+                continue  # not a one-device template (a multi-device block, say)
+            if template.name in found and found[template.name].path != template.path:
+                both = f"template {template.name!r} is in two folders: {found[template.name].path} and {template.path}"
+                raise PopulationError([both])
+            found[template.name] = template
+    return found
+
+
+class _Series:
+    """Finds a premise's (or device's, or weather station's) series across the files."""
+
+    def __init__(self, paths, tz):
+        from der_opt.inputs import read_timeseries
+
+        self.paths, self.tz = list(paths), tz
+        self.files = [read_timeseries(path) for path in self.paths]
+
+    def find(self, column: str, premise: str, device_id: str | None = None, station: str | None = None) -> dict | None:
+        for path, ts in zip(self.paths, self.files, strict=True):
+            if ts.stations is not None:
+                if station is not None and ts.has(column, station=station):
+                    return {"source": "timeseries", "path": path, "weather_station": station, "column": column,
+                            "tz": self.tz}
+                continue
+            if ts.premises is None or not ts.has(column, premise, device_id):
+                continue
+            ref = {"source": "timeseries", "path": path, "premise_id": premise, "column": column, "tz": self.tz}
+            rows = ts.rows_for(premise, device_id, column=column)
+            if "device_id" in rows and (rows["device_id"] != "").any():
+                ref["device_id"] = rows["device_id"].iloc[0]
+            return ref
+        return None
+
+
+SETTING_COLUMNS = ("participation", "baseline_behavior", "response", "envelope_weight", "exclusive_import_export",
+                   "poi_limit_kw", "import_limit_kw", "export_limit_kw")
+
+
+def _v11_devices(premise, row, label, ctx, problems) -> list[ResolvedDevice] | None:
+    sizes = {c: _number(row, c) for c in ("pv_kw_ac", "battery_kwh", "battery_kw", "ev_battery_kwh", "ev_charger_kw")}
+    devices = []
+    pv = ctx["series"].find("pv_kw", premise)
+    if pv is not None:
+        devices.append(_device("solar", "solar", ctx["layers"]("solar", {"available_kw": pv}, label, v11=True), None,
+                               ctx["policies"]("solar", "solar"), ctx["rules"]))
+    elif sizes["pv_kw_ac"] is not None:
+        problems.append(f"{premise}: pv_kw_ac is set but there's no pv_kw time series for it")
+        return None
+    if sizes["battery_kwh"] is not None:
+        battery = _device("battery", "battery", ctx["layers"]("battery", {
+            "capacity_kwh": sizes["battery_kwh"], "p_max_charge_kw": sizes["battery_kw"],
+            "p_max_discharge_kw": sizes["battery_kw"]}, label, v11=True), None,
+            ctx["policies"]("battery", "battery"), ctx["rules"])
+        if "charge_sources" in battery.params and pv is None:  # nothing to charge from
+            battery.params.pop("charge_sources")
+            battery.sources.pop("charge_sources", None)
+        devices.append(battery)
+    if sizes["ev_battery_kwh"] is not None:
+        connected, driving = ctx["series"].find("ev_connected", premise), ctx["series"].find("ev_driving_kwh", premise)
+        if connected is None or driving is None:
+            problems.append(f"{premise}: an EV needs ev_connected and ev_driving_kwh time series")
+            return None
+        v2x = str(row.get("ev_v2x") or "0") in ("1", "1.0")
+        devices.append(_device("ev", "ev_v2x", ctx["layers"]("ev", {
+            "capacity_kwh": sizes["ev_battery_kwh"], "p_max_charge_kw": sizes["ev_charger_kw"],
+            "p_max_discharge_kw": sizes["ev_charger_kw"] if v2x else 0.0,
+            **ctx["plug_in"](connected, driving)}, label, v11=True), None, ctx["policies"]("ev", "ev"), ctx["rules"]))
+    return devices
+
+
+def _v2_devices(premise, row, ctx, problems) -> list[ResolvedDevice] | None:
+    from der_opt.inputs.spec import DEVICE_TYPES
+
+    devices = []
+    ok = True
+    station = row.get("weather_station") or None
+    for _, r in ctx["devices"].for_premise(premise).iterrows():
+        device_id, kind = r["device_id"], r["type"]
+        label = f"devices.csv row {r['row']}"
+        own: dict = {}
+        kw, kwh = _number(r, "kw"), _number(r, "kwh")
+        for column in r.index:
+            if column in ("row", "premise_id", "device_id", "type", "template", "kw", "kwh", "v2x", "installed_cost",
+                          "annual_om", "charge_sources"):
+                continue
+            value = r[column]
+            if value is not None and not (isinstance(value, float) and pd.isna(value)) and value != "":
+                own[column] = float(value) if isinstance(value, float) else value
+        if r.get("charge_sources"):
+            own["charge_sources"] = [s.strip() for s in str(r["charge_sources"]).split(";") if s.strip()]
+        found = ctx["series"].find
+        if kind == "solar":
+            pv = found("pv_kw", premise, device_id)
+            if pv is not None:
+                own["available_kw"] = pv
+        elif kind == "battery":
+            own |= {k: v for k, v in (("capacity_kwh", kwh), ("p_max_charge_kw", kw), ("p_max_discharge_kw", kw))
+                    if v is not None}
+        elif kind == "ev":
+            own |= {k: v for k, v in (("capacity_kwh", kwh), ("p_max_charge_kw", kw)) if v is not None}
+            if kw is not None:
+                own["p_max_discharge_kw"] = kw if str(r.get("v2x") or "") in ("1", "1.0") else 0.0
+            connected, driving = found("ev_connected", premise, device_id), found("ev_driving_kwh", premise, device_id)
+            if connected is not None and driving is not None:
+                own |= ctx["plug_in"](connected, driving) | {"pattern": None}  # its series replace a template pattern
+        elif kind == "thermostat":
+            if kw is not None:
+                own["p_max_kw"] = kw
+            temp = found("outdoor_temp_c", premise, device_id, station)
+            if temp is not None:
+                own["ambient_temp_c"] = temp
+        elif kind == "flexible_load":
+            baseline = found("flexible_kw", premise, device_id)
+            if baseline is not None:
+                own["baseline_load_kw"] = baseline
+        template = None
+        if r.get("template"):
+            template = ctx["templates"]().get(r["template"])
+            if template is None:
+                problems.append(f"{premise}/{device_id}: no template {r['template']!r} in "
+                                f"{ctx['template_folders'] or 'the library'}")
+                ok = False
+                continue
+        device = _device(device_id, DEVICE_TYPES[kind], ctx["layers"](kind, own, label), template,
+                         ctx["policies"](device_id, kind), ctx["rules"])
+        if kind == "flexible_load" and kw is not None:  # kw is the most it can shed: spread over its blocks
+            blocks = int(device.params.get("max_blocks", 1))
+            device.params |= {"max_blocks": blocks, "block_size_kw": kw / blocks}
+            device.sources |= {"max_blocks": device.sources.get("max_blocks", label), "block_size_kw": label}
+        needs = {"solar": ("available_kw", "pv_kw"), "thermostat": ("ambient_temp_c", "outdoor_temp_c"),
+                 "flexible_load": ("baseline_load_kw", "flexible_kw")}
+        if kind in needs and needs[kind][0] not in device.params:
+            problems.append(f"{premise}/{device_id}: a {kind} needs a {needs[kind][1]} series (or "
+                            f"{needs[kind][0]} from its template or defaults)")
+            ok = False
+        if kind == "ev" and "connected" not in device.params and "pattern" not in device.params:
+            problems.append(f"{premise}/{device_id}: an EV needs ev_connected and ev_driving_kwh series, or a "
+                            "pattern from its template")
+            ok = False
+        costs = {c: _number(r, c) for c in ("installed_cost", "annual_om") if _number(r, c) is not None}
+        device.costs = costs
+        devices.append(device)
+    names = {d.device_id for d in devices}
+    for device in devices:
+        missing = sorted(set(device.params.get("charge_sources", [])) - names)
+        if not missing:
+            continue
+        if device.sources.get("charge_sources", "").startswith("devices.csv"):
+            problems.append(f"{premise}/{device.device_id}: charges from {missing}, which aren't devices at {premise}")
+            ok = False
+        else:  # a default or template written for every premise: keep what this premise has
+            kept = [s for s in device.params["charge_sources"] if s in names]
+            if kept:
+                device.params["charge_sources"] = kept
+            else:
+                device.params.pop("charge_sources")
+                device.sources.pop("charge_sources", None)
+    return devices if ok else None
+
+
 def _premise_rows(config):
-    """Premises (and optionally the network) from v1.1 input-spec files."""
-    from der_opt.inputs import read_network, read_premises, read_timeseries
+    """Premises (and optionally the network and background rows) from input-spec
+    files: 2.0 with a devices file, or 1.1 with device columns."""
+    from der_opt.inputs import read_network, read_premises
+    from der_opt.inputs.spec import read_devices
     from der_opt.network import NetworkElement
     from der_opt.scenarios.data_sources import resolve_array_param
     from der_opt.scenarios.feeder import DEFAULT_TARIFF_DIR
@@ -174,100 +356,110 @@ def _premise_rows(config):
 
     data = config.premise_data
     if data is None:
-        return [], None
+        return [], None, {}
     defaults = config.house_defaults
     network = read_network(data.network) if data.network else None
     premises = read_premises(data.premises, network)
-    series = [read_timeseries(path) for path in data.timeseries]
+    devices_file = read_devices(data.devices, premises) if data.devices else None
+    series = _Series(data.timeseries, data.tz)
     time_grid = _build_time_grid(config.time_grid)
     default_policies = defaults.counterfactual.policies if defaults.counterfactual is not None else {}
+    index: dict = {}
 
-    def source(premise: str, column: str) -> dict | None:
-        """The time series file holding this premise's column, as a data source."""
-        for path, ts in zip(data.timeseries, series, strict=True):
-            if ts.premises is None or premise not in ts.premises or column not in ts.columns:
-                continue
-            rows = ts.data[ts.data["premise_id"] == premise]
-            if rows[column].notna().any():
-                return {"source": "timeseries", "path": path, "premise_id": premise, "column": column, "tz": data.tz}
-        return None
+    def templates():
+        if "all" not in index:
+            index["all"] = _template_index(data.templates)
+        return index["all"]
 
-    out, problems = [], []
+    def layers(kind, own, label, v11=False):
+        built_in = DEVICE_DEFAULTS.get(kind, {})
+        name = "built-in (v1.1 premises device defaults)" if v11 else "built-in (premises device defaults)"
+        return [Layer("built-in", name, built_in),
+                Layer("defaults", f"house_defaults.device_params.{kind}", defaults.device_params.get(kind, {})),
+                Layer("row", label, own)]
+
+    def policies(device_id, kind):
+        policy = default_policies.get(device_id, default_policies.get(kind))
+        return [("house_defaults.counterfactual", policy)]
+
+    def plug_in(connected, driving):
+        plugged = resolve_array_param(connected, time_grid)
+        departures = [t for t in range(1, len(plugged)) if plugged[t - 1] > 0.5 and plugged[t] <= 0.5]
+        return {"connected": [float(x) for x in plugged], "driving_kwh": driving, "departure_period": departures}
+
+    ctx = {"series": series, "layers": layers, "policies": policies, "plug_in": plug_in, "devices": devices_file,
+           "templates": templates, "template_folders": data.templates,
+           "rules": [("defaults", "house_defaults.rules", defaults.rules)]}
+
+    out, background, problems = [], {}, []
+    tags = premises.tags
     for number, (premise, row) in enumerate(premises.table.iterrows(), start=2):  # row 1 is the header
         label = f"premises.csv row {number}"
+        kind = row.get("kind") or "premise"
         element = row.get("element_id") or None
         if element is None:
             problems.append(f"{premise}: no element_id (every premise on a feeder needs one)")
             continue
-        load, imported = source(premise, "load_kw"), source(premise, "import_kw")
-        sizes = {c: _number(row, c) for c in ("pv_kw_ac", "battery_kwh", "battery_kw", "ev_battery_kwh", "ev_charger_kw")}
+        load, imported = series.find("load_kw", premise), series.find("import_kw", premise)
+        no_load = (row.get("load") or "") == "none"
         if imported is not None:
             external = imported | {"column": "net_kw"}
-            if any(v is not None for v in sizes.values()):
-                problems.append(f"{premise}: metered data (import_kw/export_kw) already includes its devices, so "
-                                "it can't also have solar, battery or EV sizes")
-                continue
         elif load is not None:
             external = load
+        elif no_load and kind != "background":
+            external = None
         else:
             problems.append(f"{premise}: no load_kw or import_kw time series in {data.timeseries}")
             continue
-
-        def layers(kind, own, label=label):
-            return [Layer("built-in", "built-in (v1.1 premises device defaults)", DEVICE_DEFAULTS[kind]),
-                    Layer("defaults", f"house_defaults.device_params.{kind}", defaults.device_params.get(kind, {})),
-                    Layer("row", label, own)]
-
-        rule_layers = [("defaults", "house_defaults.rules", defaults.rules)]
-        devices = []
-        pv = source(premise, "pv_kw")
-        if pv is not None:
-            devices.append(_device("solar", "solar", layers("solar", {"available_kw": pv}), None,
-                                   [("house_defaults.counterfactual", default_policies.get("solar"))], rule_layers))
-        elif sizes["pv_kw_ac"] is not None:
-            problems.append(f"{premise}: pv_kw_ac is set but there's no pv_kw time series for it")
+        if kind == "background":
+            background[premise] = (element, external)
             continue
-        if sizes["battery_kwh"] is not None:
-            battery = _device("battery", "battery", layers("battery", {
-                "capacity_kwh": sizes["battery_kwh"], "p_max_charge_kw": sizes["battery_kw"],
-                "p_max_discharge_kw": sizes["battery_kw"]}), None,
-                [("house_defaults.counterfactual", default_policies.get("battery"))], rule_layers)
-            if "charge_sources" in battery.params and pv is None:  # nothing to charge from
-                battery.params.pop("charge_sources")
-                battery.sources.pop("charge_sources", None)
-            devices.append(battery)
-        if sizes["ev_battery_kwh"] is not None:
-            connected, driving = source(premise, "ev_connected"), source(premise, "ev_driving_kwh")
-            if connected is None or driving is None:
-                problems.append(f"{premise}: an EV needs ev_connected and ev_driving_kwh time series")
+        if devices_file is not None:
+            devices = _v2_devices(premise, row, ctx, problems)
+            if imported is not None and devices:
+                problems.append(f"{premise}: metered data (import_kw/export_kw) already includes its devices, so "
+                                "it can't also have devices in the devices file")
                 continue
-            plugged = resolve_array_param(connected, time_grid)
-            departures = [t for t in range(1, len(plugged)) if plugged[t - 1] > 0.5 and plugged[t] <= 0.5]
-            v2x = str(row.get("ev_v2x") or "0") == "1"
-            devices.append(_device("ev", "ev_v2x", layers("ev", {
-                "capacity_kwh": sizes["ev_battery_kwh"], "p_max_charge_kw": sizes["ev_charger_kw"],
-                "p_max_discharge_kw": sizes["ev_charger_kw"] if v2x else 0.0,
-                "connected": [float(x) for x in plugged], "driving_kwh": driving, "departure_period": departures}),
-                None, [("house_defaults.counterfactual", default_policies.get("ev"))], rule_layers))
+        else:
+            sizes = [_number(row, c) for c in ("pv_kw_ac", "battery_kwh", "ev_battery_kwh")]
+            if imported is not None and any(v is not None for v in sizes):
+                problems.append(f"{premise}: metered data (import_kw/export_kw) already includes its devices, so "
+                                "it can't also have solar, battery or EV sizes")
+                continue
+            devices = _v11_devices(premise, row, label, ctx, problems)
+        if devices is None:
+            continue
 
-        own = {"external_load": external}
-        limits = {k: _number(row, k) for k in ("import_limit_kw", "export_limit_kw")}
-        own |= {k: v for k, v in limits.items() if v is not None}
+        own = {} if external is None else {"external_load": external}
+        for column in SETTING_COLUMNS:
+            value = row.get(column)
+            if value is None or (isinstance(value, float) and pd.isna(value)) or value == "":
+                continue
+            own[column] = value == "1" if column == "exclusive_import_export" else value
         if row.get("tariff"):
             program = row.get("export_program") or None
+            tier = _number(row, "income_tier")
             own["billing"] = {
                 "tariff": str(Path(data.tariff_dir or DEFAULT_TARIFF_DIR) / f"{row['tariff']}.yaml"),
-                "income_tier": data.income_tier,
+                "income_tier": int(tier) if tier is not None else data.income_tier,
                 "program": ({"type": program} | data.programs.get(program, {})) if program else None,
-                "baseline_territory": row.get("baseline_territory") or None, "baseline_code": data.baseline_code,
+                "baseline_territory": row.get("baseline_territory") or None,
+                "baseline_code": row.get("baseline_code") or data.baseline_code,
             }
         settings, sources = _house_layers(config, own, label)
-        extra = {"data": "metered" if imported else "gross", **{k: v for k, v in sizes.items() if v is not None},
-                 "tariff": row.get("tariff") or "", "export_program": row.get("export_program") or ""}
+        if row.get("customer_class"):
+            settings["customer_class"], sources["customer_class"] = row["customer_class"], label
+        extra = {"data": "metered" if imported is not None else ("no load" if external is None else "gross")}
+        if devices_file is None:
+            extra |= {c: _number(row, c) for c in ("pv_kw_ac", "battery_kwh", "battery_kw", "ev_battery_kwh",
+                                                   "ev_charger_kw") if _number(row, c) is not None}
+        extra |= {"tariff": row.get("tariff") or "", "export_program": row.get("export_program") or ""}
+        extra |= {t: row.get(t) for t in tags if row.get(t) not in (None, "")}
         out.append(ResolvedPremise(premise, "premises.csv", settings, sources, devices, element_id=element,
-                                   has_counterfactual=defaults.counterfactual is not None, extra=extra))
+                                   has_counterfactual=defaults.counterfactual is not None
+                                   or any(d.counterfactual is not None for d in devices), extra=extra))
     if problems:
-        raise ValueError("premise_data problems:\n" + "\n".join(f"  - {p}" for p in problems))
+        raise PopulationError(problems)
 
     elements = None
     if network is not None:
@@ -275,11 +467,12 @@ def _premise_rows(config):
             NetworkElement(element, _number(r, "rating_kw"), _number(r, "overload_cost_per_kwh"), r["parent_id"] or None)
             for element, r in network.table.iterrows()
         ]
-    return out, elements
+    return out, elements, background
 
 
-def resolve_feeder(config) -> tuple[list[ResolvedPremise], list | None]:
-    """Every premise on a feeder scenario, written-out houses first, and the network
-    elements if premise_data names a network file."""
-    from_files, elements = _premise_rows(config)
-    return [_house(config, house) for house in config.houses] + from_files, elements
+def resolve_feeder(config) -> tuple[list[ResolvedPremise], list | None, dict]:
+    """Every premise on a feeder scenario, written-out houses first; the network elements
+    if premise_data names a network file; and background rows from the premises file,
+    as name -> (element, load data source)."""
+    from_files, elements, background = _premise_rows(config)
+    return [_house(config, house) for house in config.houses] + from_files, elements, background

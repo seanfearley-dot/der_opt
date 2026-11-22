@@ -27,6 +27,7 @@ class ResolvedDevice:
     counterfactual_source: str | None = None
     rules: dict = field(default_factory=dict)  # mechanism -> rule
     rule_sources: dict = field(default_factory=dict)  # mechanism -> source
+    costs: dict = field(default_factory=dict)  # installed_cost, annual_om (to the participant)
 
     @property
     def kind(self) -> str:
@@ -73,10 +74,22 @@ class ResolvedPremise:
                     self.settings.get("baseline_behavior", "own_bill"),
                     self.settings.get("response", "optimized"), rules, self.settings.get("envelope_weight"))
 
+    def source_of(self, setting: str) -> str:
+        """Where a setting came from; for a mapping set field by field, each field's
+        source, as `field: source` when they differ."""
+        if setting in self.sources:
+            return self.sources[setting]
+        leaves = {k[len(setting) + 1:]: v for k, v in self.sources.items() if k.startswith(setting + ".")}
+        if not leaves:
+            return "built-in"
+        if len(set(leaves.values())) == 1:
+            return next(iter(leaves.values()))
+        return "; ".join(f"{k}: {v}" for k, v in sorted(leaves.items()))
+
     def parameter_rows(self) -> list[dict]:
         """One row per setting: premise settings, then each device's parameters."""
         rows = [{"premise_id": self.premise_id, "device_id": "", "setting": k, "value": _show(self.settings.get(k)),
-                 "source": self.sources.get(k, "built-in")} for k in (*PREMISE_SETTINGS, *ROLE_SETTINGS)
+                 "source": self.source_of(k)} for k in (*PREMISE_SETTINGS, *ROLE_SETTINGS, "customer_class")
                 if self.settings.get(k) is not None]
         for device in self.devices:
             for path, source in sorted(device.sources.items()):

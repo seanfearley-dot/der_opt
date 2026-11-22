@@ -212,6 +212,10 @@ def _run_feeder(scenario: Path, output_dir: Path | None, no_counterfactual: bool
         for label, run in runs.items():
             houses[f"bill_{label}"] = run.house_costs["bill"].round(2)
         houses.to_csv(output_dir / "houses.csv")
+        from der_opt.population.report import parameters_table, premises_table
+
+        premises_table(built.resolved, built.premises).to_csv(output_dir / "premises.csv", index=False)
+        parameters_table(built.resolved).to_csv(output_dir / "device_parameters.csv", index=False)
         if study.coordination is not None:
             study.coordination_table().to_csv(output_dir / "coordination.csv")
             study.customers_table().to_csv(output_dir / "customers.csv", index=False)
@@ -540,6 +544,11 @@ def run(
 
         output_dir.mkdir(parents=True, exist_ok=True)
         dispatch.device_dispatch.to_csv(output_dir / "device_dispatch.csv")
+        from der_opt.population.compile import resolve_scenario
+        from der_opt.population.report import parameters_table
+
+        raw = validation.config if validation is not None else config  # raw keeps template sources
+        parameters_table([resolve_scenario(raw)]).to_csv(output_dir / "device_parameters.csv", index=False)
         dispatch.grid_import.to_csv(output_dir / "grid_import.csv", header=["grid_import_kw"])
         dispatch.grid_export.to_csv(output_dir / "grid_export.csv", header=["grid_export_kw"])
         dispatch_plot(dispatch, title=premise.name).savefig(output_dir / "dispatch.png")
@@ -618,10 +627,14 @@ def validate(
     scenario: Path = typer.Argument(..., help="Path to a scenario YAML file"),
     cost_tests: bool = typer.Option(
         False, "--cost-tests", help="Also require what --cost-tests needs (OpenBCA set up, discount rates)"),
+    population: Path | None = typer.Option(
+        None, "--population", help="Write premises.csv (each premise and its devices) and device_parameters.csv "
+        "(every setting's value and source) to this folder"),
 ) -> None:
     """Check a scenario without solving it: what it extends, its schema, placeholders,
-    every file it names, its input data, avoided cost set, tariffs, device names, DR
-    event calendar and cost-test settings. Exits 1 on any error."""
+    every file it names, its input data, the population (devices, series, templates,
+    what each analysis needs), avoided cost set, tariffs, device names, DR event calendar
+    and cost-test settings. Exits 1 on any error."""
     import time
 
     from der_opt.scenarios.validate import validate_scenario
@@ -632,12 +645,58 @@ def validate(
         typer.echo(f"{scenario} extends {len(result.composed.fragments)} file(s):")
         for fragment in result.composed.fragments:
             typer.echo(f"  {fragment}")
+    if result.feeder is not None:
+        _print_mix(result.feeder)
+    if population is not None and (result.feeder is not None or result.premise is not None):
+        written = _write_population(population, result)
+        typer.echo(f"Wrote {', '.join(str(w) for w in written)}")
     _print_checks(result.report)
     typer.echo(f"\n({time.perf_counter() - started:.1f} s)")
     if not result.ok:
         typer.echo("Not ready to run: fix the errors above.")
         raise typer.Exit(code=1)
     typer.echo("Ready to run.")
+
+
+def _resolved_population(validation):
+    """(resolved premises, built premises) for a validated scenario."""
+    if validation.feeder is not None:
+        return validation.feeder.resolved, validation.feeder.premises
+    from der_opt.population.compile import resolve_scenario
+
+    return [resolve_scenario(validation.config)], [validation.premise]
+
+
+def _write_population(folder: Path, validation) -> list[Path]:
+    from der_opt.population.report import parameters_table, premises_table
+
+    resolved, built = _resolved_population(validation)
+    folder.mkdir(parents=True, exist_ok=True)
+    premises_table(resolved, built).to_csv(folder / "premises.csv", index=False)
+    parameters_table(resolved).to_csv(folder / "device_parameters.csv", index=False)
+    return [folder / "premises.csv", folder / "device_parameters.csv"]
+
+
+def _print_mix(feeder) -> None:
+    """Each element's premises and devices, by type, before anything is solved."""
+    from der_opt.population.report import premises_table
+
+    table = premises_table(feeder.resolved, feeder.premises)
+    groups = feeder.houses["group"]
+    typer.echo(f"Population: {len(table)} premises" + (f", {len(feeder.background)} background loads"
+                                                         if feeder.background else ""))
+    for element, rows in table.groupby("element_id", sort=False):
+        parts = []
+        for kind, size, unit in (("solar", "solar_kw", "kW"), ("battery", "battery_kwh", "kWh"), ("ev", "ev_kwh", "kWh"),
+                                 ("thermostat", "thermostat_kw", "kW"), ("flexible_load", "flexible_kw", "kW")):
+            count = int(rows[f"n_{kind}"].sum()) if f"n_{kind}" in rows else 0
+            if count:
+                total = rows[size].sum() if size in rows else float("nan")
+                extra = f" ({int(rows['ev_v2x'].fillna(False).astype(bool).sum())} V2X)" if kind == "ev" and "ev_v2x" in rows else ""
+                parts.append(f"{count} {kind.replace('_', ' ')} {total:,.1f} {unit}{extra}")
+        who = groups.loc[rows["premise_id"]].value_counts()
+        typer.echo(f"  {element}: {len(rows)} premises ({', '.join(f'{n} {g}' for g, n in who.items())})"
+                   + (f"; {', '.join(parts)}" if parts else "; no devices"))
 
 
 @app.command()
@@ -946,6 +1005,35 @@ def openbca(
     writes OpenBCA's input tables for each test, runs OpenBCA's core on them, and reports
     OpenBCA's results next to an SPM-convention re-tally of the same values."""
     _cost_tests(run_dir, openbca_path)
+
+
+convert_app = typer.Typer(help="Convert input files to the current input data spec")
+app.add_typer(convert_app, name="convert")
+
+
+@convert_app.callback()
+def _convert() -> None:
+    """Convert input files to the current input data spec."""
+    return
+
+
+@convert_app.command("premises")
+def convert_premises_command(
+    premises: Path = typer.Argument(..., help="A 1.1 premises.csv (with device columns)"),
+    timeseries: list[Path] = typer.Option(..., "--timeseries", help="Its time series file(s); repeat for each"),
+    out: Path = typer.Option(..., "--out", help="Folder to write the 2.0 premises.csv and devices.csv to"),
+) -> None:
+    """Write a 1.1 premises file as the 2.0 pair: premises.csv without device columns, and
+    devices.csv with one row per device (docs/INPUT_DATA_SPEC.md section 0)."""
+    from der_opt.population.convert import convert_premises
+
+    try:
+        result = convert_premises(premises, timeseries, out)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    counts = ", ".join(f"{n} {kind}" for kind, n in sorted(result.counts.items())) or "no devices"
+    typer.echo(f"Wrote {result.premises} and {result.devices} ({counts}).")
+    typer.echo("In the scenario's premise_data, point premises at the new file and add `devices:` with the devices file.")
 
 
 setup_app = typer.Typer(help="One-time setup of tools der-opt works with")

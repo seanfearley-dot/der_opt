@@ -7,9 +7,18 @@
 - **Phase 1, done:** the resolved premise, the precedence rule, and device templates.
   Single-home scenarios, `houses:` and v1.1 `premises.csv` rows compile to it; every
   example resolves to identical premises and gives identical results.
-- **Phases 2-4, to come:**
-  - phase 2: the population tables;
-  - phase 3: studies and the portfolio analysis;
+- **Phase 2, done:** the population tables, under `premise_data`:
+  - input spec 2.0: `devices.csv`, premise setting columns, tags, `kind: background`,
+    `load: none`, time series by `device_id`, `outdoor_temp_c` (with weather-station
+    files) and `flexible_kw`;
+  - templates by name;
+  - `validate` reporting every population problem by premise, and writing
+    `premises.csv` and `device_parameters.csv` (`--population`);
+  - `der-opt convert premises`. Converted v1.1 files build identical premises.
+- **Phases 3-4, to come:**
+  - phase 3: studies (population and analyses in separate files), study defaults with
+    `where` selectors and overrides, and the portfolio analysis with measure selectors
+    and costs (section 4a's D and T checks come with it);
   - phase 4: `add_devices`, migration and warnings on old names.
 - v0.2: what each analysis needs, checked by `validate` (section 4a). Also covers premises
 without load, series from data sources, background load, per-premise measure costs,

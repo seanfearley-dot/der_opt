@@ -76,7 +76,13 @@ def build_feeder_scenario(config: FeederScenarioConfig) -> FeederScenario:
     from der_opt.population.compile import resolve_feeder
     from der_opt.scenarios.loader import _resolve_external_load
 
-    resolved, file_elements = resolve_feeder(config)
+    resolved, file_elements, file_background = resolve_feeder(config)
+    from der_opt.population.compile import PopulationError
+    from der_opt.population.report import population_problems
+
+    problems = population_problems(resolved)
+    if problems:
+        raise PopulationError(problems)
     if file_elements is not None and config.feeder.elements:
         raise ValueError("network elements come from premise_data.network or feeder.elements, not both")
     elements = file_elements if file_elements is not None else [
@@ -94,11 +100,13 @@ def build_feeder_scenario(config: FeederScenarioConfig) -> FeederScenario:
     roles = {r.premise_id: r.role() for r in resolved}
     time_grid = _build_time_grid(config.time_grid)
     background = {}
-    for item in config.feeder.background_load:
-        if item.name in names or item.name in background:
-            raise ValueError(f"background_load {item.name!r}: the name is already used")
-        feeder.element(item.element)  # fails early on a typo
-        background[item.name] = (item.element, _resolve_external_load(item.load, time_grid))
+    items = [(item.name, item.element, item.load) for item in config.feeder.background_load]
+    items += [(name, element, load) for name, (element, load) in file_background.items()]  # kind: background rows
+    for name, element, load in items:
+        if name in names or name in background:
+            raise ValueError(f"background_load {name!r}: the name is already used")
+        feeder.element(element)  # fails early on a typo
+        background[name] = (element, _resolve_external_load(load, time_grid))
     streams = [CapacityDeferral(s.element, s.value_per_kw, s.threshold_kw) for s in config.feeder.value_streams]
     for stream in streams:
         feeder.element(stream.element)  # fails early on a typo

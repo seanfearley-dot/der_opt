@@ -1,9 +1,35 @@
 # der-opt input data specification
 
-**Version 1.1 — approved 2026-11-19** (1.1 adds `customer_class` to premises, for DR
-settlement baselines; see docs/DR_CAPACITY_SPEC.md). `der-opt check-data` validates files against it,
+**Version 2.0 — approved 2026-11-21** with the population model
+([POPULATION_MODEL_SPEC.md](POPULATION_MODEL_SPEC.md)). 2.0 adds a devices file, premise
+settings and tags, and per-device time series (section 0); everything else is as in 1.1
+(1.1 added `customer_class` to premises, for DR settlement baselines; see
+docs/DR_CAPACITY_SPEC.md). `der-opt check-data` validates files against it,
 and scenarios read these files directly (see the README's Input data section). Change
 it only by a new version, approved the same way.
+
+## 0. What 2.0 changes
+
+- **A devices file, `devices.csv`, one row per device** (section 2a). It replaces the
+  premises file's device columns (`pv_kw_ac`, `battery_kwh`, `battery_kw`,
+  `ev_battery_kwh`, `ev_charger_kw`, `ev_v2x`).
+  - v1.1 premises files with those columns still load, with a note. `der-opt convert
+    premises` writes the two 2.0 files.
+  - A premises file can't have both those columns and a devices file.
+- **The premises file gains:**
+  - `kind`: `premise` (the default), or `background` for load through an element that
+    isn't a customer, with no devices or bill;
+  - premise settings as columns, by name: `participation`, `baseline_behavior`,
+    `response`, `envelope_weight`, `exclusive_import_export` (`0`/`1`), `income_tier`,
+    `baseline_code`, `poi_limit_kw`, and `load` (`none` for a premise with no load);
+  - **tags:** any other column, carried through and usable to select premises.
+- **Time series gain:**
+  - an optional `device_id` key column;
+  - `outdoor_temp_c` (°C, may be negative), for thermostats;
+  - `flexible_kw` (kW), a flexible load's baseline.
+
+  A shared weather file can be keyed by a `weather_station` column instead of
+  `premise_id`, and a premise picks its station with a `weather_station` tag.
 
 ## Purpose
 
@@ -114,6 +140,39 @@ One row per premise. `premises.csv`:
 | `import_limit_kw` | no | most the premise can draw from the grid (service or panel rating) |
 | `export_limit_kw` | no | most it can send back (interconnection limit; `0` = non-export) |
 
+## 2a. Devices file (2.0)
+
+One row per device. `devices.csv`:
+
+| Column | Required | Meaning |
+|---|---|---|
+| `premise_id` | yes | the premise it's behind (in the premises file) |
+| `device_id` | yes | unique within the premise; letters, digits, `_` and `-` |
+| `type` | yes | `solar`, `battery`, `ev`, `thermostat` or `flexible_load` |
+| `template` | no | a device template's name (POPULATION_MODEL_SPEC.md section 2) |
+| `kw` | per type | `solar`: inverter AC rating (a check on `pv_kw`); `battery`: charge and discharge rating; `ev`: charger rating; `thermostat`: HVAC electric rating; `flexible_load`: the most it can shed |
+| `kwh` | per type | `battery`, `ev`: capacity |
+| `v2x` | no | EVs: `1` if it can discharge (at `kw`), else `0` |
+| `installed_cost`, `annual_om` | no | the device's cost to the participant: upfront $, and $/year |
+| `charge_sources` | no | devices at the same premise it may charge from, by `device_id`, `;`-separated |
+| any device parameter | no | by its name (`degradation_cost_per_kwh`, `soc_departure_min_frac`…); a plain number. An unknown column is rejected, naming the type's parameters |
+
+```csv
+premise_id,device_id,type,template,kw,kwh,v2x
+home_01,solar,solar,,4.8,,
+home_01,ev,ev,commuter_charger,7.2,60,0
+home_06,battery,battery,battery_13kwh,5,13.5,
+```
+
+Each device reads its series from the time series files:
+- solar: `pv_kw`;
+- EV: `ev_connected` and `ev_driving_kwh`, or its template's daily `pattern`;
+- thermostat: `outdoor_temp_c`;
+- flexible load: `flexible_kw`.
+
+Rows match on `premise_id` and `device_id`, or on `premise_id` alone when the premise
+has one device of that type.
+
 ## 3. Network file
 
 One row per transformer or line section. `network.csv`:
@@ -131,6 +190,10 @@ One row per transformer or line section. `network.csv`:
 
 - **Rejected (the file won't load):**
   - a missing required column, a bad timestamp or missing offset;
+  - in a devices file: a repeated `premise_id` + `device_id`, an unknown `type`, or a
+    column that isn't any device type's parameter;
+  - a premise setting with a value it can't take, such as `response: rules` without
+    `baseline_behavior: rule_based`;
   - an interval that isn't uniform, a duplicate row, a negative value;
   - a premise with both gross and metered columns;
   - an unknown `premise_id` or `element_id`;
