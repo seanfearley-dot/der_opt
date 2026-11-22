@@ -68,6 +68,10 @@ class DREventResponse(ValueStream):
         penalty = self.program.shortfall_penalty_per_kwh * self.dt
         return sum(penalty * self.shortfall[t] for t in self.steps)
 
+    def pass_through_gain(self, premise):
+        # on a net basis it doesn't see it; on an import basis more import only costs
+        return np.zeros(premise.time_grid.horizon_steps)
+
     def evaluate_numeric(self, grid_import, grid_export, time_grid):
         imp, exp = np.asarray(grid_import), np.asarray(grid_export)
         load = imp if self.basis == "import" else imp - exp

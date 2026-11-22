@@ -213,6 +213,21 @@ class NBTBill(_BillObjective):
             cost = cost - program.nsc_rate_per_kwh * surplus
         self._cost = cost
 
+    def pass_through_gain(self, premise: Premise) -> np.ndarray:
+        """Importing and exporting x at once adds x times each bucket's charge and its
+        credit. While each bucket's credit is all used, that pays where the credits
+        (with ACC Plus) beat the charges (with non-bypassable charges, which credit
+        never offsets). A bucket with credit to spare offsets its extra charge for free,
+        so the other bucket's credit alone can make it pay. Generation credit outruns
+        generation charges in far more hours (a solar home often has generation credit
+        left), so this also counts hours where delivery credit alone pays; a home with
+        delivery credit to spare instead is caught by the solve's check."""
+        common = self._acc_credit - self._charge["nbc"]
+        all_used = (self._credit["generation"] - self._charge["generation"]
+                    + self._credit["delivery"] - self._charge["delivery"])
+        generation_spare = self._credit["delivery"] - self._charge["delivery"]
+        return common + np.maximum(all_used, generation_spare)
+
 
 class NEM2Bill(_BillObjective):
     """Cost = the customer's NEM 2.0 bill for the dispatch's import and export (see
@@ -247,6 +262,9 @@ class NEM2Bill(_BillObjective):
                 tariff.baseline.allowance_kwh(dates, tariff.season_by_month, territory, code)
                 for dates in self._cycle_dates
             ]
+
+    def pass_through_gain(self, premise: Premise) -> np.ndarray:
+        return np.zeros(premise.time_grid.horizon_steps)  # every term sees import - export
 
     def apply(self, model: pyo.ConcreteModel, premise: Premise) -> None:
         imp, exp = premise.grid_import, premise.grid_export

@@ -1,5 +1,5 @@
 # der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
 # no import and export in the same step (a MILP)
-# No importing and exporting in the same step: needed whenever export can pay more than
-# import (NBT, LMP). Adds a yes/no per step (a MILP).
+# A single meter, no importing and exporting in the same step: needed whenever export
+# can pay more than import (NBT, LMP). Adds a yes/no only in the steps where it does.
 exclusive_import_export: true

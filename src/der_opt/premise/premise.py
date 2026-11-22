@@ -10,6 +10,75 @@ from der_opt.solvers.interface import SolverConfig
 from der_opt.solvers.registry import get_solver
 from der_opt.time_grid import TimeGrid
 
+PASS_THROUGH_TOLERANCE = 1e-9  # $ per kW-period: a gain above this gets the on/off variable
+SIMULTANEOUS_FLOW_KW = 1e-6
+MAX_METER_ROUNDS = 5
+
+
+def solve_single_meter(backend, model: pyo.ConcreteModel, premises) -> object:
+    """Solves a model with exclusive_import_export premises in it.
+
+    Both steps rest on one fact: a model with fewer of the meter's constraints is a
+    relaxation of the one with them, so if its solution never imports and exports at
+    once, that solution is optimal for the full single meter too.
+
+    1. Solve with the on/off variables relaxed to [0, 1]. That's often already a
+       single-meter solution (it was on the annual NBT example), and then the MIP
+       never runs: HiGHS can spend a minute in cut rounds on a MIP whose relaxation
+       is the answer.
+    2. Otherwise, solve the MIP.
+
+    After either, a period left without the on/off variable where the solution still
+    does both gets one, and the solve starts again (from MAX_METER_ROUNDS on, every
+    period gets one)."""
+    premises = [p for p in premises if p.exclusive_import_export]
+    result = None
+    for round_ in range(MAX_METER_ROUNDS + 1):
+        result = _solve_relaxed(backend, model, premises)
+        if result is not None and _is_optimal(result):
+            if not any(p.simultaneous_flow(metered=True) or p.unmetered_simultaneous_flow() for p in premises):
+                for premise in premises:
+                    premise.set_meter_from_flows()
+                return result
+            if _add_where_both(model, premises, round_):
+                continue
+        if result is None or premises:
+            result = backend.solve(model)
+        if not _add_where_both(model, premises, round_):
+            return result
+    return result
+
+
+def _solve_relaxed(backend, model, premises):
+    variables = [v for p in premises for var in p.meter_variables for v in var.values()]
+    if not variables:
+        return None
+    for v in variables:
+        v.domain = pyo.UnitInterval
+    try:
+        return backend.solve(model)
+    except (RuntimeError, ValueError):  # e.g. a backend that raises on no solution
+        return None
+    finally:
+        for v in variables:
+            v.domain = pyo.Binary
+
+
+def _add_where_both(model, premises, round_) -> bool:
+    added = False
+    for premise in premises:
+        periods = premise.unmetered_simultaneous_flow()
+        if periods:
+            premise.add_meter_binaries(model, premise.time_grid.periods if round_ >= MAX_METER_ROUNDS - 1 else periods)
+            added = True
+    return added
+
+
+def _is_optimal(result) -> bool:
+    from der_opt.results.extract import _solver_status
+
+    return _solver_status(result).rsplit(".", 1)[-1] == "optimal"
+
 
 class Premise:
     """Composes devices + an objective (value streams) + a point-of-interconnection
@@ -24,11 +93,17 @@ class Premise:
     import price (true of essentially every flat/TOU retail tariff, since a
     cost-minimizing LP would never choose to pay import price to resell at a lower
     export price), but if export can exceed import at some period (e.g. a wholesale-LMP
-    export price spike), the optimizer can "arbitrage" the POI itself for free money
-    with no real energy flow, bypassing any devices entirely. Set this True to forbid
-    that (adds one binary variable per period; makes the model a MILP, so unrelated
-    duals go through the fix-and-resolve path -- off by default so a premise with no
-    other integer variables keeps exact LP duals).
+    export price spike, or an NBT export credit above the import rate), the optimizer
+    can "arbitrage" the POI itself for free money with no real energy flow, bypassing
+    any devices entirely. Set this True to forbid that: a single meter, which either
+    imports or exports in each period.
+
+    It takes an on/off (binary) variable, which makes the model a MILP, but only in the
+    periods where it can matter: where the value streams' pass_through_gain says doing
+    both would pay. Elsewhere doing both costs money, so the optimum doesn't do it;
+    solve_single_meter adds the variable in any other period where a solution still
+    does both (a tie, or a gain the estimate missed) and solves again. A premise whose streams
+    never pay for it stays an LP, with exact duals.
 
     Meter limits: `import_limit_kw` caps what the premise can draw from the grid (its
     service or panel rating) and `export_limit_kw` what it can send back (its
@@ -78,6 +153,7 @@ class Premise:
         # populated by register()
         self.grid_import = None
         self.grid_export = None
+        self.meter_periods: set[int] = set()  # periods with the single-meter on/off variable
 
     def register(self, model: pyo.ConcreteModel, prefix: str = "") -> None:
         """`prefix` namespaces this premise's device components (e.g. "house_01_"), so
@@ -119,22 +195,61 @@ class Premise:
         self.poi_balance = pyo.Constraint(periods, rule=poi_rule)
         model.add_component(f"{self.name}_poi_balance", self.poi_balance)
 
+        self.meter_periods = set()
+        self.meter_variables = []
+        self._meter_round = 0
         if self.exclusive_import_export:
-            self.import_active = pyo.Var(periods, domain=pyo.Binary)
-            model.add_component(f"{self.name}_import_active", self.import_active)
+            self.add_meter_binaries(model, self.periods_needing_meter())
 
-            def import_exclusive_rule(_m, t):
-                return self.grid_import[t] <= self.import_limit_kw * self.import_active[t]
+    def periods_needing_meter(self) -> list[int]:
+        """The periods where importing and exporting at once could pay, by the value
+        streams' own bounds (all of them if any stream can't say)."""
+        gain = np.zeros(self.time_grid.horizon_steps)
+        for stream in self.value_streams:
+            bound = stream.pass_through_gain(self)
+            if bound is None:
+                return list(self.time_grid.periods)
+            gain = gain + np.asarray(bound, dtype=float)
+        return [int(t) for t in np.flatnonzero(gain > PASS_THROUGH_TOLERANCE)]
 
-            def export_exclusive_rule(_m, t):
-                return self.grid_export[t] <= self.export_limit_kw * (1 - self.import_active[t])
+    def add_meter_binaries(self, model: pyo.ConcreteModel, periods) -> None:
+        """Import or export, not both, in these periods: one binary each, with the meter
+        limits as big-M bounds."""
+        periods = sorted({int(t) for t in periods} - self.meter_periods)
+        if not periods:
+            return
+        self._meter_round += 1
+        suffix = "" if self._meter_round == 1 else f"_{self._meter_round}"
+        active = pyo.Var(periods, domain=pyo.Binary)
+        model.add_component(f"{self.name}_import_active{suffix}", active)
+        model.add_component(f"{self.name}_import_exclusive{suffix}", pyo.Constraint(
+            periods, rule=lambda _m, t: self.grid_import[t] <= self.import_limit_kw * active[t]))
+        model.add_component(f"{self.name}_export_exclusive{suffix}", pyo.Constraint(
+            periods, rule=lambda _m, t: self.grid_export[t] <= self.export_limit_kw * (1 - active[t])))
+        self.meter_periods |= set(periods)
+        self.meter_variables.append(active)
 
-            model.add_component(
-                f"{self.name}_import_exclusive", pyo.Constraint(periods, rule=import_exclusive_rule)
-            )
-            model.add_component(
-                f"{self.name}_export_exclusive", pyo.Constraint(periods, rule=export_exclusive_rule)
-            )
+    def simultaneous_flow(self, metered: bool) -> list[int]:
+        """Periods (with the on/off variable, or without) where the solved model
+        imports and exports at once."""
+        out = []
+        for t in self.time_grid.periods:
+            if (t in self.meter_periods) != metered:
+                continue
+            imp, exp = self.grid_import[t].value, self.grid_export[t].value
+            if imp is not None and exp is not None and min(imp, exp) > SIMULTANEOUS_FLOW_KW:
+                out.append(t)
+        return out
+
+    def unmetered_simultaneous_flow(self) -> list[int]:
+        return self.simultaneous_flow(metered=False) if self.exclusive_import_export else []
+
+    def set_meter_from_flows(self) -> None:
+        """Each on/off variable to 1 where the meter imports, 0 where it exports (after
+        a relaxed solve that already did one or the other)."""
+        for active in self.meter_variables:
+            for t in active:
+                active[t].value = 1.0 if (self.grid_import[t].value or 0.0) >= (self.grid_export[t].value or 0.0) else 0.0
 
     def total_cost_expr(self, model: pyo.ConcreteModel):
         device_cost = sum(
@@ -162,7 +277,7 @@ class Premise:
         needs both the solved model and the backend that solved it."""
         model = self.build_standalone_model()
         backend = get_solver(solver_config or SolverConfig())
-        solver_result = backend.solve(model)
+        solver_result = solve_single_meter(backend, model, [self])
         dispatch = build_dispatch_result(self, model, solver_result,
                                          objective_value=pyo.value(model.obj) - pyo.value(self._control_cost))
         return dispatch, model, backend

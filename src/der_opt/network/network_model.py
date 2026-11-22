@@ -25,7 +25,7 @@ import pandas as pd
 import pyomo.environ as pyo
 
 from der_opt.network.topology import Feeder
-from der_opt.premise.premise import Premise
+from der_opt.premise.premise import Premise, solve_single_meter
 from der_opt.results.extract import _solver_status, build_dispatch_result
 from der_opt.results.schema import DispatchResult
 from der_opt.solvers.interface import SolverConfig
@@ -329,7 +329,7 @@ class PooledNetworkSolver(NetworkSolver):
     def solve(self, network: NetworkDispatchModel):
         model = network.build_model()
         backend = get_solver(self.solver_config)
-        solver_result = backend.solve(model)
+        solver_result = solve_single_meter(backend, model, network.premises)
         return network.result_from_model(model, solver_result), model, backend
 
 
@@ -346,7 +346,7 @@ def solve_independently(
         model = premise.build_standalone_model()
         tie_break = _tie_break_expr(premise, tie_break_per_kwh_hour) + premise._control_cost  # neither is reported
         model.obj.expr = model.obj.expr + _tie_break_expr(premise, tie_break_per_kwh_hour)
-        solver_result = get_solver(solver_config or SolverConfig()).solve(model)
+        solver_result = solve_single_meter(get_solver(solver_config or SolverConfig()), model, [premise])
         results[premise.name] = build_dispatch_result(
             premise, model, solver_result, objective_value=pyo.value(model.obj) - pyo.value(tie_break)
         )

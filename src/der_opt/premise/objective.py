@@ -45,6 +45,16 @@ class ValueStream(ABC):
         stream whose cost depends only on the bus arrays (most do)."""
         raise NotImplementedError(f"{type(self).__name__} does not support evaluate_numeric")
 
+    def pass_through_gain(self, premise: Premise) -> np.ndarray | None:
+        """Per period, what this stream would gain ($ per kW held for the period) if
+        the meter imported and exported the same power at once -- energy that never
+        flows. A premise with exclusive_import_export gets its on/off variable only
+        where the streams' gains add up to more than zero; the solve adds it anywhere
+        else the dispatch still does both (der_opt.premise.premise.solve_single_meter),
+        so an estimate that's sometimes low costs a second solve, never a wrong answer.
+        None: can't say, so every period gets the variable."""
+        return None
+
 
 class EnergyArbitrage(ValueStream):
     """Energy import/export cost against two independent, possibly time-varying price
@@ -64,3 +74,6 @@ class EnergyArbitrage(ValueStream):
 
     def evaluate_numeric(self, grid_import: np.ndarray, grid_export: np.ndarray, time_grid: TimeGrid) -> float:
         return float(np.sum(self._import_rates * grid_import - self._export_rates * grid_export))
+
+    def pass_through_gain(self, premise: Premise) -> np.ndarray:
+        return self._export_rates - self._import_rates

@@ -67,7 +67,7 @@ What merges and what replaces:
 | `meter/` | `panel_15kw`, `panel_20kw` | meter limit, both directions |
 | | `interconnection_1mw` | 1 MW limit for a grid battery |
 | | `non_export` | nothing back to the grid |
-| | `no_simultaneous_import_export` | no import and export in the same step (needed when export can pay more than import; a MILP) |
+| | `no_simultaneous_import_export` | a single meter: no import and export in the same step (needed when export can pay more than import; on/off variables only in those steps) |
 | `counterfactual/` | `battery_self_consumption` | R1: the battery self-consumes |
 | | `ev_plug_and_charge` | R1: the EV charges at full power on plug-in |
 | `billing/` | `pge_e_elec_2026-06_nbt` | E-ELEC with NBT export credits |

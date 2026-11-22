@@ -152,8 +152,8 @@ poi_limit_kw: 20 # both directions
 """, "meter/panel_20kw.yaml")
 
 NO_SIMULTANEOUS = Section("""\
-# No importing and exporting in the same step: needed whenever export can pay more than
-# import (NBT, LMP). Adds a yes/no per step (a MILP).
+# A single meter, no importing and exporting in the same step: needed whenever export
+# can pay more than import (NBT, LMP). Adds a yes/no only in the steps where it does.
 exclusive_import_export: true
 """, "meter/no_simultaneous_import_export.yaml")
 

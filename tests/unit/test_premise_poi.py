@@ -112,3 +112,74 @@ def test_meter_limit_check_names_the_direction():
     over = dataclasses.replace(dispatch, grid_export=dispatch.grid_export + 1, grid_import=dispatch.grid_import + 1)
     messages = [f.message for f in check_dispatch(premise, over).findings if f.check == "meter limit"]
     assert any(m.startswith("export reaches 4.000 kW, over its 3 kW limit") for m in messages)
+
+
+# --- the single meter's on/off variable only where it matters --------------------------
+
+
+def _priced_house(export_prices, stream_class=EnergyArbitrage):
+    from der_opt.devices import BatteryStorage
+
+    n = len(export_prices)
+    tg = TimeGrid(resolution_minutes=60, horizon_steps=n, start=datetime(2026, 8, 1))
+    battery = BatteryStorage("battery", tg, capacity_kwh=10, p_max_charge_kw=5, p_max_discharge_kw=5)
+    stream = stream_class(CSVPriceSeries([0.30] * n), CSVPriceSeries(export_prices), tg)
+    return Premise("house", tg, devices=[battery], value_streams=[stream], external_load=[1.0] * n,
+                   poi_limit_kw=20, exclusive_import_export=True)
+
+
+def _both_ways(dispatch):
+    return ((dispatch.grid_import > 1e-6) & (dispatch.grid_export > 1e-6)).sum()
+
+
+def test_the_on_off_variable_goes_only_where_export_pays_more():
+    premise = _priced_house([0.10, 0.50, 0.10, 0.30])  # 0.30 is a tie: doing both gains nothing
+    dispatch, _, _ = premise.solve()
+    assert premise.meter_periods == {1} and _both_ways(dispatch) == 0
+
+
+def test_a_retail_rate_meter_stays_a_linear_program():
+    from der_opt.pricing.duals import extract_duals
+
+    premise = _priced_house([0.10] * 4)
+    dispatch, model, backend = premise.solve()
+    assert premise.meter_periods == set() and _both_ways(dispatch) == 0
+    assert extract_duals(model, backend, [f"{premise.name}_poi_balance"])[f"{premise.name}_poi_balance"].is_exact
+
+
+def test_the_solve_adds_the_variable_where_a_stream_missed_a_gain():
+    import numpy as np
+
+    class Understated(EnergyArbitrage):
+        def pass_through_gain(self, premise):
+            return np.zeros(premise.time_grid.horizon_steps)  # wrong: export pays more at t=1
+
+    exact, _, _ = _priced_house([0.10, 0.50, 0.10, 0.10]).solve()
+    premise = _priced_house([0.10, 0.50, 0.10, 0.10], Understated)
+    dispatch, _, _ = premise.solve()
+    assert premise.meter_periods == {1} and _both_ways(dispatch) == 0
+    assert dispatch.objective_value == pytest.approx(exact.objective_value)
+
+
+def test_an_unknown_stream_gets_the_variable_everywhere():
+    class Unknown(EnergyArbitrage):
+        def pass_through_gain(self, premise):
+            return None
+
+    premise = _priced_house([0.10] * 4, Unknown)
+    premise.solve()
+    assert premise.meter_periods == {0, 1, 2, 3}
+
+
+def test_nbt_meter_matches_on_off_in_every_hour():
+    from der_opt.scenarios import load_scenario
+
+    path = "examples/scenarios/battery_solar_lbnl_nbt.yaml"
+    auto = load_scenario(path)
+    dispatch, _, _ = auto.solve()
+    everywhere = load_scenario(path)
+    everywhere.periods_needing_meter = lambda: list(everywhere.time_grid.periods)
+    reference, _, _ = everywhere.solve()
+    assert 0 < len(auto.meter_periods) < auto.time_grid.horizon_steps // 10
+    assert _both_ways(dispatch) == 0
+    assert dispatch.objective_value == pytest.approx(reference.objective_value, rel=1e-4)

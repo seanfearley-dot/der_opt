@@ -258,7 +258,8 @@ poi_limit_kw: 15.0                  # meter limit, kW, both directions...
 import_limit_kw: 15.0               # ...or set each: draw from the grid (service/panel rating)
 export_limit_kw: 7.0                #     and send back (interconnection limit; 0 = non-export)
 exclusive_import_export: true       # see Modeling caveats -- turn on whenever export
-                                    # price can exceed import price (NBT, LMP)
+                                    # price can exceed import price (NBT, LMP); a single
+                                    # meter, with on/off variables only where that happens
 
 counterfactual:                     # optional; see Counterfactuals below
   policies:
@@ -304,8 +305,9 @@ A template's counterfactual policy gives the scenario a counterfactual run.
 `smoothing_cost_per_kw` is $ per kW of change in a battery's (or V2X EV's) power from one
 step to the next. It settles near-ties toward steady output: without it, the optimizer
 will swing the battery hour to hour to catch a cent's difference in price. It steers the
-dispatch only and is left out of every reported cost and value. A large value makes runs
-with on/off variables (`exclusive_import_export`, DR) much slower.
+dispatch only and is left out of every reported cost and value. It ties each step to the
+next, which can make runs with many on/off variables slower (the meter's
+`exclusive_import_export` keeps its own few; see Modeling caveats).
 
 - **Meter limits.** `import_limit_kw` and `export_limit_kw` are separate because they
   usually differ: import is the service rating, export what the interconnection allows.
@@ -1152,8 +1154,9 @@ wrong answer before it was understood:
   that credit would offset the rest of the month. It also needs
   `exclusive_import_export: true`: on some summer evenings the delivery export credit
   is higher than the delivery import rate, and without it the optimizer imports and
-  exports in the same hour. That makes the solve a MILP (the annual example takes
-  about a minute instead of ~4 s).
+  exports in the same hour. That makes the solve a MILP, but only in the hours where
+  export can pay more (216 of 2026's 8,760 on E-ELEC, plus 22 where the delivery
+  credit alone does), so the annual example runs in about 75 s instead of 6.5 minutes.
 
 - **Terminal SOC and fair comparisons.** Energy left in a battery/EV at the end of the
   horizon isn't valued, so whichever dispatch ends with *less* stored energy looks
@@ -1165,8 +1168,14 @@ wrong answer before it was understood:
 - **`exclusive_import_export`.** By default import and export are only linked by their
   difference, so if export price ever exceeds import price the optimizer can import
   and export simultaneously for free money. Real NBT export rates spike above typical
-  import rates on summer evenings — turn this on for NBT/LMP export scenarios. (It
-  adds a binary per period, so duals become fix-and-resolve approximations.)
+  import rates on summer evenings — turn this on for NBT/LMP export scenarios. It's a
+  single meter: each period imports or exports, not both. That takes an on/off
+  (binary) variable, but only in periods where doing both could pay: each value stream
+  says where (`pass_through_gain`), and the solve adds the variable anywhere else a
+  solution still does both, then solves again. It also solves with the on/off
+  variables relaxed first and keeps that solution if it already never does both, so
+  the MILP only runs when it has to. A premise whose prices never pay for it stays an
+  LP with exact duals; otherwise duals are fix-and-resolve approximations.
 - **EV customer expectations.** Use a realistic departure target (~0.8), not the
   statistical daily-need minimum (~0.1) — the latter lets the optimizer run the car
   near-empty for export revenue. `integrations/ev_profile.charging_device_params()`

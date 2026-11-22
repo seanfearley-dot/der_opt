@@ -76,6 +76,9 @@ class SignalAdder(ValueStream):
     def evaluate_numeric(self, grid_import, grid_export, time_grid):
         return float(np.sum(self.rates * (np.asarray(grid_import) - np.asarray(grid_export))))
 
+    def pass_through_gain(self, premise):
+        return np.zeros(premise.time_grid.horizon_steps)  # net import only
+
 
 class EnvelopeLimit(ValueStream):
     """Import and export no more than the envelope, softly: each kWh over costs the
@@ -107,6 +110,9 @@ class EnvelopeLimit(ValueStream):
 
     def evaluate_numeric(self, grid_import, grid_export, time_grid):
         return self.penalty * float(sum(violations(self.import_caps, self.export_caps, grid_import, grid_export)))
+
+    def pass_through_gain(self, premise):
+        return np.zeros(premise.time_grid.horizon_steps)  # more of either can only cost
 
 
 def violations(import_caps, export_caps, grid_import, grid_export) -> tuple[float, float]:

@@ -253,6 +253,13 @@ class TariffEnergyCharge(ValueStream):
                     break
         return float(-total if self.direction == "export" else total)
 
+    def pass_through_gain(self, premise: Premise) -> np.ndarray:
+        dt = self.time_grid.dt_hours
+        rates = [[tier.rate for tier in self.tariff.energy_periods[i]] for i in self._period_index]
+        if self.direction == "export":
+            return np.array([max(r) for r in rates]) * dt
+        return -np.array([min(r) for r in rates]) * dt
+
 
 class DemandCharge(ValueStream):
     """cost = rate_per_kw * peak_demand, where peak_demand >= grid_import[t] for every
@@ -283,6 +290,9 @@ class DemandCharge(ValueStream):
     def evaluate_numeric(self, grid_import, grid_export, time_grid: TimeGrid) -> float:
         return float(self.rate_per_kw * np.max(grid_import))
 
+    def pass_through_gain(self, premise: Premise) -> np.ndarray:
+        return np.zeros(premise.time_grid.horizon_steps)  # more import can only raise the peak
+
 
 class CapacityReliabilityPayment(ValueStream):
     """Revenue for committing to have at least `committed_kw` of reducible/dischargeable
@@ -301,3 +311,6 @@ class CapacityReliabilityPayment(ValueStream):
 
     def evaluate_numeric(self, grid_import, grid_export, time_grid: TimeGrid) -> float:
         return float(-self.payment_per_kw_event * self.committed_kw * len(self.event_periods))
+
+    def pass_through_gain(self, premise: Premise) -> np.ndarray:
+        return np.zeros(premise.time_grid.horizon_steps)  # doesn't depend on the meter
