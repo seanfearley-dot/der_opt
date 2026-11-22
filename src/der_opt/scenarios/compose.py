@@ -21,6 +21,7 @@ import yaml
 PATH_KEYS = frozenset({
     "path", "csv_path", "export_rates_csv", "tariff", "tariff_dir", "urdb_json_path",
     "scenario_dir", "arrivals_csv", "departures_csv", "set", "file", "premises", "network", "timeseries",
+    "template",
 })
 MERGE_BY_NAME = frozenset({"devices"})
 

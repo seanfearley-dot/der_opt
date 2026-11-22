@@ -234,16 +234,12 @@ def test_no_counterfactual_section_gives_none():
 
 
 def test_counterfactual_policy_for_unknown_device_raises(tmp_path):
-    from der_opt.scenarios import (
-        build_counterfactual_policies,
-        build_premise,
-        load_scenario_config,
-    )
+    from der_opt.scenarios import load_scenario_config
 
     path = _scenario_with_policies(tmp_path, "    not_a_device: {type: self_consumption}\n")
-    config = load_scenario_config(path)
-    with pytest.raises(ValueError, match="not_a_device"):
-        build_counterfactual_policies(config, build_premise(config))
+    # caught when the scenario is resolved, before anything is built
+    with pytest.raises(ValueError, match="unknown device 'not_a_device'"):
+        load_scenario_config(path)
 
 
 def test_counterfactual_policy_on_wrong_device_type_raises(tmp_path):

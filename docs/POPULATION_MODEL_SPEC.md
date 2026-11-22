@@ -2,6 +2,15 @@
 
 **Version 1.0**, approved 2026-11-21 with the recommended choice on each decision, and
 `add_devices` (section 3a, decision 12).
+
+**Build status:**
+- **Phase 1, done:** the resolved premise, the precedence rule, and device templates.
+  Single-home scenarios, `houses:` and v1.1 `premises.csv` rows compile to it; every
+  example resolves to identical premises and gives identical results.
+- **Phases 2-4, to come:**
+  - phase 2: the population tables;
+  - phase 3: studies and the portfolio analysis;
+  - phase 4: `add_devices`, migration and warnings on old names.
 - v0.2: what each analysis needs, checked by `validate` (section 4a). Also covers premises
 without load, series from data sources, background load, per-premise measure costs,
 measures selected by type, and any premise setting as a column.

@@ -258,6 +258,23 @@ billing:                            # optional; see Billing below
 Every device has `type`, a unique `name`, and `params`. Any array-valued param
 (marked *array*) can be a literal list or a data source (see below).
 
+A device can also name a **template**: a file of parameters for one device type, with
+its counterfactual policy and rules ([docs/POPULATION_MODEL_SPEC.md](docs/POPULATION_MODEL_SPEC.md)
+section 2). Its own `params` go on top. Any one-device library block works as a template:
+
+```yaml
+devices:
+  - {type: battery, name: battery, template: ../library/devices/battery_13kwh.yaml, params: {capacity_kwh: 10}}
+```
+
+Every setting is resolved by one precedence rule. From weakest to strongest:
+1. built-in defaults;
+2. the template;
+3. defaults (`house_defaults` on a feeder);
+4. the premise's or device's own value.
+
+A template's counterfactual policy gives the scenario a counterfactual run.
+
 | `type` | Required params | Optional params (default) |
 |---|---|---|
 | `solar` | `available_kw` *array* | — |

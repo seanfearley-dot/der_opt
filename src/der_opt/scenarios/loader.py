@@ -231,11 +231,21 @@ def _resolve_external_load(config, time_grid: TimeGrid) -> np.ndarray:
 def load_scenario_config(path: str | Path) -> ScenarioConfig:
     """Parses and validates a scenario YAML file without building anything: merges
     what it `extends` and resolves its paths from the files that name them
-    (docs/SCENARIO_COMPOSITION_SPEC.md)."""
-    return ScenarioConfig.model_validate(load_composed(path).data)
+    (docs/SCENARIO_COMPOSITION_SPEC.md). The result is the resolved premise as a scenario
+    (docs/POPULATION_MODEL_SPEC.md): device templates expanded, every setting decided."""
+    return resolved_config(ScenarioConfig.model_validate(load_composed(path).data))
+
+
+def resolved_config(config: ScenarioConfig) -> ScenarioConfig:
+    """The scenario with every setting resolved by the precedence rule (templates
+    expanded); a scenario that's already resolved comes back the same."""
+    from der_opt.population.compile import resolve_scenario
+
+    return resolve_scenario(config).to_scenario_config(config.time_grid)
 
 
 def build_premise(config: ScenarioConfig) -> Premise:
+    config = resolved_config(config)
     time_grid = _build_time_grid(config.time_grid)
 
     built_devices: dict[str, Device] = {}

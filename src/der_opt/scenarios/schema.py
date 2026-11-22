@@ -15,6 +15,9 @@ class DeviceConfig(BaseModel):
     type: Literal["solar", "battery", "thermostat", "curtailable_load", "ev_v2x"]
     name: str
     params: dict[str, Any] = Field(default_factory=dict)
+    # a device template (docs/POPULATION_MODEL_SPEC.md section 2): its parameters,
+    # counterfactual policy and rules, under these params
+    template: str | None = None
 
 
 class ValueStreamConfig(BaseModel):
