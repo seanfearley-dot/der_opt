@@ -199,7 +199,7 @@ def _check_dr(v: Validation) -> None:
     v.report.ran("dr calendar", found)
 
 
-def _check_cost_test(v: Validation, cost_tests: bool, check_openbca: bool) -> None:
+def _check_cost_test(v: Validation, cost_tests: bool, check_openbca: bool, openbca=None) -> None:
     from der_opt.settings import openbca_dir
 
     if v.config.cost_test is None:
@@ -211,14 +211,14 @@ def _check_cost_test(v: Validation, cost_tests: bool, check_openbca: bool) -> No
                              "needed to run the cost tests in OpenBCA"))
     try:
         if check_openbca:
-            openbca_dir()
+            openbca_dir(openbca)
     except FileNotFoundError as exc:
         found.append(Finding(level, "cost test", f"{exc} (needed for --cost-tests and `der-opt openbca`)"))
     v.report.ran("cost test", found)
 
 
 def validate_scenario(path: str | Path, cost_tests: bool = False, build: bool = True,
-                      before_run: bool = False) -> Validation:
+                      before_run: bool = False, openbca: str | Path | None = None) -> Validation:
     """Runs every no-solve check on a scenario. With cost_tests, a missing OpenBCA or
     missing discount rates are errors rather than warnings. before_run (what `der-opt
     run` uses) leaves out what only `der-opt validate` reports: `check-data`'s
@@ -284,5 +284,5 @@ def validate_scenario(path: str | Path, cost_tests: bool = False, build: bool = 
     _check_ev_patterns(v)
     _check_billing(v)
     _check_dr(v)
-    _check_cost_test(v, cost_tests, check_openbca=cost_tests or not before_run)
+    _check_cost_test(v, cost_tests, check_openbca=cost_tests or not before_run, openbca=openbca)
     return v

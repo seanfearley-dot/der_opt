@@ -106,6 +106,25 @@ def test_avoided_cost_calendar_maps_by_date():
     assert values.loc["2026-07-15 18:00", "energy"] == pytest.approx(local.loc["2027-07-15 19:00", "energy"])
 
 
+def test_openbca_gets_absolute_paths_when_called_with_relative_ones(exported, run_dir, tmp_path, monkeypatch):
+    """OpenBCA runs from its own checkout, so relative paths (the default out/<name>, a
+    relative --openbca) must be made absolute before it's called."""
+    import subprocess
+
+    checkout = tmp_path / "checkout"
+    (checkout / ".venv" / "bin").mkdir(parents=True)
+    (checkout / ".venv" / "bin" / "python").write_text("", encoding="utf-8")
+    (checkout / "core").mkdir()
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda command, **kw: calls.append((command, kw))
+                        or subprocess.CompletedProcess(command, 0, "", ""))
+    monkeypatch.chdir(tmp_path)
+    run_openbca(exported[:1], Path("checkout"), Path(os.path.relpath(run_dir / "openbca" / "run_core.py", tmp_path)))
+    (command, kw), = calls
+    assert all(Path(arg).is_absolute() for arg in command), command
+    assert Path(kw["cwd"]).is_absolute() and Path(command[0]) == (checkout / ".venv" / "bin" / "python").resolve()
+
+
 @pytest.mark.skipif(not OPENBCA_DIR, reason="needs an OpenBCA checkout: set OPENBCA_DIR")
 def test_openbca_runs_and_reconciles(exported, run_dir):
     run_openbca(exported, OPENBCA_DIR, run_dir / "openbca" / "run_core.py")

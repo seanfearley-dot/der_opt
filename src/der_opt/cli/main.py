@@ -31,14 +31,14 @@ def _write_checks(output_dir: Path, scenario: Path, config, report, results: dic
     return write_run_record(output_dir, scenario, config.model_dump(mode="json"), report, results, composed)
 
 
-def _validate_first(scenario: Path, cost_tests: bool):
+def _validate_first(scenario: Path, cost_tests: bool, openbca_path: Path | None = None):
     """Runs `der-opt validate`'s checks; stops the run on any error."""
     import time
 
     from der_opt.scenarios.validate import validate_scenario
 
     started = time.perf_counter()
-    validation = validate_scenario(scenario, cost_tests=cost_tests, before_run=True)
+    validation = validate_scenario(scenario, cost_tests=cost_tests, before_run=True, openbca=openbca_path)
     if not validation.ok:
         typer.echo(f"{scenario} didn't validate, so nothing was solved:")
         for line in validation.report.lines():
@@ -409,7 +409,7 @@ def run(
         raise typer.BadParameter("--cost-tests is for single-measure runs; feeder scenarios don't have cost tests yet")
     if cost_tests and sections.get("cost_test") is None:
         raise typer.BadParameter("--cost-tests needs a cost_test section in the scenario")
-    validation = None if no_validate else _validate_first(scenario, cost_tests)
+    validation = None if no_validate else _validate_first(scenario, cost_tests, openbca_path)
     if feeder:
         if duals:
             typer.echo("(feeder runs always report congestion prices; --duals adds nothing)")

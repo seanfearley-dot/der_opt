@@ -335,8 +335,13 @@ def export_openbca(package: str | Path, out_dir: str | Path) -> list[ExportedTes
 
 
 def run_openbca(exported: list[ExportedTest], openbca_dir: str | Path, runner: Path) -> None:
-    """Runs OpenBCA's core (its own Python environment) on each exported test."""
-    openbca_dir = Path(openbca_dir)
+    """Runs OpenBCA's core (its own Python environment) on each exported test.
+
+    OpenBCA runs from its own checkout (cwd), so every path handed to it is made
+    absolute first; a path relative to the caller's folder (the default out/<name> of
+    `der-opt run --cost-tests`, or a relative --openbca) would otherwise point inside
+    the checkout. That includes the interpreter, which is looked up relative to cwd."""
+    openbca_dir = Path(openbca_dir).expanduser().resolve()
     python = openbca_dir / ".venv" / "bin" / "python"
     if not python.exists():
         python = openbca_dir / ".venv" / "Scripts" / "python.exe"
@@ -347,8 +352,9 @@ def run_openbca(exported: list[ExportedTest], openbca_dir: str | Path, runner: P
         # input tables whose model definitions haven't changed, even if the files have
         for stale in (item.folder / "output").glob("openbca.db*"):
             stale.unlink()
-        result = subprocess.run([str(python), str(runner), str(item.folder / "input_project"), str(openbca_dir / "core"),
-                                 str((item.folder / "output").resolve())], capture_output=True, text=True, cwd=openbca_dir)
+        result = subprocess.run([str(python), str(Path(runner).resolve()), str((item.folder / "input_project").resolve()),
+                                 str(openbca_dir / "core"), str((item.folder / "output").resolve())],
+                                capture_output=True, text=True, cwd=openbca_dir)
         (item.folder / "output" / "openbca.log").write_text(result.stdout + result.stderr, encoding="utf-8")
         if result.returncode != 0:
             raise RuntimeError(f"OpenBCA failed on {item.test}; see {item.folder / 'output' / 'openbca.log'}\n"
