@@ -344,6 +344,19 @@ def net_load_table(cases: dict[str, Case]) -> pd.DataFrame:
     return pd.DataFrame({name: case.result.grid_import - case.result.grid_export for name, case in cases.items()})
 
 
+def device_table(cases: dict[str, Case]) -> pd.DataFrame:
+    """cases_device_dispatch.csv: each case's device power (kW, generation and discharge
+    positive) and stored energy (kWh, start of step), as `case.device.net_power` and
+    `case.device.soc`."""
+    columns = {}
+    for name, case in cases.items():
+        frame = case.result.device_dispatch
+        for column in frame.columns:
+            if column.endswith((".net_power", ".soc")):
+                columns[f"{name}.{column}"] = frame[column]
+    return pd.DataFrame(columns, index=next(iter(cases.values())).result.grid_import.index)
+
+
 def printed_rows(cases: dict[str, Case], dt: float) -> pd.DataFrame:
     rows = []
     for case in cases.values():

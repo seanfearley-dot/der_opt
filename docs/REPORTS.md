@@ -75,25 +75,25 @@ folder's `summary.json` and CSVs.
 - **Light and dark** follow the system setting.
 
 What each page shows:
-- **Single home:** the TRC and RIM ratios, leading the panel; then "Compare [case]
-  with [case]", with quick buttons for the usual questions (the solar, the measure
-  under rule-based control, optimization, DR participation, everything) and cards for
-  what moved: bill, total cost, import, export, peak import and the DR incentive. It
-  opens on the cost tests' own pair, so the cards describe the change the ratios do.
-  Then the value breakdown; a Compare section for the same pair (bills by month, value
-  streams, net load on the linked time axis, the average day by month and the change
-  by month and hour), all drawn in the page, so changing the pair needs no re-run; the meter
-  and each device's power and stored energy (counterfactual dotted); where optimization
-  moved load, by hour and day; energy by month; DR capacity by month and the events;
-  screening values; cost tests (OpenBCA's results); bills; checks; every setting
-  with its source.
+- **Single home:** one A/B choice, pinned at the top while you scroll, drives the
+  page ([docs/COMPARISON_CASES_SPEC.md](COMPARISON_CASES_SPEC.md) section 5): pick any
+  two cases (or a quick button: the solar, the measure under rule-based control,
+  optimization, DR participation, everything), and every difference is **A − B**,
+  positive meaning B is lower. It opens on the cost tests' own pair. The TRC and RIM
+  ratios lead the summary; then cards for bill, total cost, import, export and peak
+  import (A − B) and the DR incentive. The value breakdown, the meter and each device's
+  power and stored energy, net load A − B by hour and day, the average day by month,
+  energy by month and the bills all show A and B. DR capacity and events, screening
+  values and the cost tests describe fixed comparisons and say so; then checks and
+  every setting with its source. A folder written before cases shows optimal against
+  counterfactual instead.
 - **Feeder:** cards (costs by run, network saving, who pays more); premises by element;
   costs by run; peak flow by element and run, and each element's flow over time with
   its rating; congestion prices; each premise's bill change under coordination and its
   bills by run; the coordination runs against the ideal; checks; settings.
 - **Study:** cards (premises, device types, analyses); the feeder analysis's headline
   figures, linked to its page; the portfolio (a bar per premise for a chosen measure;
-  a case pair for the whole study, with each premise's bill savings for it, largest
+  one A/B case choice for the whole study, with each premise's bill A − B, largest
   first, and the total; and the table, with each case's bill, each premise linked to
   its page); the population by element, the
   premises table, and what `add_devices` chose; checks; settings. Each run's page links

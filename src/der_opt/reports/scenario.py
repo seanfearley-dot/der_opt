@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 from pathlib import Path
 
 import numpy as np
@@ -67,15 +68,40 @@ def build(folder: Path, summary: dict, page: Page | None = None) -> Page:
                              ("good" if (ratio or 0) >= 1 else "bad") + " feature"))
     from der_opt.reports import cases as compare
 
+    paired = compare.setup(page, folder, summary)  # the A/B bar pinned at the top drives the page
     if featured:
         page.cards(top, featured)  # the cost tests lead the panel
-    if not compare.selector(page, top, folder, summary):  # a folder written before cases: the old cards
+        if paired:
+            compare.fixed(page, top, "TRC and RIM measure the cost tests' own comparison"
+                          + _cost_test_pair(summary) + ".")
+    if paired:
+        compare.summary_cards(page, top)
+    else:  # a folder written before cases: optimal against counterfactual
         page.cards(top, cards)
     devices = ", ".join(f"{d['name']} ({d['type']}{', ' + Path(d['template']).stem if d.get('template') else ''})"
                         for d in summary.get("devices") or []) or "no devices"
     page.text(top, f"Devices: {devices}. Status: {summary.get('status')}.")
     for pattern in summary.get("ev_patterns") or []:
         page.text(top, f"EV {pattern['device']} daily pattern: {pattern['summary']}")
+
+    if paired:
+        imported = _series(folder, "grid_import.csv")
+        compare.value(page)
+        compare.dispatch(page, opening_window(imported) if imported is not None else None)
+        compare.energy(page)
+        _dr(page, folder, summary)
+        _screening(page, summary)
+        _cost_tests(page, summary)
+        compare.bills(page)
+        for section in page.sections:
+            what = {"dr": "it compares the DR study's own runs (R1, R2, R3) and settlement baseline S",
+                    "screening": "screening values compare the cost tests' runs" + _cost_test_pair(summary),
+                    "cost-tests": "the tests compare" + _cost_test_pair(summary)}.get(section.id)
+            if what:
+                section.parts.insert(0, f'<p class="note fixed">Not set by A and B: {html.escape(what)}.</p>')
+        _checks(page, summary)
+        _settings(page, folder)
+        return page
 
     # --- value breakdown
     streams = [k for k in optimal if k != "total"]
@@ -90,8 +116,6 @@ def build(folder: Path, summary: dict, page: Page | None = None) -> Page:
         page.chart(section, traces, {"barmode": "group", "yaxis": {"title": "$ over the run (cost +, value −)"},
                                      "hovermode": "closest"}, height=320)
 
-    imported = _series(folder, "grid_import.csv")
-    compare.section(page, summary, opening_window(imported) if imported is not None else None)
     _dispatch(page, folder, summary)
     _energy(page, folder)
     _dr(page, folder, summary)
@@ -101,6 +125,14 @@ def build(folder: Path, summary: dict, page: Page | None = None) -> Page:
     _checks(page, summary)
     _settings(page, folder)
     return page
+
+
+def _cost_test_pair(summary: dict) -> str:
+    cases, compare = summary.get("cases") or {}, summary.get("case_compare") or {}
+    pair = compare.get("cost_tests")
+    if not pair:
+        return ""
+    return f" ({cases[pair[0]]['label']} against {cases[pair[1]]['label']})"
 
 
 def _subtitle(summary: dict) -> str:

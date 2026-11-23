@@ -1,7 +1,9 @@
 # der-opt comparison cases specification
 
-**v1.0, approved 2026-11-22**, with the recommended answer to each decision in
-section 8. Built as written, except where a note below says otherwise.
+**v1.1, 2026-11-22.** v1.0 was approved 2026-11-22 with the recommended answer to each
+decision in section 8; v1.1 makes one A/B choice drive the whole report page, with
+every difference shown as A − B (section 5). Built as written, except where a note
+below says otherwise.
 
 ## Purpose
 
@@ -118,6 +120,7 @@ reads them breaks.
 |---|---|
 | `cases.csv` | one row per case and billing cycle: bill (amount due), import kWh, export kWh, peak kW; and one whole-run row per case with its bill, DR incentive and cost by value stream (as built: a bill stream nets over the run, so its cost doesn't split by cycle) |
 | `cases_net_load_kw.csv` | one column per case: net load at the meter (import − export), every step |
+| `cases_device_dispatch.csv` | each case's device power (`case.device.net_power`, kW) and stored energy (`case.device.soc`, kWh), every step (v1.1: so the dispatch charts can follow A and B) |
 
 A year of hourly net load for five cases is about 0.4 MB. The existing
 `counterfactual_*` and DR files stay as they are.
@@ -127,21 +130,20 @@ bill, total cost, import, export and peak.
 
 ## 5. The report
 
-**Top panel:**
-- **TRC and RIM lead the panel, as now.** They belong to the cost tests' measure,
-  so they stay fixed.
-- **Below them, a comparison selector:** "Compare `[without ▾]` with `[with ▾]`".
-  Its cards show what moved from the first case to the second:
-  - bill savings;
-  - total cost savings, including degradation;
-  - import kWh;
-  - export kWh;
-  - peak import kW;
-  - the DR incentive, when `responding` is one of the two.
-- **Quick buttons for the usual questions,** each setting both dropdowns. A button
-  only appears when its cases exist.
+**One A/B choice drives the page** (v1.1, 2026-11-22). Two selectors in v1.0, one
+in the summary and one in a Compare section, read as two separate choices, and the
+value breakdown and dispatch still showed optimal against counterfactual. Now:
 
-| Button | Without | With |
+- **A bar pinned at the top of the page**, above every section, stays in view while
+  scrolling: **A** `[case ▾]` **B** `[case ▾]`, the quick buttons, and one line saying
+  what a sign means.
+- **Every difference is A − B.** Positive means B is lower than A (a lower bill, less
+  import, less export); negative means B is higher. Cards, chart traces, the heatmap's
+  colorbar and the bill table all say "A − B". A and B have their own colors (gray and
+  blue) everywhere, with A dotted on time charts.
+- **The quick buttons** set both A and B:
+
+| Button | A | B |
 |---|---|---|
 | Solar | `no_devices` | `no_measure` |
 | The battery, rule-based | `no_measure` | `rule_based` |
@@ -149,35 +151,42 @@ bill, total cost, import, export and peak.
 | DR participation | `optimized` | `responding` |
 | Everything | `no_devices` | `responding` |
 
-  The button labels come from the case labels. With an EV as the measure, the second
-  button reads "The EV, rule-based".
+  The labels come from the case labels; with an EV as the measure, the second reads
+  "The EV, rule-based". A button only appears when its cases exist.
 - **The page opens on the cost tests' own pair** (decision 4): `rule_based` →
-  `responding` for `scope: control`, and `no_measure` → `responding` for
-  `scope: device`. The cards under TRC and RIM then describe the same comparison the
-  ratios do, and the page says so. Without cost tests it opens on `rule_based` →
-  `optimized`, which is today's "value of optimization". `cases.compare` overrides
-  either.
+  `responding` for `scope: control`, `no_measure` → `responding` for `scope: device`;
+  without cost tests, `rule_based` → `optimized`. `cases.compare` overrides it.
 
-**A Compare section** follows the value breakdown and uses the same selector:
-- the bill by month, both cases side by side, with the difference;
-- each value stream for both cases, as the value breakdown shows optimal and
-  counterfactual now;
-- net load at the meter for both cases, on the page's linked time axis, so zooming to
-  a day shows that day here too;
-- the average day by month: net load of each case, and the difference.
+**What follows A and B:**
+- **Summary cards:** bill, total cost (with degradation), import, export and peak
+  import, each A − B with both values beneath; and the DR incentive a case earned, as
+  its own card (not a difference, and not in the costs).
+- **Value breakdown:** each value stream for A and B, and A − B.
+- **Dispatch:** the meter (the home's load, A, B; A − B in the legend) and each
+  device's power and stored energy (B solid, A dotted) on the linked time axis; net
+  load A − B by hour and day; the average day in each month.
+- **Energy by month:** import and export, A and B.
+- **Bills:** amount due by billing cycle for A and B, and A − B; and the bill summary
+  as a table with A, B and A − B columns.
 
-Everything is computed in the page from the embedded cases, so changing the pair
-needs no server and no re-run. The value breakdown and dispatch sections keep showing
-optimal against counterfactual, as now.
+**What doesn't, and says so:** TRC and RIM, the DR section, screening values and the
+cost tests describe fixed comparisons (the cost tests' pair, or the DR study's R1, R2,
+R3 and S). Each carries a line beginning "Not set by A and B", naming what it compares.
+
+A folder written before cases has no cases, and its page shows optimal against
+counterfactual, as before. Everything is computed in the page from the embedded cases
+(`cases_net_load_kw.csv`, `cases_device_dispatch.csv` and `summary.json`), so changing
+the pair needs no server and no re-run.
 
 ## 6. Studies
 
 - **A study's portfolio** already runs each premise as a single-home scenario, so
-  every premise page gets its own cases and Compare section.
+  every premise page gets its own cases and A/B bar.
 - **On the study page** (decision 3):
   - the portfolio table gains each case's bill;
-  - the selector picks a pair for the whole study;
-  - the portfolio's bar per premise shows that pair's bill savings.
+  - one A/B choice for the whole study;
+  - a bar per premise of its bill, A − B (total cost where there's no bill), largest
+    first, with the total and the number of premises lower in B.
 - **Feeder runs aren't cases.** Coordinated, independent and counterfactual on a
   network compare control strategies on shared limits, a different question, and they
   stay as they are.

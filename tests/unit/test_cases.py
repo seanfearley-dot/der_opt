@@ -119,8 +119,14 @@ def test_a_run_makes_prices_and_writes_every_case(tmp_path):
     assert whole.loc["optimized", "bill"] == pytest.approx(cases["optimized"]["bill"]["net_cost"])
     assert "cost: NBTBill" in table and set(table["case"]) == set(cases)
 
+    devices = pd.read_csv(out / "cases_device_dispatch.csv", index_col=0)
+    assert {"optimized.battery.soc", "responding.battery.net_power", "no_measure.solar.net_power"} <= set(devices)
+    assert not any(c.startswith(("no_devices.", "no_measure.battery")) for c in devices)
+
     page = (out / "report.html").read_text(encoding="utf-8")
-    assert 'class="case-pick"' in page and 'id="compare"' in page and "DR participation" in page
+    assert page.count('class="case-pick"') == 2  # one A/B choice for the whole page, pinned at the top
+    assert 'class="pairbar"' in page and "<b>A − B</b>" in page and "DR participation" in page
+    assert "Not set by A and B" in page  # DR doesn't follow the choice, and says so
 
 
 def test_a_case_can_be_billed_on_its_own_tariff(tmp_path):

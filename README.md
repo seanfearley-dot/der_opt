@@ -122,6 +122,7 @@ Files written with `-o`:
 | `duals.csv`, `duals.png` | all dual families (long format), and a chart of the marginal value of energy at the meter (with `--duals`) |
 | `cases.csv` | the comparison cases ([docs/COMPARISON_CASES_SPEC.md](docs/COMPARISON_CASES_SPEC.md)): per case and billing cycle, the bill, import, export and peak; and a whole-run row per case with its cost by value stream |
 | `cases_net_load_kw.csv` | net load at the meter (import − export), one column per case, every step |
+| `cases_device_dispatch.csv` | each case's device power (kW) and stored energy (kWh), every step, as `case.device.net_power` and `case.device.soc` |
 | `bill_cycles.csv`, `counterfactual_bill_cycles.csv` | per billing cycle: kWh, charges by bucket, credits earned and applied, amount due, credit balances (with `billing`) |
 | `checks.csv` | every check finding: level, check, message, run, premise |
 | `summary.json` | the numbers the run prints, as data, for reports and scripts ([docs/REPORTS.md](docs/REPORTS.md)) |
@@ -484,7 +485,8 @@ every device. A case appears only when the run can make it (`rule_based` needs a
 every device). Each is priced on the run's value streams (degradation counts; the
 smoothing cost never does) and billed on its tariff; the DR incentive is
 `responding`'s own line. The run prints a table of them, and writes `cases.csv` and
-`cases_net_load_kw.csv`. An optional section chooses:
+`cases_net_load_kw.csv` and `cases_device_dispatch.csv`. The report has one A/B choice
+for the whole page, and shows every difference as A − B. An optional section chooses:
 
 ```yaml
 cases:

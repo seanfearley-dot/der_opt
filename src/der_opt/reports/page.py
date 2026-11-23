@@ -114,6 +114,7 @@ class Page:
         self.links: list[tuple[str, str]] = []  # (label, href) above the title
         self.extra: dict = {}  # more data for `scripts`, at report-data's "extra"
         self.scripts: list[str] = []  # run after the page's own script (charts are drawn first)
+        self.banner = ""  # markup pinned at the top of the main column, above every section
 
     # sections and parts
     def section(self, id: str, title: str) -> Section:
@@ -219,7 +220,7 @@ class Page:
     # rendering
     def render(self, script: str) -> str:
         nav = "".join(f'<a href="#{s.id}">{html.escape(s.title)}</a>' for s in self.sections if s.parts)
-        body = "".join(f'<section id="{s.id}"><h2>{html.escape(s.title)}</h2>{"".join(s.parts)}</section>'
+        body = self.banner + "".join(f'<section id="{s.id}"><h2>{html.escape(s.title)}</h2>{"".join(s.parts)}</section>'
                        for s in self.sections if s.parts)
         crumbs = " / ".join(f'<a href="{html.escape(h)}">{html.escape(t)}</a>' for t, h in self.links)
         data = json.dumps(jsonable({"axes": self.axes, "charts": self.charts, "extra": self.extra}),
@@ -228,7 +229,7 @@ class Page:
         return TEMPLATE.format(
             title=html.escape(self.title), subtitle=html.escape(self.subtitle), kind=html.escape(self.kind),
             crumbs=f'<div class="crumbs">{crumbs}</div>' if crumbs else "", nav=nav, body=body, script=script,
-            data=data, css=CSS, js=JS + "".join(self.scripts))
+            data=data, css=CSS, js=JS + "".join(self.scripts), main_class=' class="has-bar"' if self.banner else "")
 
 
 CSS = """
@@ -276,6 +277,13 @@ details summary{cursor:pointer;color:var(--accent);margin:4px 0}
 .picker{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:14px 0 8px}
 .picker select{padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);
 font:inherit}
+.has-bar section{scroll-margin-top:120px}
+.pairbar{position:sticky;top:0;z-index:20;background:var(--panel);border:1px solid var(--line);border-radius:10px;
+padding:10px 16px;margin-bottom:18px;box-shadow:0 4px 14px rgba(0,0,0,.12)}
+.pairbar .picker{margin:0 0 6px} .pairbar .quick{margin:0 0 6px} .pairbar .sign{margin:0;font-size:13px}
+.ab{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:5px;
+font-weight:700;font-size:12px;color:#fff} .ab.a{background:#9ca3af;color:#111} .ab.b{background:#2563eb}
+.fixed{border-left:3px solid var(--line);padding-left:8px}
 .quick{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
 .quick button{padding:3px 10px;border:1px solid var(--line);border-radius:999px;background:var(--panel);
 color:var(--ink);font:inherit;font-size:12px;cursor:pointer}
@@ -329,6 +337,6 @@ TEMPLATE = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{title}</title><style>{css}</style><script src="{script}"></script></head>
 <body><header>{crumbs}<span class="kind">{kind}</span><h1>{title}</h1><div class="sub">{subtitle}</div></header>
-<div class="layout"><nav>{nav}</nav><main>{body}</main></div>
+<div class="layout"><nav>{nav}</nav><main{main_class}>{body}</main></div>
 <script type="application/json" id="report-data">{data}</script><script>{js}</script></body></html>
 """

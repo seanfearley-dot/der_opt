@@ -60,7 +60,7 @@ def test_a_single_home_run_writes_its_report(tmp_path):
     assert result.exit_code == 0 and f"Report: {out / 'report.html'}" in result.output
     text = (out / "report.html").read_text(encoding="utf-8")
     assert '<script src="_assets/plotly.min.js">' in text and (out / ASSETS / PLOTLY).exists()
-    for section in ("summary", "value", "compare", "dispatch", "checks", "settings"):
+    for section in ("summary", "value", "dispatch", "energy", "checks", "settings"):
         assert f'<section id="{section}">' in text, section
     assert 'class="case-pick"' in text and ">Optimization</button>" in text  # the value of optimization's pair
     (out / "report.html").unlink()

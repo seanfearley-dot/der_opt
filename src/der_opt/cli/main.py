@@ -835,11 +835,12 @@ def _run_scenario(scenario: Path, output_dir: Path | None = None, duals: bool = 
                                  for label, r in (("without", without), ("with", with_))}
             write_impact_package(output_dir, config, without_label, without, with_, premise.time_grid,
                                  dr_study, package_bills, tz=config.dr.tz if config.dr else "America/Los_Angeles")
-        from der_opt.cases import cases_table, net_load_table
+        from der_opt.cases import cases_table, device_table, net_load_table
 
         dt = premise.time_grid.dt_hours
         cases_table(cases, dt).to_csv(output_dir / "cases.csv", index=False)
         net_load_table(cases).round(4).to_csv(output_dir / "cases_net_load_kw.csv", index_label="timestamp")
+        device_table(cases).round(4).to_csv(output_dir / "cases_device_dispatch.csv", index_label="timestamp")
         results["cases"] = {name: {"bill": case.bill.summary["net_cost"] if case.bill is not None else None,
                                    "total": case.costs["total"]} for name, case in cases.items()}
         _write_checks(output_dir, scenario, config, report, results, composed)
