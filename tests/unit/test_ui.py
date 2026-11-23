@@ -227,3 +227,11 @@ def test_the_creator_opens_and_saves_a_selected_file(server, project):
     status, body, _ = _post(port, "/create/save-file", {"path": tariff, "content": text}, app.token)
     assert status == 200 and "Saved." in body and (project / tariff).read_text(encoding="utf-8").endswith("# checked\n")
     assert _post(port, "/create/save-file", {"path": "../outside.yaml", "content": "x"}, app.token)[0] == 403
+
+
+def test_a_device_block_opens_beside_the_devices_step(server, project):
+    _, port = server  # the project has no library of its own: the starter library's blocks are shown, not edited
+    panel = _get(port, "/create/file?block=devices/battery_13kwh")[1]
+    assert "capacity_kwh: 13.5" in panel and "read-only" in panel and "file-text" not in panel
+    assert "No block" in _get(port, "/create/file?block=devices/nope")[1]
+    assert "No block" in _get(port, "/create/file?block=../../pyproject")[1]  # nothing outside the library

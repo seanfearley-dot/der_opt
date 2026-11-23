@@ -558,6 +558,24 @@ def file_panel(project, relative: str) -> str:
             '<span class="file-status note"></span></div>')
 
 
+def block_panel(project, library: Path | None, name: str) -> str:
+    """A library block (devices/battery_13kwh): editable when the library is in the
+    project, shown when it's the starter library outside it."""
+    if not name or library is None:
+        return '<p class="note">Pick a block and it opens here.</p>'
+    path = (Path(library) / f"{name}.yaml").resolve()
+    if not path.is_file() or Path(library).resolve() not in path.parents:
+        return f'<p class="status bad">No block {esc(name)} in the library.</p>'
+    root = Path(project.root).resolve()
+    if root in path.parents:
+        return file_panel(project, str(path.relative_to(root)))
+    return (f'<h3 class="file-name">{esc(name)} <span class="note">(library block)</span></h3>'
+            f'<p class="note">The starter library, outside this project: read-only here. Its settings are what a '
+            f'device from this block gets unless you change them in the step. To edit blocks, '
+            f'<code>der-opt setup library DIR</code> makes your own copy in the project.</p>'
+            f'<pre class="file-head">{esc(path.read_text(encoding="utf-8"))}</pre>')
+
+
 def save_file(project, form: dict) -> str:
     path = project.inside(form["path"])
     if path.suffix not in EDITABLE or not path.is_file():
@@ -690,6 +708,16 @@ const ta=box.querySelector("textarea.file-text");const body=new URLSearchParams(
 const r2=await fetch("/create/save-file",{method:"POST",headers:{"X-Token":TOKEN},body});
 box.querySelector(".file-status").innerHTML=r2.ok?await r2.text():'<span class="status bad">'+await r2.text()+"</span>";
 changed();};}
+async function openBlock(name){if(!name)return;openPath="block:"+name;const box=document.querySelector('[data-pane-box="file"]');
+const r=await fetch("/create/file?block="+encodeURIComponent(name));box.innerHTML=await r.text();paneTab("file");
+const save=box.querySelector("[data-save-file]");if(save)save.onclick=async()=>{const ta=box.querySelector("textarea.file-text");
+const body=new URLSearchParams({path:ta.dataset.path,content:ta.value});const r2=await fetch("/create/save-file",
+{method:"POST",headers:{"X-Token":TOKEN},body});box.querySelector(".file-status").innerHTML=r2.ok?await r2.text():
+'<span class="status bad">'+await r2.text()+"</span>";changed();};}
+const blockOf=el=>{const k=el.dataset&&el.dataset.k||"";return /^devices\.\d+\.template$/.test(k)||
+/^add_devices\.\d+\.device\.template$/.test(k)?el.value:null;};
+form.addEventListener("focusin",ev=>{const b=blockOf(ev.target);if(b&&"block:devices/"+b!==openPath)openBlock("devices/"+b);});
+form.addEventListener("change",ev=>{const b=blockOf(ev.target);if(b)setTimeout(()=>openBlock("devices/"+b),0);});
 form.addEventListener("focusin",ev=>{const pick=ev.target.closest(".pickpath");if(!pick)return;
 const v=get(pick.querySelector("select[data-pick]").dataset.pick);const path=Array.isArray(v)?v[v.length-1]:v;
 if(path&&path!=="TODO"&&path!==openPath)openFile(path);});

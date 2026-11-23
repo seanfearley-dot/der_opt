@@ -121,6 +121,9 @@ def make_handler(app: App, port: int):
                 if route == "/create/file":
                     from der_opt.ui import creator
 
+                    if params.get("block"):
+                        folder, _ = app.blocks()
+                        return self._send(200, creator.block_panel(project, folder, params["block"]))
                     return self._send(200, creator.file_panel(project, params.get("path", "")))
                 if route == "/create/preset":
                     import json
