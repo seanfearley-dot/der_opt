@@ -47,12 +47,14 @@ def test_each_preset_writes_what_its_template_wrote(tmp_path, name, library):
 @pytest.mark.parametrize("name", sorted(PRESETS))
 def test_each_preset_survives_the_page(name):
     # to the form the page holds (YAML boxes, sizes apart from other settings), as JSON, and back
+    from der_opt.creator.writer import compose_answers
     from der_opt.ui.creator import from_form, to_form
 
     answers = preset(name, OPTIONS)
     again, problems = from_form(json.loads(json.dumps(to_form(answers))))
     assert not problems
-    assert again.model_dump() == answers.model_dump()
+    target = REPO / "scenarios" / "x.yaml"  # the same file either way (the page keeps one avoided cost set)
+    assert compose_answers(again, target, REPO, LIBRARY)[0] == compose_answers(answers, target, REPO, LIBRARY)[0]
 
 
 def test_rules_and_comparisons_from_selects():

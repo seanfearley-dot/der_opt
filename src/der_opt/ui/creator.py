@@ -98,6 +98,10 @@ def to_form(answers: Answers) -> dict:
     """The answers as the page holds them: YAML boxes as text, sizes and the rest of a
     device's settings apart."""
     data = json.loads(answers.model_dump_json())
+    cost_test = (data.get("value") or {}).get("cost_test")
+    if cost_test and not data["value"].get("avoided_costs"):  # the one set field shows the tests' set
+        chosen = (cost_test.get("avoided_costs") or {}).get("set")
+        data["value"]["avoided_costs"] = None if chosen == "TODO" else chosen
     when = data["when"]
     if when.get("start"):  # a window, as the page asks for it
         steps = when.get("steps") or 0
@@ -169,15 +173,35 @@ def from_form(data: dict) -> tuple[Answers, list[tuple[str, str]]]:
             rules.setdefault(mechanism, {}).setdefault(kind, {}).update(settings or {})
     if participation:
         participation["rules"] = {m: k for m, k in rules.items() if k}
-    cost_test = (data.get("value") or {}).get("cost_test")
+    value = data.get("value") or {}
+    cost_test = value.get("cost_test")
     if cost_test:
         cost_test["without"] = {k: v for k, v in (cost_test.get("without") or {}).items() if v}
+        cost_test["avoided_costs"] = {"set": value.get("avoided_costs") or "TODO"}  # the one set, for both
+        for path in (("start_year",), ("participant_costs", "upfront"), ("discount_rates", "utility"),
+                     ("discount_rates", "participant"), ("discount_rates", "societal")):
+            holder = cost_test
+            for key in path[:-1]:
+                holder = holder.setdefault(key, {})
+            if holder.get(path[-1]) is None:  # needed: a placeholder the checks name, not an empty value
+                holder[path[-1]] = "TODO"
+        for section in ("participant_costs", "program_costs"):
+            cost_test[section] = {k: v for k, v in (cost_test.get(section) or {}).items() if v is not None}
+        for key in ("net_to_gross", "bill_escalation", "cost_escalation", "tests"):
+            if cost_test.get(key) in (None, []):
+                cost_test.pop(key, None)
     dr = data.get("dr")
     for program in (dr, ((data.get("coordination") or {}).get("dr_events"))):  # months as numbers (JSON made them text)
         random = ((program or {}).get("events") or {}).get("random")
         if isinstance(random, dict) and isinstance(random.get("events_per_month"), dict):
             random["events_per_month"] = {int(k) if str(k).isdigit() else k: v
                                           for k, v in random["events_per_month"].items()}
+    program = (dr or {}).get("program") or {}
+    if program.get("response", "incentive") == "incentive" and program.get("incentive_per_kwh") is None and dr:
+        program["incentive_per_kwh"] = "TODO"  # needed: a placeholder the checks name
+    for key in ("committed_kw", "cap_kw"):
+        if program.get(key) is None:
+            program.pop(key, None)
     if dr and isinstance(dr.get("events"), dict):  # one constructor: the one picked
         for kind in list(dr["events"]):
             if dr["events"][kind] in (None, {}):
@@ -407,26 +431,47 @@ def steps_html(device_blocks: list[str], files: dict[str, list[str]]) -> str:
              + _f("Longest event, h", "coordination.dr_events.program.max_hours", "num"))))
     s.append(_step(11, mech + _f("Runs", "coordination.runs", "yaml",
                                  "blank: each mechanism alone and all together; or {name: [envelopes, ...]}")))
-    s.append(_step(12, _f("Avoided cost set", "value.avoided_costs", hint="a folder with manifest.yaml (screening)",
-                          attrs='list="dl-sets"')
+    rate = "a fraction: 0.075 = 7.5% a year"
+    s.append(_step(12, _f("Avoided cost set", "value.avoided_costs", hint="a folder with manifest.yaml: the avoided "
+                          "costs behind the screening values and the cost tests' benefits", attrs='list="dl-sets"')
                    + '<div data-kinds="home portfolio both"><label class="f"><span class="lab">Cost tests</span>'
                      '<input type="checkbox" data-enable="value.cost_test" data-default-key="cost_test"></label>'
-                   + '<div data-needs="value.cost_test">' + _f("Start year", "value.cost_test.start_year", "num")
+                   + '<div data-needs="value.cost_test">'
+                   + '<h3>The measure</h3>' + _f("First year", "value.cost_test.start_year", "num",
+                                                 "the measure's first year in service")
                    + _f("Life, years", "value.cost_test.measure_life_years", "num")
-                   + _f("Avoided cost set", "value.cost_test.avoided_costs.set", attrs='list="dl-sets"')
-                   + _f("Participant upfront $", "value.cost_test.participant_costs.upfront", "num",
-                        "include the installed cost of any device compared as removed")
-                   + _f("Participant $/year", "value.cost_test.participant_costs.annual_om", "num")
-                   + _f("Program admin upfront $", "value.cost_test.program_costs.admin_upfront", "num")
-                   + _f("Program admin $/year", "value.cost_test.program_costs.admin_annual", "num")
-                   + _f("Discount rate, utility", "value.cost_test.discount_rates.utility", "num")
-                   + _f("Discount rate, participant", "value.cost_test.discount_rates.participant", "num")
-                   + _f("Discount rate, societal", "value.cost_test.discount_rates.societal", "num")
+                   + _f("Net-to-gross", "value.cost_test.net_to_gross", "num",
+                        "the share of the impact the program causes, 0-1 (1 = all of it)")
                    + '<h3>What each device is compared against</h3><div class="without"></div>'
                      '<p class="note">removed: the home without it (its cost belongs in the participant cost); '
                      'rule_based: its ordinary rule; tou_timer: an EV charging from the cheapest TOU period; '
                      'events_only: that EV, responding to events; backup_only: a battery held full, discharging only '
                      'into events. A battery has no default.</p>'
+                   + '<h3>Costs, $</h3>'
+                   + _f("Participant, upfront", "value.cost_test.participant_costs.upfront", "num",
+                        "what the customer pays to take part; include the installed cost of any device compared as "
+                        "removed")
+                   + _f("Participant, a year", "value.cost_test.participant_costs.annual_om", "num", "O&M")
+                   + _f("Program admin, upfront", "value.cost_test.program_costs.admin_upfront", "num")
+                   + _f("Program admin, a year", "value.cost_test.program_costs.admin_annual", "num")
+                   + _f("Program incentive, upfront", "value.cost_test.program_costs.upfront_incentive", "num",
+                        "paid to the customer once (the DR incentive comes from the run)")
+                   + '<h3>Discounting and escalation</h3>'
+                   + _f("Discount rate, utility", "value.cost_test.discount_rates.utility", "num", rate + " (RIM, TRC, PAC)")
+                   + _f("Discount rate, participant", "value.cost_test.discount_rates.participant", "num",
+                        rate + " (PCT)")
+                   + _f("Discount rate, societal", "value.cost_test.discount_rates.societal", "num", rate + " (SCT)")
+                   + _f("Bill escalation", "value.cost_test.bill_escalation", "num", "a year, a fraction: 0.03 = 3%")
+                   + _f("Cost escalation", "value.cost_test.cost_escalation", "num", "a year, a fraction")
+                   + '<h3>DR capacity valued</h3>'
+                   + _f("Against", "value.cost_test.capacity_value.reference", "select", options=[
+                       ("R2", "the same home with no events (R2)"), ("R3", "the home without the measure (R3)"),
+                       ("S", "the settlement baseline (S)")])
+                   + _f("Basis", "value.cost_test.capacity_value.basis", "select", options=[
+                       ("import", "grid import only"), ("net", "net load (exports count)")])
+                   + _f("Measured", "value.cost_test.capacity_value.measure", "select", options=[
+                       ("counted", "counted: a test event every eligible day"), ("accounted", "accounted: the events called")])
+                   + '<label class="f"><span class="lab">Tests</span><span><label class="check"><input type="checkbox" data-group="value.cost_test.tests" value="PCT"> PCT</label> <label class="check"><input type="checkbox" data-group="value.cost_test.tests" value="RIM"> RIM</label> <label class="check"><input type="checkbox" data-group="value.cost_test.tests" value="TRC"> TRC</label> <label class="check"><input type="checkbox" data-group="value.cost_test.tests" value="PAC"> PAC</label> <label class="check"><input type="checkbox" data-group="value.cost_test.tests" value="SCT"> SCT</label> </span></label>'
                    + "</div></div>"
                    + '<div data-kinds="feeder both"><h3>The network\'s own value</h3>'
                    + _rows("deferral", "value.deferral", deferral_row, "Add capacity deferral") + "</div>"))
@@ -596,6 +641,7 @@ white-space:pre;overflow:auto;border:1px solid var(--line);border-radius:8px;pad
 .pane pre.file-head{font-size:11px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px}
 .pane ul.files{list-style:none;padding:0;margin:0}.pane button.link{background:none;border:0;color:var(--accent);
 cursor:pointer;padding:2px 0;font:inherit;text-align:left}
+input.todo::placeholder{color:#b45309}
 .pickpath{display:flex;flex-direction:column;gap:4px;min-width:0}.pickpath select,.pickpath input{width:100%}
 .creator{display:grid;grid-template-columns:200px minmax(0,1fr) minmax(0,440px);gap:18px;align-items:start}
 nav.steps{position:sticky;top:12px;display:flex;flex-direction:column;gap:2px}
@@ -643,6 +689,7 @@ x&&x.trim());if(k&&v!==undefined&&v!=="")o[k]=isNaN(+v)?v:+v;});return o;}return
 function show(el,v){if(el.dataset.t==="bool"){el.checked=!!v;return;}if(el.dataset.t==="pairs"){
 el.value=v&&typeof v==="object"?Object.entries(v).map(([k,x])=>k+": "+x).join(", "):"";return;}
 if(v==null&&el.dataset.default){el.value=el.dataset.default;return;}
+if(v==="TODO"){el.value="";el.placeholder="to fill in";el.classList.add("todo");return;}el.classList.remove("todo");
 el.value=v==null?"":Array.isArray(v)?v.join(", "):v;}
 function holds(cond){return cond.split("||").some(c=>{if(c.startsWith("?")){const ks=parts(c.slice(1));
 let o=S;for(const k of ks.slice(0,-1)){if(o==null)return false;o=o[k];}return o!=null&&ks[ks.length-1] in o;}
@@ -687,7 +734,8 @@ const opt=(v,label,on)=>`<option value="${v.replace(/"/g,"&quot;")}" ${on?"selec
 label.replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]))+"</option>";
 function picks(){form.querySelectorAll("select[data-pick]").forEach(sel=>{const key=sel.dataset.pick;
 let list=sel.dataset.files;if(list==="tariffs"&&S.kind!=="home")list="tariff_dirs";
-const files=(X.files||{})[list]||[],input=sel.parentElement.querySelector("input"),cur=get(key);
+const files=(X.files||{})[list]||[],input=sel.parentElement.querySelector("input"),raw=get(key),
+cur=raw==="TODO"?null:raw;
 if(sel.dataset.add){sel.innerHTML=opt("","add a file…",true)+files.map(f=>opt(f,f,false)).join("");input.hidden=false;
 sel.onchange=()=>{if(sel.value){const l=get(key)||[];if(!l.includes(sel.value))l.push(sel.value);set(key,l);
 show(input,l);changed();openFile(sel.value);}sel.value="";};return;}
@@ -727,6 +775,7 @@ ev.value=k.replace("_yaml","");}form.querySelectorAll("[data-k]").forEach(el=>sh
 S._target:get(el.dataset.k)));form.querySelectorAll("[data-enable]").forEach(cb=>{cb.checked=get(cb.dataset.enable)!=null;});
 form.querySelectorAll("[data-needs]").forEach(d=>d.hidden=get(d.dataset.needs)==null);
 form.querySelectorAll("[data-when]").forEach(d=>d.hidden=!holds(d.dataset.when));picks();
+form.querySelectorAll("[data-group]").forEach(c=>{const l=get(c.dataset.group);c.checked=!l||!l.length||l.includes(c.value);});
 const allowed=KINDS[S.kind]||KINDS.home;document.querySelectorAll("[data-goto]").forEach(a=>{
 a.hidden=!allowed.includes(+a.dataset.goto);a.classList.toggle("on",+a.dataset.goto===step);});
 form.querySelectorAll("[data-kinds]").forEach(d=>d.hidden=!d.dataset.kinds.split(" ").includes(S.kind)||
@@ -748,7 +797,8 @@ writing${warnings?`, ${warnings} warning(s)`:""}.</p>`:`<p class="status ok">Rea
 document.querySelector(".all-checks").innerHTML=d.items.length?"<ul>"+d.items.map(i=>`<li class="lv-${i.level}">step ${i.step}: `+
 i.message.replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]))+"</li>").join("")+"</ul>":"<p>Every check is clean.</p>";
 document.querySelectorAll("[data-write]").forEach(b=>b.disabled=errors>0);}
-form.addEventListener("input",ev=>{const el=ev.target;if(!el.dataset.k)return;
+form.addEventListener("input",ev=>{const el=ev.target;if(el.dataset.group){set(el.dataset.group,[...form.querySelectorAll(
+`[data-group="${el.dataset.group}"]`)].filter(c=>c.checked).map(c=>c.value));changed();return;}if(!el.dataset.k)return;
 if(el.dataset.k==="_target")S._target=el.value;else set(el.dataset.k,value(el));if(el.hasAttribute("data-rerender"))render();changed();});
 form.addEventListener("change",ev=>{const el=ev.target;if(el.hasAttribute("data-events")){
 S.dr.events=JSON.parse(JSON.stringify(DEF.events[el.value]));render();changed();return;}
