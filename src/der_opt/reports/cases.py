@@ -15,8 +15,7 @@ import pandas as pd
 from der_opt.reports.page import Page, Section
 
 A_COLOR, B_COLOR, DIFF_COLOR = "#9ca3af", "#2563eb", "#f59e0b"
-SIGN = ("Every difference on this page is <b>A − B</b>: positive means B is lower than A (a lower bill, "
-        "less import, less export), negative means B is higher.")
+SIGN = "Differences are A − B: positive means B is lower than A."
 
 
 def _picker(names: dict[str, str], buttons: list[dict]) -> str:
@@ -91,24 +90,22 @@ def _chart(page: Page, section: Section, key: str, layout: dict, height: int, **
 
 def value(page: Page) -> None:
     section = page.section("value", "Value breakdown")
-    page.text(section, "Cost by value stream over the run, A and B (cost +, value −), and A − B.")
+    page.text(section, "Cost by value stream over the run (cost +, value −), A and B, and the difference.")
     _chart(page, section, "streams", {"barmode": "group", "yaxis": {"title": "$ over the run"},
                                       "hovermode": "closest"}, 320)
 
 
 def dispatch(page: Page, window) -> None:
     section = page.section("dispatch", "Dispatch")
-    page.text(section, "Power at the meter, kW: import positive, export negative. The home's load, A and B; A − B "
-                       "is in the legend. Zoom with the buttons or the slider; every time chart on the page follows.")
+    page.text(section, "Power at the meter, kW: import positive, export negative. The home's load, A and B; the "
+                       "difference is in the legend. Zoom with the buttons or the slider; every time chart on the page "
+                       "follows.")
     _chart(page, section, "meter", {"yaxis": {"title": "kW"}}, 420, zoom=True, window=window)
     page.text(section, "Each device's power, kW (generation and discharge positive), and stored energy, kWh (right "
                        "axis): B solid, A dotted. A device a case doesn't have has no line for it.")
     _chart(page, section, "devices", {"yaxis": {"title": "kW"}, "yaxis2": {"title": "kWh", "overlaying": "y",
                                                                             "side": "right", "showgrid": False}},
            420, zoom=True, window=window)
-    page.text(section, "Net load, A − B, by hour and day, kW: blue where B takes less from the grid than A, red "
-                       "where it takes more.")
-    _chart(page, section, "heat", {"yaxis": {"title": "hour", "dtick": 3}, "hovermode": "closest"}, 320)
     months = len(next(iter(page.extra["cases"]["cases"].values()))["avg_day"]) or 1
     page.text(section, "The average day in each month: net load of A and B by hour, kW.")
     _chart(page, section, "day", {}, 190 * ((months + 3) // 4) + 50)
@@ -125,7 +122,7 @@ def bills(page: Page) -> None:
     if not any(c.get("bill") for c in page.extra["cases"]["cases"].values()):
         return  # no billing section
     section = page.section("bills", "Bills")
-    page.text(section, "Amount due each billing cycle, A and B, and A − B (the saving going from A to B).")
+    page.text(section, "Amount due each billing cycle, A and B, and the difference.")
     _chart(page, section, "bills", {"barmode": "group", "xaxis": {"type": "category"}, "yaxis": {"title": "$"},
                                     "hovermode": "x unified"}, 320)
     page.html(section, '<div class="table-wrap case-bill-table"></div>')
@@ -153,15 +150,15 @@ function card(label,value,note,tone){return `<div class="card ${tone||""}"><div 
 `<div class="value">${esc(value)}</div>`+(note?`<div class="sub">${note}</div>`:"")+"</div>";}
 const tone=v=>v>0.005?"good":v<-0.005?"bad":"";
 function cards(A,B){const out=[];
-if(A.bill&&B.bill){const d=A.bill.net_cost-B.bill.net_cost;out.push(card("Bill, A − B",smoney(d),
-`A ${money(A.bill.net_cost)} − B ${money(B.bill.net_cost)}`,tone(d)));}
-const t=A.costs.total-B.costs.total;out.push(card("Total cost, A − B",smoney(t),
-`A ${money(A.costs.total)} − B ${money(B.costs.total)}, with degradation`,tone(t)));
+if(A.bill&&B.bill){const d=A.bill.net_cost-B.bill.net_cost;out.push(card("Bill",smoney(d),
+`A ${money(A.bill.net_cost)} · B ${money(B.bill.net_cost)}`,tone(d)));}
+const t=A.costs.total-B.costs.total;out.push(card("Total cost",smoney(t),
+`A ${money(A.costs.total)} · B ${money(B.costs.total)}, with degradation`,tone(t)));
 const ea=A.energy,eb=B.energy;
-out.push(card("Import, A − B",snum(ea.import_kwh-eb.import_kwh,0," kWh"),`A ${num(ea.import_kwh)} − B ${num(eb.import_kwh)} kWh`));
-out.push(card("Export, A − B",snum(ea.export_kwh-eb.export_kwh,0," kWh"),`A ${num(ea.export_kwh)} − B ${num(eb.export_kwh)} kWh`));
-out.push(card("Peak import, A − B",snum(ea.peak_import_kw-eb.peak_import_kw,2," kW"),
-`A ${num(ea.peak_import_kw,2)} − B ${num(eb.peak_import_kw,2)} kW`));
+out.push(card("Import",snum(ea.import_kwh-eb.import_kwh,0," kWh"),`A ${num(ea.import_kwh)} · B ${num(eb.import_kwh)} kWh`));
+out.push(card("Export",snum(ea.export_kwh-eb.export_kwh,0," kWh"),`A ${num(ea.export_kwh)} · B ${num(eb.export_kwh)} kWh`));
+out.push(card("Peak import",snum(ea.peak_import_kw-eb.peak_import_kw,2," kW"),
+`A ${num(ea.peak_import_kw,2)} · B ${num(eb.peak_import_kw,2)} kW`));
 [[A,"A"],[B,"B"]].forEach(([C,s])=>{if(C.dr_incentive!=null)out.push(card(`DR incentive earned by ${s}`,
 money(C.dr_incentive),"at settlement; not in the costs or bill above",""));});
 return out.join("");}
@@ -183,13 +180,13 @@ function streams(A,B){if(!ids.streams)return;const keys=[...new Set([...Object.k
 .filter(k=>k!=="total");const ya=keys.map(k=>A.costs[k]||0),yb=keys.map(k=>B.costs[k]||0);
 react(ids.streams,[{type:"bar",name:"A: "+A.label,x:keys,y:ya,marker:{color:CA},hovertemplate:"$%{y:,.2f}"},
 {type:"bar",name:"B: "+B.label,x:keys,y:yb,marker:{color:CB},hovertemplate:"$%{y:,.2f}"},
-{type:"scatter",mode:"markers",name:"A − B",x:keys,y:ya.map((v,i)=>v-yb[i]),marker:{color:CD,size:11,symbol:"diamond"},
+{type:"scatter",mode:"markers",name:"difference",x:keys,y:ya.map((v,i)=>v-yb[i]),marker:{color:CD,size:11,symbol:"diamond"},
 hovertemplate:"$%{y:,.2f}"}],base(ids.streams));}
 function meter(A,B){if(!ids.meter)return;const t=time(),tr=[];
 if(X.load)tr.push({type:"scatter",mode:"lines",name:"home load",x:t,y:X.load,line:{color:ink(),width:1},hovertemplate:hov("kW")});
 tr.push({type:"scatter",mode:"lines",name:"A: "+A.label,x:t,y:A.net,line:{color:CA,width:1.2,dash:"dot"},hovertemplate:hov("kW")});
 tr.push({type:"scatter",mode:"lines",name:"B: "+B.label,x:t,y:B.net,line:{color:CB,width:1.5},hovertemplate:hov("kW")});
-tr.push({type:"scatter",mode:"lines",name:"A − B",x:t,y:A.net.map((v,i)=>diff(v,B.net[i])),visible:"legendonly",
+tr.push({type:"scatter",mode:"lines",name:"difference",x:t,y:A.net.map((v,i)=>diff(v,B.net[i])),visible:"legendonly",
 line:{color:CD,width:1.2},hovertemplate:hov("kW")});react(ids.meter,tr,base(ids.meter),true);}
 function devices(A,B){if(!ids.devices)return;const t=time(),tr=[];
 const names=[...new Set([...Object.keys(B.devices),...Object.keys(A.devices)])];
@@ -200,14 +197,6 @@ hovertemplate:hov("kW")});
 if(own.kwh)tr.push({type:"scatter",mode:"lines",name:`${d} kWh, ${s}`,x:t,y:own.kwh,yaxis:"y2",
 line:{color:c,width:1,dash:s==="B"?"dash":"dot"},visible:s==="B"?true:"legendonly",hovertemplate:hov("kWh")});}}
 react(ids.devices,tr,base(ids.devices),true);}
-function heat(A,B){if(!ids.heat)return;const t=time(),days=[],index={},sums=[],counts=[];
-for(let i=0;i<t.length;i++){const v=diff(A.net[i],B.net[i]);if(v==null)continue;const day=t[i].slice(0,10),h=+t[i].slice(11,13);
-if(!(day in index)){index[day]=days.length;days.push(day);sums.push(new Array(24).fill(0));counts.push(new Array(24).fill(0));}
-sums[index[day]][h]+=v;counts[index[day]][h]+=1;}
-const z=[...Array(24).keys()].map(h=>days.map((_,j)=>counts[j][h]?sums[j][h]/counts[j][h]:null));
-const limit=Math.max(1e-6,...z.flat().filter(v=>v!=null).map(Math.abs));
-react(ids.heat,[{type:"heatmap",x:days,y:[...Array(24).keys()],z,colorscale:"RdBu",reversescale:true,zmin:-limit,zmax:limit,
-colorbar:{title:"A − B, kW"},hovertemplate:"%{x} %{y}:00<br>A − B: %{z:,.2f} kW<extra></extra>"}],base(ids.heat));}
 function day(A,B){if(!ids.day)return;const months=Object.keys(A.avg_day),traces=[],hours=[...Array(24).keys()];
 const layout={grid:{rows:Math.ceil(months.length/4),columns:Math.min(4,months.length),pattern:"independent"},
 hovermode:"x unified",annotations:[],margin:{l:40,r:10,t:50,b:30}};
@@ -230,7 +219,7 @@ const get=(C,m)=>{const r=C.by_month.find(r=>r.month===m);return r&&r.bill!=null
 const ya=months.map(m=>get(A,m)),yb=months.map(m=>get(B,m));
 react(ids.bills,[{type:"bar",name:"A: "+A.label,x:months,y:ya,marker:{color:CA},hovertemplate:"$%{y:,.2f}"},
 {type:"bar",name:"B: "+B.label,x:months,y:yb,marker:{color:CB},hovertemplate:"$%{y:,.2f}"},
-{type:"scatter",mode:"lines+markers",name:"A − B",x:months,y:ya.map((v,i)=>diff(v,yb[i])),line:{color:CD},
+{type:"scatter",mode:"lines+markers",name:"difference",x:months,y:ya.map((v,i)=>diff(v,yb[i])),line:{color:CD},
 hovertemplate:"$%{y:,.2f}"}],base(ids.bills));}
 const box=document.querySelector(".case-bill-table");if(!box)return;
 if(!A.bill||!B.bill){box.innerHTML='<p class="note">No bill: the scenario has no billing section.</p>';return;}
@@ -240,7 +229,7 @@ o[k.replace(/_/g," ")]=v;}return o;};
 const fa=flat(A.bill),fb=flat(B.bill),keys=[...new Set([...Object.keys(fa),...Object.keys(fb)])];
 const cell=(k,v,s)=>bad(v)?"":(k.includes("kwh")?(s?snum(v,1," kWh"):num(v,1," kWh")):(s?smoney(v):money(v)));
 box.innerHTML='<table><thead><tr><th></th><th class="num">A: '+esc(A.label)+'</th><th class="num">B: '+esc(B.label)+
-'</th><th class="num">A − B</th></tr></thead><tbody>'+keys.map(k=>`<tr><td>${esc(k)}</td><td class="num">${cell(k,fa[k])}</td>`+
+'</th><th class="num">Difference</th></tr></thead><tbody>'+keys.map(k=>`<tr><td>${esc(k)}</td><td class="num">${cell(k,fa[k])}</td>`+
 `<td class="num">${cell(k,fb[k])}</td><td class="num">${cell(k,diff(fa[k],fb[k]),true)}</td></tr>`).join("")+
 "</tbody></table>"+(A.tariff?`<p class="note">A on ${esc(A.tariff)}${A.program?", "+esc(A.program):""}; B on `+
 `${esc(B.tariff)}${B.program?", "+esc(B.program):""}.</p>`:"");}
@@ -249,7 +238,7 @@ document.querySelectorAll(".case-pick").forEach(s=>{s.value=pair[+s.dataset.side
 document.querySelectorAll(".quick button").forEach(q=>q.classList.toggle("on",q.dataset.without===a&&q.dataset.with===b));
 document.querySelectorAll(".case-cards").forEach(c=>{c.innerHTML=cards(A,B);});
 document.querySelectorAll(".case-note").forEach(n=>{n.textContent=note(a,b);});
-streams(A,B);meter(A,B);devices(A,B);heat(A,B);day(A,B);energy(A,B);bills(A,B);}
+streams(A,B);meter(A,B);devices(A,B);day(A,B);energy(A,B);bills(A,B);}
 document.querySelectorAll(".case-pick").forEach(s=>s.addEventListener("change",()=>{pair[+s.dataset.side]=s.value;show();}));
 document.querySelectorAll(".quick button").forEach(q=>q.addEventListener("click",()=>{pair=[q.dataset.without,q.dataset.with];show();}));
 window.addEventListener("load",show);
@@ -293,12 +282,12 @@ def study_selector(page: Page, section: Section, folder: Path, table: pd.DataFra
                                  "labels": {n: GENERIC_LABELS[n] for n in names}, "pair": opening, "chart": chart,
                                  "basis": basis}
     page.html(section, _picker({n: GENERIC_LABELS[n] for n in names}, buttons)
-              + f'<p class="note sign">Each premise\'s {basis}, <b>A − B</b>: positive means its {basis} is lower '
-                'in B than in A.</p><div class="cards case-cards"></div>')
+              + f'<p class="note sign">Differences are A − B: positive means a premise\'s {basis} is lower in B.</p>'
+                '<div class="cards case-cards"></div>')
     page.chart(section, [], {"hovermode": "closest", "showlegend": False, "xaxis": {"type": "category"},
-                             "yaxis": {"title": f"{basis}, A − B, $"}}, height=320)
-    page.text(section, f"One bar per premise: its {basis} in A minus its {basis} in B, largest first. A premise "
-                       "without one of the two cases (no measure to remove, say) has no bar.")
+                             "yaxis": {"title": f"{basis} difference, $"}}, height=320)
+    page.text(section, f"One bar per premise: its {basis} difference, largest first. A premise without one of the "
+                       "two cases (no measure to remove, say) has no bar.")
     page.scripts.append(STUDY_JS)
 
 
@@ -315,14 +304,14 @@ document.querySelectorAll(".quick button").forEach(q=>q.classList.toggle("on",q.
 const rows=S.premises.map((p,i)=>({p,v:S.values[a][i]==null||S.values[b][i]==null?null:S.values[a][i]-S.values[b][i]}))
 .filter(r=>r.v!=null).sort((x,y)=>y.v-x.v);const total=rows.reduce((s,r)=>s+r.v,0);
 const saving=rows.filter(r=>r.v>0.005).length;
-document.querySelectorAll(".case-cards").forEach(c=>{c.innerHTML=card(`Total ${S.basis}, A − B`,money(total),
-`A ${S.labels[a]} − B ${S.labels[b]}, ${rows.length} premises`,total>0.005?"good":total<-0.005?"bad":"")+
+document.querySelectorAll(".case-cards").forEach(c=>{c.innerHTML=card(`Total ${S.basis} difference`,money(total),
+`A ${S.labels[a]} · B ${S.labels[b]}, ${rows.length} premises`,total>0.005?"good":total<-0.005?"bad":"")+
 card("Premises lower in B",`${saving} of ${rows.length}`,"")+
-(rows.length?card("Mean per premise, A − B",money(total/rows.length),""):"");});
+(rows.length?card("Mean per premise",money(total/rows.length),""):"");});
 const gd=document.getElementById(S.chart);if(!gd||!window.Plotly)return;
 const layout=JSON.parse(JSON.stringify(all.charts.find(c=>c.id===S.chart).layout));
 Plotly.react(gd,[{type:"bar",x:rows.map(r=>r.p),y:rows.map(r=>r.v),marker:{color:"#2563eb"},
-hovertemplate:"%{x}, A − B: $%{y:,.2f}<extra></extra>"}],themed(layout),{responsive:true,displaylogo:false});}
+hovertemplate:"%{x}: $%{y:,.2f}<extra></extra>"}],themed(layout),{responsive:true,displaylogo:false});}
 document.querySelectorAll(".case-pick").forEach(s=>s.addEventListener("change",()=>{pair[+s.dataset.side]=s.value;show();}));
 document.querySelectorAll(".quick button").forEach(q=>q.addEventListener("click",()=>{pair=[q.dataset.without,q.dataset.with];show();}));
 window.addEventListener("load",show);

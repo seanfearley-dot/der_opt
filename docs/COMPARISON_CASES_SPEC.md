@@ -137,10 +137,10 @@ value breakdown and dispatch still showed optimal against counterfactual. Now:
 - **A bar pinned at the top of the page**, above every section, stays in view while
   scrolling: **A** `[case ▾]` **B** `[case ▾]`, the quick buttons, and one line saying
   what a sign means.
-- **Every difference is A − B.** Positive means B is lower than A (a lower bill, less
-  import, less export); negative means B is higher. Cards, chart traces, the heatmap's
-  colorbar and the bill table all say "A − B". A and B have their own colors (gray and
-  blue) everywhere, with A dotted on time charts.
+- **Every difference is A − B, stated once,** in the bar: positive means B is lower
+  than A. Cards show the signed difference with A's and B's values beneath; chart
+  series and the bill table's column are called "difference". A and B have their own
+  colors (gray and blue) everywhere, with A dotted on time charts.
 - **The quick buttons** set both A and B:
 
 | Button | A | B |
@@ -159,15 +159,15 @@ value breakdown and dispatch still showed optimal against counterfactual. Now:
 
 **What follows A and B:**
 - **Summary cards:** bill, total cost (with degradation), import, export and peak
-  import, each A − B with both values beneath; and the DR incentive a case earned, as
+  import, each the difference with both values beneath; and the DR incentive a case earned, as
   its own card (not a difference, and not in the costs).
-- **Value breakdown:** each value stream for A and B, and A − B.
+- **Value breakdown:** each value stream for A and B, and the difference.
 - **Dispatch:** the meter (the home's load, A, B; A − B in the legend) and each
-  device's power and stored energy (B solid, A dotted) on the linked time axis; net
-  load A − B by hour and day; the average day in each month.
+  device's power and stored energy (B solid, A dotted) on the linked time axis; the
+  average day in each month. (v1.1 dropped the day-by-hour heatmap: it added little.)
 - **Energy by month:** import and export, A and B.
-- **Bills:** amount due by billing cycle for A and B, and A − B; and the bill summary
-  as a table with A, B and A − B columns.
+- **Bills:** amount due by billing cycle for A and B, and the difference; and the bill
+  summary as a table with A, B and difference columns.
 
 **What doesn't, and says so:** TRC and RIM, the DR section, screening values and the
 cost tests describe fixed comparisons (the cost tests' pair, or the DR study's R1, R2,

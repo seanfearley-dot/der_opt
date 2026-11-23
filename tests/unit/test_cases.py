@@ -125,7 +125,7 @@ def test_a_run_makes_prices_and_writes_every_case(tmp_path):
 
     page = (out / "report.html").read_text(encoding="utf-8")
     assert page.count('class="case-pick"') == 2  # one A/B choice for the whole page, pinned at the top
-    assert 'class="pairbar"' in page and "<b>A − B</b>" in page and "DR participation" in page
+    assert 'class="pairbar"' in page and "Differences are A − B" in page and "DR participation" in page
     assert "Not set by A and B" in page  # DR doesn't follow the choice, and says so
 
 

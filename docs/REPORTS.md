@@ -78,11 +78,11 @@ What each page shows:
 - **Single home:** one A/B choice, pinned at the top while you scroll, drives the
   page ([docs/COMPARISON_CASES_SPEC.md](COMPARISON_CASES_SPEC.md) section 5): pick any
   two cases (or a quick button: the solar, the measure under rule-based control,
-  optimization, DR participation, everything), and every difference is **A − B**,
-  positive meaning B is lower. It opens on the cost tests' own pair. The TRC and RIM
+  optimization, DR participation, everything). Differences are A − B, positive meaning
+  B is lower; the bar says so once. It opens on the cost tests' own pair. The TRC and RIM
   ratios lead the summary; then cards for bill, total cost, import, export and peak
-  import (A − B) and the DR incentive. The value breakdown, the meter and each device's
-  power and stored energy, net load A − B by hour and day, the average day by month,
+  import (each the difference) and the DR incentive. The value breakdown, the meter and
+  each device's power and stored energy, the average day by month,
   energy by month and the bills all show A and B. DR capacity and events, screening
   values and the cost tests describe fixed comparisons and say so; then checks and
   every setting with its source. A folder written before cases shows optimal against
@@ -93,7 +93,7 @@ What each page shows:
   bills by run; the coordination runs against the ideal; checks; settings.
 - **Study:** cards (premises, device types, analyses); the feeder analysis's headline
   figures, linked to its page; the portfolio (a bar per premise for a chosen measure;
-  one A/B case choice for the whole study, with each premise's bill A − B, largest
+  one A/B case choice for the whole study, with each premise's bill difference, largest
   first, and the total; and the table, with each case's bill, each premise linked to
   its page); the population by element, the
   premises table, and what `add_devices` chose; checks; settings. Each run's page links

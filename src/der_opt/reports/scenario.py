@@ -195,19 +195,6 @@ def _dispatch(page: Page, folder: Path, summary: dict) -> None:
                                                                            "side": "right", "showgrid": False}},
                    height=420, zoom=True, window=window, unit="kW", unit2="kWh")
 
-    if cf_in is not None and cf_out is not None and len(net) >= 48:
-        change = (net - (cf_in - cf_out))
-        frame = pd.DataFrame({"kw": change.to_numpy()}, index=change.index)
-        frame["day"], frame["hour"] = frame.index.strftime("%Y-%m-%d"), frame.index.hour
-        grid = frame.pivot_table(index="hour", columns="day", values="kw", aggfunc="mean")
-        limit = float(np.nanmax(np.abs(grid.to_numpy()))) or 1.0
-        page.text(section, "Where optimization moved load: optimal minus counterfactual net load by hour and day "
-                           "(blue: less from the grid; red: more).")
-        page.chart(section, [{"type": "heatmap", "x": list(grid.columns), "y": list(grid.index),
-                              "z": [_round(r, 2) for r in grid.to_numpy()], "colorscale": "RdBu", "reversescale": True,
-                              "zmin": -limit, "zmax": limit, "colorbar": {"title": "kW"}}],
-                   {"yaxis": {"title": "hour", "dtick": 3}, "hovermode": "closest"}, height=320)
-
 
 def opening_window(series: pd.Series, days: int = 7) -> tuple[str, str] | None:
     """For a run longer than two weeks, the week around its highest value."""
