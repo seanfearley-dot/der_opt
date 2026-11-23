@@ -49,6 +49,7 @@ class DRStudy:
     slice_of_day: pd.DataFrame  # month x hour, per reference
     checks: CheckReport
     summary: dict = field(default_factory=dict)
+    baselines: list[pd.Series] = field(default_factory=list)  # S per calendar, on the settlement basis; NaN outside events
 
 
 def _net(result: DispatchResult) -> pd.Series:
@@ -130,7 +131,7 @@ def run_dr_study(config: ScenarioConfig, r2: DispatchResult | None = None, r2_pr
     loads = {"net": nets, "import": {name: series.clip(lower=0) for name, series in nets.items()}}
     prefix = {"net": "", "import": "import_"}
 
-    responding, perf_rows, event_rows = [], [], []
+    responding, perf_rows, event_rows, baselines = [], [], [], []
     for replicate, events in enumerate(calendars):
         mask = np.zeros(len(index), dtype=bool)
         for e in events:
@@ -146,6 +147,7 @@ def run_dr_study(config: ScenarioConfig, r2: DispatchResult | None = None, r2_pr
         mine = {"net": net, "import": net.clip(lower=0)}
         settled = {basis: settlement_baselines(mine[basis], events, dr.customer_class) for basis in mine}
         s_series = {basis: baseline_series(settled[basis], events, index) for basis in mine}
+        baselines.append(s_series[basis])
         for e in events:
             rows = (index >= e.start) & (index < e.end)
             row = {"replicate": replicate, "event_id": e.event_id, "event_type": e.event_type, "month": e.start.month,
@@ -331,4 +333,5 @@ def run_dr_study(config: ScenarioConfig, r2: DispatchResult | None = None, r2_pr
         "incentive_earned": float(performance["incentive_earned"].sum() / len(calendars))
         if "incentive_earned" in performance else None,
     }
-    return DRStudy(program, calendars, refs, responding, events_frame, performance, capacity, slice_of_day, checks, summary)
+    return DRStudy(program, calendars, refs, responding, events_frame, performance, capacity, slice_of_day, checks, summary,
+                   baselines)

@@ -83,8 +83,12 @@ What each page shows:
   ratios lead the summary; then cards for bill, total cost, import, export and peak
   import (each the difference) and the DR incentive. The value breakdown, the meter and
   each device's power and stored energy, the average day by month,
-  energy by month and the bills all show A and B. DR capacity and events, screening
-  values and the cost tests describe fixed comparisons and say so; then checks and
+  energy by month and the bills all show A and B. The DR section, screening values and
+  the cost tests describe fixed comparisons and say so. DR speaks in case names (the
+  DR run, the same home with no events, the settlement baseline): an event's day, picked
+  from a menu, with the event shaded and what it earned; and capacity by month against
+  both references, counted beside accounted, on net load or grid import, with the
+  months outside the season greyed and the valued measure marked; then checks and
   every setting with its source. A folder written before cases shows optimal against
   counterfactual instead.
 - **Feeder:** cards (costs by run, network saving, who pays more); premises by element;

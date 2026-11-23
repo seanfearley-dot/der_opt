@@ -764,7 +764,7 @@ nothing.
 - **Slice-of-Day:** a 24-hour profile for each month.
 
 `-o` writes `dr_events.csv`, `dr_event_performance.csv`, `dr_capacity.csv`,
-`dr_capacity_slice_of_day.csv`, and `dr_net_load_kw.csv` (every run's net load).
+`dr_capacity_slice_of_day.csv`, and `dr_net_load_kw.csv` (every run's net load, and the settlement baseline S during each calendar's events, on the program's basis, as `S_replicate_N`).
 
 **How each response is modeled:**
 - **Payment basis:** the optimization is paid against an *expected* baseline (the

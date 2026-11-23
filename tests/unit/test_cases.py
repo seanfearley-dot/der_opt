@@ -127,6 +127,10 @@ def test_a_run_makes_prices_and_writes_every_case(tmp_path):
     assert page.count('class="case-pick"') == 2  # one A/B choice for the whole page, pinned at the top
     assert 'class="pairbar"' in page and "Differences are A − B" in page and "DR participation" in page
     assert "Not set by A and B" in page  # DR doesn't follow the choice, and says so
+    # the DR section: an event's day with the settlement baseline, and capacity against two references
+    assert dr["S_replicate_0"].notna().sum() == 2 and dr["S_replicate_0"].loc["2026-07-16 17:00":"2026-07-16 18:00"].notna().all()
+    assert "An event&#x27;s day" in page and "Thu Jul 16, 17:00" in page
+    assert "vs settlement baseline, accounted" in page and "vs Solar only" not in page  # R3 is left out
 
 
 def test_a_case_can_be_billed_on_its_own_tariff(tmp_path):

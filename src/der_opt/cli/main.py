@@ -384,6 +384,7 @@ def _write_dr(study, output_dir: Path) -> None:
     study.slice_of_day.to_csv(output_dir / "dr_capacity_slice_of_day.csv", index=False)
     frames = {f"replicate_{i}": r.grid_import - r.grid_export for i, r in enumerate(study.responding)}
     frames |= {name: r.grid_import - r.grid_export for name, r in study.references.items()}
+    frames |= {f"S_replicate_{i}": series for i, series in enumerate(study.baselines)}  # NaN outside events
     pd.DataFrame(frames).to_csv(output_dir / "dr_net_load_kw.csv")
 
 
