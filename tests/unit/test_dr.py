@@ -54,6 +54,12 @@ def test_calendar_rules(event, message):
     assert any(message in f.message for f in cal.validate_calendar([event], _program(), JULY))
 
 
+def test_one_event_a_day():
+    events = [_event(7, 16, 1), _event(7, 19, 1, event_id="later")]  # same day, no overlap
+    assert any("2 events on 2026-07-07" in f.message for f in cal.validate_calendar(events, _program(), JULY))
+    assert not cal.validate_calendar([_event(7, 16, 1), _event(8, 16, 1, event_id="next")], _program(), JULY)
+
+
 def test_calendar_limits_and_overlap():
     p = _program(max_events_per_month=2, max_consecutive_days=2)
     events = [_event(7, 16, 2), _event(8, 16, 2, event_id="b"), _event(9, 16, 2, event_id="c"),

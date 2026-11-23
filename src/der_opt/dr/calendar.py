@@ -133,6 +133,9 @@ def validate_calendar(events: list[Event], program, time_grid: TimeGrid) -> list
     for a, b in zip(ordered, ordered[1:], strict=False):
         if b.start < a.end:
             bad(f"{a.event_id} and {b.event_id} overlap")
+    by_day = pd.Series([e.day for e in events]).value_counts()
+    for day, count in by_day[by_day > 1].items():  # no grid-services program calls twice in a day (spec v1.3)
+        bad(f"{count} events on {day}; a program calls at most one event a day")
     by_month = pd.Series([e.day.month for e in events]).value_counts()
     if program.max_events_per_month is not None:
         for month, count in by_month.items():

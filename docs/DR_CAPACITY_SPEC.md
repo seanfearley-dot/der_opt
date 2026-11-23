@@ -229,6 +229,7 @@ Checks added to every run:
 - **Errors:**
   - an event outside its program's season, window, length or call limits;
   - overlapping events;
+  - more than one event on a day (v1.3: no grid-services program calls twice a day);
   - a schedule rule landing on a day that already has an event.
 - **Warnings:**
   - delivered reduction larger than the devices' combined power;
@@ -305,6 +306,8 @@ the home can hold that way.
     optimizer was paid.
 11. **Skipped hours (v1.3):** an event hour under a quarter of the event's mean
     reduction against S.
+12. **One event a day (v1.3):** a calendar with two events on a day is an error, whatever
+    built it. Under `uniform`, an event is then each day's run of event hours.
 
 ## Threads to pull
 

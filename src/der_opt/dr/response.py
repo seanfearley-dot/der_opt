@@ -31,7 +31,8 @@ from der_opt.time_grid import TimeGrid
 
 
 def event_runs(steps: list[int]) -> list[list[int]]:
-    """The steps of each event: runs of consecutive event steps."""
+    """The steps of each event: runs of consecutive event steps (a calendar has at most
+    one event a day, so runs and events are the same)."""
     runs, current = [], []
     for t in steps:
         if current and t != current[-1] + 1:
