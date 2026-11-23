@@ -84,15 +84,15 @@ def build(folder: Path, summary: dict, page: Page | None = None) -> Page:
     for pattern in summary.get("ev_patterns") or []:
         page.text(top, f"EV {pattern['device']} daily pattern: {pattern['summary']}")
 
-    if paired:
+    if paired:  # the order: what happened, what it cost, DR, the cost tests, then the detail
         imported = _series(folder, "grid_import.csv")
-        compare.value(page)
         compare.dispatch(page, opening_window(imported) if imported is not None else None)
         compare.energy(page)
-        _dr(page, folder, summary)
-        _screening(page, summary)
-        _cost_tests(page, summary)
         compare.bills(page)
+        _dr(page, folder, summary)
+        _cost_tests(page, summary)
+        _screening(page, summary)
+        compare.value(page)
         for section in page.sections:
             what = {"dr": "it compares the DR run with the same home without events and with the "
                           "settlement baseline",
@@ -104,7 +104,19 @@ def build(folder: Path, summary: dict, page: Page | None = None) -> Page:
         _settings(page, folder)
         return page
 
-    # --- value breakdown
+    _dispatch(page, folder, summary)
+    _energy(page, folder)
+    _bills(page, summary)
+    _dr(page, folder, summary)
+    _cost_tests(page, summary)
+    _screening(page, summary)
+    _value(page, optimal, counterfactual)
+    _checks(page, summary)
+    _settings(page, folder)
+    return page
+
+
+def _value(page: Page, optimal: dict, counterfactual: dict | None) -> None:
     streams = [k for k in optimal if k != "total"]
     if streams:
         section = page.section("value", "Value breakdown")
@@ -116,16 +128,6 @@ def build(folder: Path, summary: dict, page: Page | None = None) -> Page:
                            "marker": {"color": COUNTERFACTUAL}})
         page.chart(section, traces, {"barmode": "group", "yaxis": {"title": "$ over the run (cost +, value −)"},
                                      "hovermode": "closest"}, height=320)
-
-    _dispatch(page, folder, summary)
-    _energy(page, folder)
-    _dr(page, folder, summary)
-    _screening(page, summary)
-    _cost_tests(page, summary)
-    _bills(page, summary)
-    _checks(page, summary)
-    _settings(page, folder)
-    return page
 
 
 def _cost_test_pair(summary: dict) -> str:
@@ -374,11 +376,17 @@ def _screening(page: Page, summary: dict) -> None:
     screening = summary.get("screening")
     if not screening:
         return
-    section = page.section("screening", "Screening values")
-    page.text(section, f"First year, {screening.get('set_id')} ({screening.get('dollars')} $), measure vs "
-                       f"{screening.get('measure_vs')}. Not cost-test results. DR capacity valued: "
-                       f"{screening.get('capacity_valued')}.")
+    tests = next((s for s in page.sections if s.id == "cost-tests"), None)
     rows = [{"category": c, "part": p, "value": v} for c, parts in screening["values"].items() for p, v in parts.items()]
+    about = (f"First year, {screening.get('set_id')} ({screening.get('dollars')} $), measure vs "
+             f"{screening.get('measure_vs')}. Not cost-test results. DR capacity valued: "
+             f"{screening.get('capacity_valued')}.")
+    if tests is not None:  # with the cost tests, folded beneath them
+        page.text(tests, "Screening values: " + about)
+        page.table(tests, pd.DataFrame(rows), formats={"value": money}, collapsed="Screening values")
+        return
+    section = page.section("screening", "Screening values")
+    page.text(section, about)
     page.table(section, pd.DataFrame(rows), formats={"value": money})
 
 

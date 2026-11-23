@@ -158,8 +158,9 @@ value breakdown and dispatch still showed optimal against counterfactual. Now:
   without cost tests, `rule_based` → `optimized`. `cases.compare` overrides it.
 
 **What follows A and B:**
-- **Summary cards:** bill, total cost (with degradation), import, export and peak
-  import, each the difference with both values beneath; and the DR incentive a case earned, as
+- **Summary cards:** bill, total cost (with degradation), import, export, and mean net
+  load during the DR events (peak import when there's no DR), each the difference with
+  both values beneath; and the DR incentive a case earned, as
   its own card (not a difference, and not in the costs).
 - **Value breakdown:** each value stream for A and B, and the difference.
 - **Dispatch:** the meter (the home's load, A, B; A − B in the legend) and each
@@ -168,6 +169,9 @@ value breakdown and dispatch still showed optimal against counterfactual. Now:
 - **Energy by month:** import and export, A and B.
 - **Bills:** amount due by billing cycle for A and B, and the difference; and the bill
   summary as a table with A, B and difference columns.
+
+**The page's order:** summary, dispatch, energy by month, bills, demand response, cost
+tests (screening values folded beneath), value breakdown, checks, settings.
 
 **What doesn't, and says so:** TRC and RIM, the DR section, screening values and the
 cost tests describe fixed comparisons (the cost tests' pair, or the DR study's R1, R2,

@@ -79,18 +79,24 @@ What each page shows:
   page ([docs/COMPARISON_CASES_SPEC.md](COMPARISON_CASES_SPEC.md) section 5): pick any
   two cases (or a quick button: the solar, the measure under rule-based control,
   optimization, DR participation, everything). Differences are A − B, positive meaning
-  B is lower; the bar says so once. It opens on the cost tests' own pair. The TRC and RIM
-  ratios lead the summary; then cards for bill, total cost, import, export and peak
-  import (each the difference) and the DR incentive. The value breakdown, the meter and
-  each device's power and stored energy, the average day by month,
-  energy by month and the bills all show A and B. The DR section, screening values and
-  the cost tests describe fixed comparisons and say so. DR speaks in case names (the
-  DR run, the same home with no events, the settlement baseline): an event's day, picked
-  from a menu, with the event shaded and what it earned; and capacity by month against
-  both references, counted beside accounted, on net load or grid import, with the
-  months outside the season greyed and the valued measure marked; then checks and
-  every setting with its source. A folder written before cases shows optimal against
-  counterfactual instead.
+  B is lower; the bar says so once. It opens on the cost tests' own pair. In order:
+  1. **Summary:** the TRC and RIM ratios; then cards for bill, total cost, import and
+     export (each the difference), mean net load during DR events (peak import when
+     there's no DR), and the DR incentive a case earned.
+  2. **Dispatch:** the meter and each device's power and stored energy, A and B, on the
+     linked time axis; the average day by month.
+  3. **Energy by month** and 4. **Bills**, A and B.
+  5. **Demand response,** in case names (the DR run, the same home with no events, the
+     settlement baseline): an event's day, picked from a menu, with the event shaded and
+     what it earned; and capacity by month against both references, counted beside
+     accounted, on net load or grid import, months outside the season greyed and the
+     valued measure marked.
+  6. **Cost tests,** with the first-year screening values folded beneath them.
+  7. **Value breakdown:** each value stream, A and B.
+  8. **Checks** and 9. **settings,** each with its source.
+
+  Demand response and the cost tests describe fixed comparisons and say so. A folder
+  written before cases shows optimal against counterfactual instead, in the same order.
 - **Feeder:** cards (costs by run, network saving, who pays more); premises by element;
   costs by run; peak flow by element and run, and each element's flow over time with
   its rating; congestion prices; each premise's bill change under coordination and its

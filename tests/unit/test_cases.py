@@ -127,6 +127,10 @@ def test_a_run_makes_prices_and_writes_every_case(tmp_path):
     assert page.count('class="case-pick"') == 2  # one A/B choice for the whole page, pinned at the top
     assert 'class="pairbar"' in page and "Differences are A − B" in page and "DR participation" in page
     assert "Not set by A and B" in page  # DR doesn't follow the choice, and says so
+    order = [page.index(f'<section id="{name}">') for name in ("summary", "dispatch", "energy", "bills", "dr", "value",
+                                                                 "checks", "settings")]
+    assert order == sorted(order)  # the page's order
+    assert '"dr_events":1' in page and "During DR events" in page  # the summary card over the event hours
     # the DR section: an event's day with the settlement baseline, and capacity against two references
     assert dr["S_replicate_0"].notna().sum() == 2 and dr["S_replicate_0"].loc["2026-07-16 17:00":"2026-07-16 18:00"].notna().all()
     assert "An event&#x27;s day" in page and "Thu Jul 16, 17:00" in page

@@ -69,7 +69,16 @@ def setup(page: Page, folder: Path, summary: dict) -> bool:
     if "optimized" in net and devices is not None:  # the home's own load: the same in every case
         own = [c for c in devices.columns if c.startswith("optimized.") and c.endswith(".net_power")]
         load = _rounded(net["optimized"] + devices[own].sum(axis=1))
-    page.extra["cases"] = {"cases": data, "compare": compare, "load": load,
+    events_path, dr_steps, dr_hours = folder / "dr_event_performance.csv", [], 0.0
+    if events_path.exists():  # the steps inside the DR events (the first calendar's), for the summary card
+        events = pd.read_csv(events_path, parse_dates=["start", "end"])
+        events = events[events["replicate"] == 0]
+        inside = np.zeros(len(net.index), dtype=bool)
+        for start, end in zip(events["start"], events["end"], strict=True):
+            inside |= (net.index >= start) & (net.index < end)
+        dr_steps, dr_hours = np.flatnonzero(inside).tolist(), float(events["hours"].sum())
+    page.extra["cases"] = {"cases": data, "compare": compare, "load": load, "dr_steps": dr_steps,
+                           "dr_hours": dr_hours, "dr_events": len(events) if dr_steps else 0,
                            "colors": [A_COLOR, B_COLOR, DIFF_COLOR],
                            "device_colors": {d: _color(d, kinds) for d in kinds}, "charts": {}}
     labels = {n: c["label"] for n, c in cases.items()}
@@ -157,7 +166,11 @@ const t=A.costs.total-B.costs.total;out.push(card("Total cost",smoney(t),
 const ea=A.energy,eb=B.energy;
 out.push(card("Import",snum(ea.import_kwh-eb.import_kwh,0," kWh"),`A ${num(ea.import_kwh)} · B ${num(eb.import_kwh)} kWh`));
 out.push(card("Export",snum(ea.export_kwh-eb.export_kwh,0," kWh"),`A ${num(ea.export_kwh)} · B ${num(eb.export_kwh)} kWh`));
-out.push(card("Peak import",snum(ea.peak_import_kw-eb.peak_import_kw,2," kW"),
+const steps=X.dr_steps||[];
+if(steps.length&&A.net&&B.net){const mean=C=>steps.reduce((s,i)=>s+(C.net[i]||0),0)/steps.length;const ma=mean(A),mb=mean(B);
+out.push(card("During DR events",snum(ma-mb,2," kW"),`mean net load: A ${num(ma,2)} · B ${num(mb,2)} kW, over `+
+`${X.dr_events} events (${num(X.dr_hours,0)} h)`,tone(ma-mb)));}
+else out.push(card("Peak import",snum(ea.peak_import_kw-eb.peak_import_kw,2," kW"),
 `A ${num(ea.peak_import_kw,2)} · B ${num(eb.peak_import_kw,2)} kW`));
 [[A,"A"],[B,"B"]].forEach(([C,s])=>{if(C.dr_incentive!=null)out.push(card(`DR incentive earned by ${s}`,
 money(C.dr_incentive),"at settlement; not in the costs or bill above",""));});
