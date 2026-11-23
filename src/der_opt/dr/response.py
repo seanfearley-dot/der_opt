@@ -12,7 +12,9 @@ the settlement actually earned, from the responding run's own history, next to t
                the reported settlement floors each event's payment at zero.
                delivery uniform (v1.3): pays incentive_per_kwh x hours x the held kW,
                one variable per event no larger than (baseline - load) in any of its
-               steps, so energy goes to the event's weakest hour first.
+               steps, so energy goes to the event's weakest hour first. Like per_kwh
+               it's linear and unfloored in the optimization (an event the home can't
+               bring below the baseline costs it); the reported settlement floors at zero.
   commitment   load <= baseline - committed_kw + shortfall, shortfall penalized
   import_cap   import <= cap_kw + shortfall, shortfall penalized
 
@@ -67,7 +69,10 @@ class DREventResponse(ValueStream):
 
     def apply(self, model, premise):
         if self.uniform and self.steps:
-            self.held = pyo.Var(range(len(self.events)), domain=pyo.NonNegativeReals)
+            # free, like per_kwh's linear payment: an event whose worst hour can't get below the
+            # baseline costs the optimizer, rather than making the run infeasible; the reported
+            # settlement floors at zero
+            self.held = pyo.Var(range(len(self.events)), domain=pyo.Reals)
             model.add_component(f"{premise.name}_dr_held", self.held)
             pairs = [(e, t) for e, steps in enumerate(self.events) for t in steps]
             model.add_component(f"{premise.name}_dr_uniform", pyo.Constraint(
@@ -104,7 +109,7 @@ class DREventResponse(ValueStream):
         load = imp if self.basis == "import" else imp - exp
         m = self.mask
         if self.uniform:
-            held = [max(0.0, float((self.baseline[s] - load[s]).min())) for s in self.events]
+            held = [float((self.baseline[s] - load[s]).min()) for s in self.events]  # unfloored, as optimized
             return float(-self.program.incentive_per_kwh * self.dt * sum(len(s) * h for s, h in zip(self.events, held,
                                                                                                     strict=True)))
         if self.response == "incentive":

@@ -7,6 +7,9 @@ from der_opt.devices.base import Device
 from der_opt.time_grid import TimeGrid
 
 
+OTHER_HVAC_COST = 1e-3  # $/kWh thermal of non-electric heat or cooling: steers only, never reported
+
+
 class SmartThermostat(Device):
     """1R1C thermal model: temp[t+1] = temp[t] + (dt/C) * ((T_amb[t]-temp[t])/R +/- COP*p_hvac[t]),
     with a comfort-band inequality T_min[t] <= temp[t] <= T_max[t]. Because the comfort
@@ -16,10 +19,11 @@ class SmartThermostat(Device):
     subtracts it.
 
     A thermostat that only cools can't hold the lower comfort limit when the house is
-    colder than that on its own (winter, with heating that isn't electric or isn't
-    modeled), so there the lower limit is the free-floating temperature, the house with
-    the HVAC off; a heating thermostat's upper limit likewise. A run that holds the band
-    everywhere is unchanged: cooling only ever lowers the temperature below free-floating."""
+    colder than that on its own (a winter night, or a cool night after a hot day), so a
+    non-electric heat input (`other_kw`, thermal: the gas furnace) can keep it there; a
+    heating thermostat gets non-electric cooling (open windows) for its upper limit. It
+    costs a steering-only OTHER_HVAC_COST per kWh, never reported, so it's used only when
+    the band needs it, and a run that held the band without it is unchanged."""
 
     def __init__(
         self,
@@ -47,21 +51,6 @@ class SmartThermostat(Device):
         self.p_max_kw = p_max_kw
         self.initial_temp_c = initial_temp_c
         self.sign = 1.0 if mode == "heating" else -1.0
-        free = self.free_floating()
-        if mode == "cooling":
-            self.T_min = np.minimum(self.T_min, free)
-        else:
-            self.T_max = np.maximum(self.T_max, free)
-
-    def free_floating(self) -> np.ndarray:
-        """Indoor temperature at the start of each step with the HVAC off."""
-        dt = self.time_grid.dt_hours
-        out = np.empty(len(self.T_amb))
-        temp = self.initial_temp_c
-        for t, ambient in enumerate(self.T_amb):
-            out[t] = temp
-            temp = temp + (dt / self.C) * (ambient - temp) / self.R
-        return out
 
     @staticmethod
     def _broadcast(value, time_grid: TimeGrid) -> np.ndarray:
@@ -77,6 +66,8 @@ class SmartThermostat(Device):
         temp_periods = range(self.time_grid.horizon_steps + 1)
         self.p_hvac = pyo.Var(periods, bounds=(0, self.p_max_kw), domain=pyo.NonNegativeReals)
         self.temp = pyo.Var(temp_periods, domain=pyo.Reals)
+        self.other = pyo.Var(periods, domain=pyo.NonNegativeReals)  # non-electric heat (cooling mode), kW thermal
+        model.add_component(self._component_name("other"), self.other)
         model.add_component(self._component_name("p_hvac"), self.p_hvac)
         model.add_component(self._component_name("temp"), self.temp)
 
@@ -91,6 +82,7 @@ class SmartThermostat(Device):
         def temp_dynamics_rule(_m, t):
             return self.temp[t + 1] == self.temp[t] + (dt / self.C) * (
                 (self.T_amb[t] - self.temp[t]) / self.R + self.sign * self.cop * self.p_hvac[t]
+                - self.sign * self.other[t]
             )
 
         model.add_component(
@@ -109,6 +101,11 @@ class SmartThermostat(Device):
     def net_power_expr(self, model: pyo.ConcreteModel, t: int):
         return -self.p_hvac[t]
 
+    def control_cost_expr(self, model: pyo.ConcreteModel):
+        """The non-electric heat (or cooling) that holds the far comfort limit: a
+        steering cost only, so it's used just when the band needs it."""
+        return OTHER_HVAC_COST * self.time_grid.dt_hours * sum(self.other[t] for t in self.time_grid.periods)
+
     def initial_state(self) -> dict:
         return {"temp": self.initial_temp_c}
 
@@ -120,12 +117,18 @@ class SmartThermostat(Device):
         next_temp = temp + (dt / self.C) * (
             (self.T_amb[t] - temp) / self.R + self.sign * self.cop * p_hvac
         )
-        return {"temp": next_temp, "p_hvac": p_hvac, "net_power": -p_hvac}
+        # the non-electric heat (cooling) a real house gets to hold the far limit
+        limit = (self.T_min if self.sign < 0 else self.T_max)[min(t + 1, len(self.T_min) - 1)]
+        gap = (limit - next_temp) if self.sign < 0 else (next_temp - limit)
+        other = max(0.0, gap) * self.C / dt
+        next_temp += -self.sign * (dt / self.C) * other
+        return {"temp": next_temp, "p_hvac": p_hvac, "other_kw": other, "net_power": -p_hvac}
 
     def dispatch_series(self, model: pyo.ConcreteModel) -> dict[str, np.ndarray]:
         periods = self.time_grid.periods
         return {
             "p_hvac": np.array([pyo.value(self.p_hvac[t]) for t in periods]),
             "temp": np.array([pyo.value(self.temp[t]) for t in periods]),
+            "other_kw": np.array([pyo.value(self.other[t]) for t in periods]),
             "net_power": np.array([-pyo.value(self.p_hvac[t]) for t in periods]),
         }

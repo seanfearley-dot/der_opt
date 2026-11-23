@@ -313,11 +313,12 @@ next, which can make runs with many on/off variables slower (the meter's
 `exclusive_import_export` keeps its own few; see Modeling caveats).
 
 - **A thermostat only cools, or only heats.** A cooling thermostat can't hold
-  `comfort_min_c` when the house is colder than that on its own (winter, with heating
-  that isn't electric or isn't modeled), so there the lower limit is the free-floating
-  temperature, the house with the HVAC off; a heating thermostat's upper limit likewise.
-  A run that holds the band everywhere is unchanged, and a cooling thermostat can run a
-  whole year.
+  `comfort_min_c` when the house is colder than that on its own (a winter night, or a
+  cool night after a hot day), so non-electric heat (the gas furnace, `other_kw` in the
+  dispatch, kW thermal) keeps it there; a heating thermostat gets non-electric cooling
+  for its upper limit. It carries a $0.001/kWh steering cost, never reported, so it's
+  used only when the band needs it. A run that held the band without it is unchanged,
+  and a cooling thermostat can run a whole year.
 - **Meter limits.** `import_limit_kw` and `export_limit_kw` are separate because they
   usually differ: import is the service rating, export what the interconnection allows.
   `poi_limit_kw` sets both; a specific one overrides it. With an export limit, the

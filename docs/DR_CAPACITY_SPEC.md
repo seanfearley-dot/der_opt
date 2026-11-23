@@ -259,7 +259,9 @@ the home can hold that way.
 - **Held kW, in the optimization:** one variable per event, at most the reduction below
   the expected baseline in each of the event's steps; the incentive pays
   `incentive_per_kwh x hours x held kW`. It's linear, so the solve stays an LP and its
-  duals stay exact. Reduction above the held kW in any hour earns only what the bill
+  duals stay exact. Like `per_kwh`, it isn't floored in the optimization: an event whose
+  worst hour can't get below the baseline (an EV still away, say) costs the optimizer
+  rather than making the run infeasible; the reported settlement floors at zero. Reduction above the held kW in any hour earns only what the bill
   pays for it. (Prototyped on the July run: the reduction came out flat, 0.90 kW in each
   of the four hours on 8 July against 0, 2.36, 0.92, 0.30 per kWh, for the same
   incentive and $0.61 a month in bill value given up.)
