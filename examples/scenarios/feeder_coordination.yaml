@@ -30,6 +30,8 @@ objective: # replaces homes_bill's bill objective: these homes aren't billed on 
       export_price: {type: constant, price: 0.05} # illustrative
 
 defaults:
+  - where: {type: ev}  # these EVs charge on plug-in, the behavior this example is about (the library's default is a TOU timer)
+    set: {device: {counterfactual: {type: rule_based_ev}}}
   - set: {premise: {poi_limit_kw: 20}}
 
 premises:

@@ -49,6 +49,8 @@ tariffs:
     nbt: {export_rates_csv: ../data/pge_nbt_eec_2026.csv, acc_plus_per_kwh: 0.0088}
 
 defaults:
+  - where: {type: ev}  # these EVs charge on plug-in, the behavior this example is about (the library's default is a TOU timer)
+    set: {device: {counterfactual: {type: rule_based_ev}}}
   - set:
       premise:
         poi_limit_kw: 30

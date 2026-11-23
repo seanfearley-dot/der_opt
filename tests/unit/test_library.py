@@ -45,6 +45,11 @@ devices:
           {LIB}/value_streams/pge_e_elec_2026-06_import_demand_charge.yaml", {LIB}/meter/panel_20kw.yaml"]
 name: charge_only
 {LOAD}""",
+    "tou_timer": f"""extends: [{JULY}, {LIB}/devices/ev_commuter_charge_only.yaml",
+          {LIB}/value_streams/pge_e_elec_2026-06_import.yaml", {LIB}/meter/panel_20kw.yaml",
+          {LIB}/counterfactual/ev_tou_timer.yaml"]
+name: tou_timer
+{LOAD}""",
     "non_export": f"""extends: [{JULY}, {LIB}/devices/battery_13kwh.yaml",
           {LIB}/value_streams/pge_e_elec_2026-06_import.yaml", {LIB}/meter/panel_20kw.yaml",
           {LIB}/meter/non_export.yaml", {LIB}/avoided_costs/synthetic_2026.yaml"]

@@ -43,28 +43,17 @@ def config_without_devices(config, devices: list[str] | None):
                                      "cases": None})
 
 
-def resolve_runs(config, premise, dispatch, counterfactual, dr_study, no_measure: DispatchResult | None = None):
-    """(without, with, description) for the measure's scope (cost-test spec section 1).
-    `no_measure` is the comparison cases' run without the measure devices, if made."""
-    from der_opt.scenarios.loader import build_premise
-    from der_opt.simulation import CounterfactualSimulator
+def resolve_runs(config, cases: dict):
+    """(without, with, description) for the cost tests (cost test spec v1.3): the
+    comparison home built device by device, against the DR run (or the optimized run)."""
+    from der_opt.cases import cost_test_pair
 
-    scope = config.cost_test.scope if config.cost_test else "control"
-    with_ = dr_study.responding[0] if dr_study is not None else dispatch
-    if scope == "control":
-        if dr_study is not None:
-            return dr_study.references["R1"], with_, "R1 (counterfactual)"
-        if counterfactual is not None:
-            return counterfactual, with_, "R1 (counterfactual)"
-        return CounterfactualSimulator(build_premise(config), {}).run(), with_, "R1 (devices passive)"
-    devices = config.cost_test.measure_devices if config.cost_test else None
-    if devices is None and config.dr is not None:
-        devices = config.dr.measure_devices
-    if dr_study is not None and devices == (config.dr.measure_devices if config.dr else None):
-        return dr_study.references["R3"], with_, "R3 (no measure devices)"
-    if no_measure is not None:  # the cases use the same measure devices
-        return no_measure, with_, "R3 (no measure devices)"
-    return build_premise(config_without_devices(config, devices)).solve()[0], with_, "R3 (no measure devices)"
+    pair = cost_test_pair(config, list(cases))
+    if pair is None:
+        raise ValueError("the cost tests need the comparison home and the run they measure; the cases section "
+                         "leaves one out")
+    without, with_ = cases[pair[0]], cases[pair[1]]
+    return without.result, with_.result, f"{without.label} ({without.description})"
 
 
 def standard_time_hours(year: int, tz: str) -> tuple[pd.DatetimeIndex, pd.DatetimeIndex, str]:
@@ -98,7 +87,11 @@ def energy_impact(without: DispatchResult, with_: DispatchResult, time_grid, tz:
 
 
 def write_impact_package(out_dir: Path, config, without_label: str, without: DispatchResult, with_: DispatchResult,
-                         time_grid, dr_study=None, bills: dict | None = None, tz: str = "America/Los_Angeles") -> Path:
+                         time_grid, dr_study=None, bills: dict | None = None, tz: str = "America/Los_Angeles",
+                         incentives: tuple[float | None, float | None] | None = None,
+                         without_modes: dict | None = None) -> Path:
+    """`incentives` = (the comparison home's DR incentive, the measured run's): the
+    measure's first-year incentive is the difference (cost test spec v1.3)."""
     from der_opt.avoided_costs.screening import capacity_measures
 
     ct = config.cost_test
@@ -134,6 +127,8 @@ def write_impact_package(out_dir: Path, config, without_label: str, without: Dis
         first[["event_id", "start", "end", "settlement_basis", "incentive_earned"]].to_csv(
             package / "dr_incentives.csv", index=False)
         incentive_first_year = float(first["incentive_earned"].sum())
+    if incentives is not None:  # what the measure adds: an events-only comparison home earns some too
+        incentive_first_year = (incentives[1] or 0.0) - (incentives[0] or 0.0)
 
     bill_reduction = None
     if bills and {"without", "with"} <= set(bills):
@@ -141,7 +136,7 @@ def write_impact_package(out_dir: Path, config, without_label: str, without: Dis
     measure = {
         "spec": "docs/COST_TEST_SPEC.md v1.0",
         "created": datetime.now().isoformat(timespec="seconds"),
-        "measure_id": config.name, "scope": ct.scope, "without": without_label,
+        "measure_id": config.name, "without": without_label, "without_modes": without_modes,
         "analysis_year": int(pd.DatetimeIndex(time_grid.timestamps())[0].year),
         "start_year": ct.start_year, "measure_life_years": ct.measure_life_years,
         "net_to_gross": ct.net_to_gross, "impact_degradation": ct.impact_degradation,

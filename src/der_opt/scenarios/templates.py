@@ -198,7 +198,7 @@ dr:
 COST_TEST = Section("""\
 # docs/COST_TEST_SPEC.md
 cost_test:
-  scope: control # measure = optimization + DR, against R1
+  without: {battery: rule_based} # each device's comparison: battery removed | rule_based | backup_only; EV tou_timer | events_only | removed
   start_year: $next_year
   measure_life_years: 10
   avoided_costs: {set: $avoided_costs}
@@ -251,7 +251,7 @@ HOMES_BILL = Section("""\
 objective: bill
 defaults:
   - where: {type: ev}
-    set: {device: {counterfactual: {type: rule_based_ev}}}
+    set: {device: {counterfactual: {type: tou_timer}}}
   - where: {type: battery}
     set: {device: {counterfactual: {type: self_consumption}}}
 """, "study/homes_bill.yaml")

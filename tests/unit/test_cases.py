@@ -59,18 +59,19 @@ def _config(path: Path) -> ScenarioConfig:
 
 def test_the_cases_a_run_can_make_and_their_names(tmp_path):
     config = _config(_scenario(tmp_path))
-    assert planned(config) == ["no_devices", "no_measure", "rule_based", "optimized", "responding"]
+    assert planned(config) == ["no_devices", "without", "rule_based", "optimized", "responding"]
     named = labels(config)
-    assert named["no_measure"][0] == "Solar only" and named["rule_based"][0] == "Battery, rule-based"
+    # no cost test: the comparison home's battery is removed, its solar unchanged
+    assert named["without"][0] == "No battery" and named["rule_based"][0] == "Battery, rule-based"
     assert named["responding"][0] == "Optimized + DR"
     assert [b["label"] for b in buttons(config, planned(config))] == [
-        "Solar", "The battery, rule-based", "Optimization", "DR participation", "Everything"]
+        "The measure", "Optimization", "DR participation", "Everything"]
     assert opening_pair(config, planned(config)) == ("rule_based", "optimized", "the value of optimization")
 
     bare = config.model_copy(update={"dr": None, "counterfactual": None})
-    assert planned(bare) == ["no_devices", "optimized"]  # the measure is every device: no no_measure
+    assert planned(bare) == ["no_devices", "without", "optimized"]
     assert "no counterfactual" in unavailable(bare)["rule_based"]
-    assert planned(config, counterfactual=False) == ["no_devices", "no_measure", "optimized", "responding"]
+    assert planned(config, counterfactual=False) == ["no_devices", "without", "optimized", "responding"]
 
 
 def test_cases_settings_are_checked(tmp_path):
@@ -87,19 +88,19 @@ def test_a_run_makes_prices_and_writes_every_case(tmp_path):
     out = tmp_path / "out"
     result = runner.invoke(app, ["run", str(_scenario(tmp_path)), "-o", str(out)])
     assert result.exit_code == 0, result.output
-    assert "Cases (each priced the same way" in result.output and "Solar only" in result.output
+    assert "Cases (each priced the same way" in result.output and "No battery" in result.output
     summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
     assert summary["summary_version"] == "1.1"
     cases = summary["cases"]
-    assert list(cases) == ["no_devices", "no_measure", "rule_based", "optimized", "responding"]
+    assert list(cases) == ["no_devices", "without", "rule_based", "optimized", "responding"]
     assert cases["optimized"]["costs"] == pytest.approx(summary["costs"]["optimal"])
     assert cases["rule_based"]["costs"] == pytest.approx(summary["costs"]["counterfactual"])
     assert cases["optimized"]["bill"]["net_cost"] == pytest.approx(summary["bills"]["optimal"]["net_cost"])
     assert cases["responding"]["dr_incentive"] is not None and cases["optimized"]["dr_incentive"] is None
     assert "DREventResponse" not in cases["responding"]["costs"]  # the incentive is its own line
-    assert cases["no_devices"]["devices"] == [] and cases["no_measure"]["devices"] == ["solar"]
-    assert "battery degradation" not in cases["no_measure"]["costs"]
-    assert cases["no_measure"]["energy"]["self_consumed_solar_kwh"] <= cases["no_measure"]["energy"]["solar_kwh"]
+    assert cases["no_devices"]["devices"] == [] and cases["without"]["devices"] == ["solar"]
+    assert "battery degradation" not in cases["without"]["costs"]
+    assert cases["without"]["energy"]["self_consumed_solar_kwh"] <= cases["without"]["energy"]["solar_kwh"]
     assert summary["case_compare"]["without"] == "rule_based" and summary["case_compare"]["with"] == "optimized"
 
     net = pd.read_csv(out / "cases_net_load_kw.csv", index_col=0, parse_dates=True)
@@ -110,7 +111,7 @@ def test_a_run_makes_prices_and_writes_every_case(tmp_path):
     assert imported == pytest.approx(net["no_devices"].sum(), rel=1e-3)
     assert load["load_kw"].max() > 0
     dr = pd.read_csv(out / "dr_net_load_kw.csv", index_col=0)  # DR's references: the same runs
-    assert (dr["R3"].to_numpy() - net["no_measure"].to_numpy()).max() == pytest.approx(0, abs=1e-3)
+    assert (dr["R3"].to_numpy() - net["without"].to_numpy()).max() == pytest.approx(0, abs=1e-3)  # solar only
     assert (dr["R1"].to_numpy() - net["rule_based"].to_numpy()).max() == pytest.approx(0, abs=1e-3)
     assert (dr["replicate_0"].to_numpy() - net["responding"].to_numpy()).max() == pytest.approx(0, abs=1e-3)
 
@@ -120,8 +121,8 @@ def test_a_run_makes_prices_and_writes_every_case(tmp_path):
     assert "cost: NBTBill" in table and set(table["case"]) == set(cases)
 
     devices = pd.read_csv(out / "cases_device_dispatch.csv", index_col=0)
-    assert {"optimized.battery.soc", "responding.battery.net_power", "no_measure.solar.net_power"} <= set(devices)
-    assert not any(c.startswith(("no_devices.", "no_measure.battery")) for c in devices)
+    assert {"optimized.battery.soc", "responding.battery.net_power", "without.solar.net_power"} <= set(devices)
+    assert not any(c.startswith(("no_devices.", "without.battery")) for c in devices)
 
     page = (out / "report.html").read_text(encoding="utf-8")
     assert page.count('class="case-pick"') == 2  # one A/B choice for the whole page, pinned at the top

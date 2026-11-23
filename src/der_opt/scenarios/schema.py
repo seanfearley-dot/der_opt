@@ -173,8 +173,14 @@ class DiscountRatesConfig(BaseModel):
 
 
 class CostTestConfig(BaseModel):
-    scope: Literal["control", "device"] = "control"
-    measure_devices: list[str] | None = None  # device scope: removed for R3; default dr.measure_devices or all
+    """docs/COST_TEST_SPEC.md. `without` says what each device is compared against (v1.3):
+    by device name or type, a mode (removed, rule_based, tou_timer, events_only,
+    backup_only) or {mode: tou_timer, start: "HH:MM"}; a battery must have one."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    without: dict[str, str | dict[str, Any]] = Field(default_factory=dict)
+    with_: Literal["responding", "optimized"] | None = Field(None, alias="with")  # default responding with DR
     start_year: int
     measure_life_years: int
     avoided_costs: AvoidedCostsConfig
@@ -191,10 +197,21 @@ class CostTestConfig(BaseModel):
     tests: list[Literal["PCT", "RIM", "TRC", "PAC", "SCT"]] = Field(
         default_factory=lambda: ["PCT", "RIM", "TRC", "PAC", "SCT"])
 
+    @model_validator(mode="before")
+    @classmethod
+    def _retired(cls, data):
+        if isinstance(data, dict):
+            for key in ("scope", "measure_devices"):
+                if key in data:
+                    raise ValueError(f"cost_test.{key} is retired (cost test spec v1.3): say what each device is "
+                                     "compared against with cost_test.without, e.g. without: {battery: removed, "
+                                     "ev: tou_timer}")
+        return data
+
 
 # --- comparison cases (docs/COMPARISON_CASES_SPEC.md v1.0) ------------------------------
 
-CaseName = Literal["no_devices", "no_measure", "rule_based", "optimized", "responding"]
+CaseName = Literal["no_devices", "without", "rule_based", "optimized", "responding"]
 
 
 class CaseCompareConfig(BaseModel):
@@ -220,7 +237,7 @@ class CasesConfig(BaseModel):
     include: list[CaseName] | None = None
     compare: CaseCompareConfig | None = None
     no_devices: CaseConfig | None = None
-    no_measure: CaseConfig | None = None
+    without: CaseConfig | None = None  # the cost tests' comparison home (v1.2; was no_measure)
     rule_based: CaseConfig | None = None
     optimized: CaseConfig | None = None
     responding: CaseConfig | None = None

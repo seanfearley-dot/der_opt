@@ -481,15 +481,13 @@ report can compare any two ([docs/COMPARISON_CASES_SPEC.md](docs/COMPARISON_CASE
 | Case | The home | Made from |
 |---|---|---|
 | `no_devices` | its load alone | the meter reading the load (nothing to decide) |
-| `no_measure` | without the measure's devices, optimized | DR's R3, or its own solve |
+| `without` | the cost tests' comparison home, device by device (`cost_test.without`) | simulated, plus one solve for events-only or backup-only devices |
 | `rule_based` | every device, under the `counterfactual` policies | the counterfactual |
 | `optimized` | every device, optimized, no DR events | the main solve |
 | `responding` | every device, optimized, responding to DR events | the DR study |
 
-The measure's devices are `cost_test.measure_devices`, then `dr.measure_devices`, then
-every device. A case appears only when the run can make it (`rule_based` needs a
-`counterfactual`, `responding` a `dr` section, and `no_measure` a measure that isn't
-every device). Each is priced on the run's value streams (degradation counts; the
+A case appears only when the run can make it (`rule_based` needs a `counterfactual`,
+`responding` a `dr` section). Each is priced on the run's value streams (degradation counts; the
 smoothing cost never does) and billed on its tariff; the DR incentive is
 `responding`'s own line. The run prints a table of them, and writes `cases.csv` and
 `cases_net_load_kw.csv` and `cases_device_dispatch.csv`. The report has one A/B choice
@@ -881,9 +879,29 @@ test's net benefits would change if those costs were discounted
 ([docs/COST_TEST_SPEC.md](docs/COST_TEST_SPEC.md) section 3). The `cost_test` section
 needs `discount_rates: {utility, participant, societal}` for the export.
 
+**What the measure is compared against** is a home built device by device
+(`cost_test.without`, [docs/COST_TEST_SPEC.md](docs/COST_TEST_SPEC.md) section 1a),
+against the DR run (or the optimized run without DR):
+
+| Mode | The device in the comparison home | For |
+|---|---|---|
+| `removed` | gone, with everything it does (an EV takes its charging load with it) | battery, EV |
+| `rule_based` | its counterfactual rule: a thermostat at setpoint (no pre-cooling), a self-consuming battery, an EV charging on plug-in | thermostat (default), battery, EV |
+| `tou_timer` | an EV charging at full power from the start of the tariff's cheapest period until full (`{mode: tou_timer, start: "21:00"}` sets the time) | EV (default) |
+| `events_only` | the TOU-timer EV, also responding to DR events | EV |
+| `backup_only` | a battery held full for backup, discharging only into DR events | battery |
+| `unchanged` | as in the measured run | solar |
+
+A battery has no default (it varies by program), so a cost test at a home with one
+must name its mode. A `removed` device is bought by the measure: its installed cost
+belongs in `participant_costs` (a study's portfolio adds it; a single home gets a
+warning). The comparison home is the `without` case on the report's A/B bar, and the
+page opens on it against the measured run. `scope` and `cost_test.measure_devices`
+are retired.
+
 ```yaml
 cost_test:
-  scope: control                       # control (vs R1) or device (vs R3)
+  without: {battery: backup_only, ev: tou_timer}  # thermostat: rule_based by default
   start_year: 2027
   measure_life_years: 10
   avoided_costs: {set: ../data/avoided_costs/synthetic_2026}

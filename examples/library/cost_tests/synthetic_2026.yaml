@@ -3,7 +3,7 @@
 # Cost-test settings and the synthetic avoided cost set (docs/COST_TEST_SPEC.md).
 # Costs and rates are illustrative.
 cost_test:
-  scope: control # measure = optimization + DR participation, against R1
+  without: {battery: rule_based} # what each device is compared against: battery removed | rule_based | backup_only; EV tou_timer (default) | events_only | removed | rule_based; thermostat rule_based
   start_year: 2027
   measure_life_years: 10
   avoided_costs: {set: ../../data/avoided_costs/synthetic_2026}

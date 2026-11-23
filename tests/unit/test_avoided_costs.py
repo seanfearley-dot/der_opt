@@ -149,6 +149,7 @@ def test_cli_writes_screening_and_impact_package(tmp_path):
     for name in ("measure.yaml", "energy_impact.csv", "capacity.csv", "dr_incentives.csv"):
         assert (package / name).exists(), name
     measure = yaml.safe_load((package / "measure.yaml").read_text(encoding="utf-8"))
-    assert measure["scope"] == "control" and measure["capacity_value"] == "R2/import/counted"
+    assert measure["without_modes"] == {"battery": "rule_based", "solar": "unchanged"}  # the library block's comparison
+    assert measure["capacity_value"] == "R2/import/counted"
     assert measure["first_year"]["dr_incentive"] == pytest.approx(56.77, abs=0.01)  # 49.74 before the battery smoothing
     assert len(pd.read_csv(package / "energy_impact.csv")) == 8760

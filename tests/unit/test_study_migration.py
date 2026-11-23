@@ -228,7 +228,7 @@ def test_old_names_warn_and_the_examples_use_none(tmp_path):
 def test_study_defaults_add_up_across_extends(tmp_path):
     data = compose_scenario(REPO / "examples" / "scenarios" / "feeder_from_files.yaml").data
     wheres = [d.get("where") for d in data["defaults"]]
-    # homes_bill's two, device_params's two, then the study's own
-    assert wheres == [{"type": "ev"}, {"type": "battery"}, {"type": "battery"}, {"type": "ev"}, None]
+    # homes_bill's two, device_params's two, then the study's own two (EVs on plug-in, and every premise)
+    assert wheres == [{"type": "ev"}, {"type": "battery"}, {"type": "battery"}, {"type": "ev"}, {"type": "ev"}, None]
     kinds = {b.name: b.kind for b in read_library(REPO / "examples" / "library")}
     assert kinds["study/homes_bill"] == kinds["study/device_params"] == "study"

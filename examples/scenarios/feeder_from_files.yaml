@@ -33,6 +33,8 @@ tariffs:
     nem2: {nsc_rate_per_kwh: 0.02781}
 
 defaults:
+  - where: {type: ev}  # these EVs charge on plug-in, the behavior this example is about (the library's default is a TOU timer)
+    set: {device: {counterfactual: {type: rule_based_ev}}}
   - set: {premise: {exclusive_import_export: true}} # no importing and exporting in the same hour (each home needs both limits)
 
 analyses:

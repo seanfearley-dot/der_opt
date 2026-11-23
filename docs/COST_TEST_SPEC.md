@@ -1,8 +1,9 @@
 # der-opt measure impact export specification (for cost tests)
 
-**Version 1.2 — approved 2026-11-22.** Implemented: the impact package and the OpenBCA
+**Version 1.3 — approved 2026-11-22.** Implemented: the impact package and the OpenBCA
 export (`der_opt.cost_test`, `der-opt openbca`). Change it only by a new
-version, approved the same way. (1.2 drops der-opt's re-tally of OpenBCA's streams and
+version, approved the same way. (1.3 compares the measure against a home built device
+by device, section 1, retiring `scope`; 1.2 drops der-opt's re-tally of OpenBCA's streams and
 reports OpenBCA's results alone, its own ratio included; 1.1 switched the export from
 Excel templates to OpenBCA's input tables; 1.0 approved 2026-11-20; drafts 0.1-0.3 led
 to 1.0.)
@@ -25,13 +26,84 @@ go in as a custom stream. The one gap is how it classifies negative streams (dec
 
 ## 1. The measure
 
-One premise, one full analysis year. `scope` (a per-run setting) picks the "without"
-case for every impact:
+One premise, one full analysis year. "With" is the responding run when there's a DR
+program, otherwise the optimized run (`cost_test.with` picks). "Without" is the
+comparison home, built device by device (v1.3, below; until 1.3 a `scope` picked R1 or
+R3 for the whole home).
 
-| `scope` | "With" | "Without" |
+### 1a. What each device is compared against (v1.3)
+
+**Why.** `scope: control` compares against R1, every device under its rule-based
+control. That's one behavior for the whole home, and often the wrong one: a battery
+program's comparison may be no battery, a thermostat's is a thermostat that doesn't
+pre-cool, and an event program's EV is one on a TOU charging timer.
+
+**The comparison home is built device by device.** Each device has a mode:
+
+| Mode | The device in the comparison home | Devices |
 |---|---|---|
-| `control` | the responding run | **R1**: same devices, today's rule-based control |
-| `device` | the responding run | **R3**: no measure devices |
+| `removed` | gone, with everything it does (an EV takes its charging load with it) | battery, EV |
+| `rule_based` | its `counterfactual` policy: thermostat `setpoint` (holds the top of the comfort band, no pre-cooling), battery `self_consumption` | thermostat, battery, EV |
+| `tou_timer` | an EV that starts charging at full power when the tariff's cheapest period begins (or at a set time) and stops when full; it never discharges | EV |
+| `events_only` | the TOU-timer EV that also responds to DR events: shifts charging out of an event, or discharges into it with V2X, and recharges after | EV |
+| `backup_only` | a battery held full for backup that discharges only into DR events, then recharges | battery |
+| `unchanged` | as in the "with" run | solar (always) |
+
+```yaml
+cost_test:
+  without:                    # per device, by name; omitted devices take their type's default
+    battery: backup_only      # rule_based | removed | backup_only (required: it varies by program)
+    ev: tou_timer             # tou_timer (default) | events_only | removed | rule_based
+    thermostat: rule_based    # the default
+  with: responding            # optional; responding with a DR program, else optimized
+```
+
+- **Defaults:** thermostat `rule_based`; EV `tou_timer`, the common EV behavior and
+  the baseline for event programs; solar `unchanged`. **A battery has no default:** the
+  comparison varies by program, so a cost test at a home with a battery must say which
+  (validation names the three choices).
+- **`tou_timer`:** the cheapest period comes from the premise's import tariff (E-ELEC:
+  midnight to 3 pm, so a commuter EV home at 18:30 waits until midnight). `start:
+  "HH:MM"` sets the timer instead. It's also a new `counterfactual` policy for EVs,
+  usable anywhere `rule_based_ev` is.
+- **`events_only` and `backup_only`** are solved: the device sees a flat energy price, so
+  nothing rewards TOU shifting, plus the DR program's response. A tiny tie-break
+  holds its resting behavior: the EV charges in the cheapest period, as on its timer;
+  the battery stays full. It meets every departure and comfort limit like any run, and
+  is billed on the real tariff afterwards.
+- **How it runs:** rule-based and timer devices are simulated first and fixed as load
+  profiles (none of their rules depends on another device); `events_only` and
+  `backup_only` devices, if any, are solved together in one more solve; removed devices
+  are dropped.
+- **`scope` is retired.** A scenario that still sets it fails validation, naming
+  `without`. The library's cost-test block drops it; its EV counterfactual becomes
+  `tou_timer`.
+- **Participant costs.** When a device is `removed`, the measure includes buying it, so
+  `participant_costs.upfront` must include its installed cost. A study's portfolio
+  already adds each removed device's `installed_cost`; a single-home run warns, naming
+  the removed devices.
+
+**Cases** (comparison cases spec v1.2): the comparison home becomes a case, `without`
+(labeled from its modes, e.g. "Thermostat at setpoint, no battery"), replacing
+`no_measure`, so the A/B page can show exactly what TRC and RIM compare against. The
+report opens on `without` -> `with`.
+
+**The five homes, as an example:**
+
+| Home | Comparison home |
+|---|---|
+| 1 Battery | battery as the study chooses: `removed`, `rule_based` or `backup_only` |
+| 2 V2X | EV on a TOU timer (or `events_only`, or `removed`) |
+| 3 Thermostat + battery | thermostat at setpoint; battery as chosen |
+| 4 Thermostat | thermostat at setpoint |
+| 5 V2X + battery | EV on a TOU timer; battery as chosen |
+
+- **As built:** a solved device's resting behavior is held as a rule, not only a
+  tie-break: outside an event it can't discharge, and outside the event's recovery
+  window (its start to the end of the next day) it keeps at least the energy it would
+  have at rest. Smoothing is off for it. The measure's first-year DR incentive is the
+  "with" run's less what the comparison home earns (an events-only EV earns some), and
+  `measure.yaml` records each device's mode.
 
 ## 2. The impact package
 
@@ -124,7 +196,7 @@ Two things in how OpenBCA scores a run matter here:
 
 ```yaml
 cost_test:
-  scope: control                  # control | device (per run)
+  without: {battery: backup_only} # each device's comparison (section 1a); a battery must have one
   start_year: 2027
   measure_life_years: 10
   avoided_costs: {set: avoided_costs/acc_2024_pge_cz12}
@@ -150,6 +222,7 @@ sweeps and quick comparisons without a round trip through OpenBCA (decision 1).
 ## Decisions (approved with version 1.0)
 
 - **Scope:** a per-run setting, `control` (against R1) or `device` (against R3).
+  Replaced in 1.3 by `without`, below.
 - **Capacity value:** R2 / import / counted by default, configurable.
 - **Tests:** OpenBCA allocates, discounts and runs them. der-opt computes no cost tests.
   It writes one OpenBCA configuration per test (PCT, RIM, TRC, PAC, SCT) as **OpenBCA's
@@ -170,6 +243,11 @@ sweeps and quick comparisons without a round trip through OpenBCA (decision 1).
   results.
 - **Annual costs (v1.1):** OpenBCA's convention of not discounting them is kept, noted and
   quantified on every export.
+- **What each device is compared against (v1.3):** a battery's mode is required (it varies
+  by program); an EV's default is `tou_timer`, and the library's EV counterfactual is the
+  TOU timer too; `scope` is retired with a validation error; `events_only` and
+  `backup_only` are solved against a flat price and the DR program, holding their
+  resting behavior.
 
 ## Threads to pull
 

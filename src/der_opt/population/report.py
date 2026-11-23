@@ -14,7 +14,8 @@ from der_opt.population.resolved import ROLE_SETTINGS, ResolvedPremise
 
 BILL_STREAMS = {"bill", "nbt_bill", "nem2_bill"}
 # the device kinds each counterfactual policy works on
-POLICY_KINDS = {"self_consumption": {"battery", "ev"}, "rule_based_ev": {"ev"}, "setpoint": {"thermostat"},
+POLICY_KINDS = {"self_consumption": {"battery", "ev"}, "rule_based_ev": {"ev"}, "tou_timer": {"ev"},
+                "setpoint": {"thermostat"},
                 "no_flexibility": {"solar", "battery", "ev", "thermostat", "flexible_load"}}
 
 

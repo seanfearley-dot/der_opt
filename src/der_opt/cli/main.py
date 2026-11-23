@@ -736,9 +736,12 @@ def _run_scenario(scenario: Path, output_dir: Path | None = None, duals: bool = 
         from der_opt.cost_test import resolve_runs
 
         acs = read_set(set_path)
-        no_measure = cases["no_measure"].result if "no_measure" in cases else None
-        without, with_, without_label = resolve_runs(config, premise, dispatch, counterfactual, dr_study,
-                                                     no_measure)
+        if config.cost_test is not None:  # the comparison home (cost test spec v1.3)
+            without, with_, without_label = resolve_runs(config, cases)
+        else:  # screening values alone: the rule-based run against the measured one, as before
+            with_ = dr_study.responding[0] if dr_study is not None else dispatch
+            without = counterfactual if counterfactual is not None else dispatch
+            without_label = "R1 (counterfactual)" if counterfactual is not None else "the optimized run"
         impact_runs = (without, with_, without_label)
         capacity_kw = capacity_measures(dr_study.capacity) if dr_study is not None else {}
         screening = screening_values(acs, without.grid_import - without.grid_export,
@@ -756,7 +759,7 @@ def _run_scenario(scenario: Path, output_dir: Path | None = None, duals: bool = 
     for label, result in runs_checked.items():
         report.extend(check_dispatch(premise, result, run=label))
     ended = runs_checked | {name: case.result for name, case in cases.items()
-                            if name in ("no_measure", "responding")}
+                            if name in ("without", "responding")}
     report.extend(check_end_states(premise, ended))
     if billing is not None and validation is None:
         report.extend(check_tariff_dates(billing[0], premise.time_grid))
@@ -834,8 +837,14 @@ def _run_scenario(scenario: Path, output_dir: Path | None = None, duals: bool = 
                 tariff, program, bill_kwargs = billing
                 package_bills = {label: bill_from_dispatch(r, premise.time_grid, tariff, program, **bill_kwargs)
                                  for label, r in (("without", without), ("with", with_))}
+            from der_opt.cases import cost_test_pair
+            from der_opt.cost_test.without import config_modes
+
+            pair = cost_test_pair(config, list(cases))
             write_impact_package(output_dir, config, without_label, without, with_, premise.time_grid,
-                                 dr_study, package_bills, tz=config.dr.tz if config.dr else "America/Los_Angeles")
+                                 dr_study, package_bills, tz=config.dr.tz if config.dr else "America/Los_Angeles",
+                                 incentives=(cases[pair[0]].dr_incentive, cases[pair[1]].dr_incentive),
+                                 without_modes={k: v["mode"] for k, v in config_modes(config).items()})
         from der_opt.cases import cases_table, device_table, net_load_table
 
         dt = premise.time_grid.dt_hours

@@ -144,7 +144,8 @@ def test_portfolio_premises_get_their_measure_class_and_costs(tmp_path):
     study = _load(_study(tmp_path))
     analysis = study.analyses.portfolio
     analysis.cost_test = {"start_year": 2027, "measure_life_years": 10, "participant_costs": {"upfront": 100},
-                          "avoided_costs": {"set": str(DATA / "avoided_costs" / "synthetic_2026")}}
+                          "avoided_costs": {"set": str(DATA / "avoided_costs" / "synthetic_2026")},
+                          "without": {"battery": "removed"}}  # the comparison home has no battery: the measure buys it
     premises, problems = portfolio_premises(study)
     assert not problems
     by = {p.premise_id: p for p in premises}
@@ -152,6 +153,12 @@ def test_portfolio_premises_get_their_measure_class_and_costs(tmp_path):
     assert by["home_a"].config.dr.customer_class == "residential"
     assert by["home_a"].config.cost_test.participant_costs.upfront == 100 + 9000  # base + its battery
     assert by["home_b"].config.cost_test.participant_costs.upfront == 100 + 9500 + 250  # + its own participant_upfront
+    analysis.cost_test["without"] = {"battery": "rule_based"}  # compared against the same battery: nothing bought
+    by = {p.premise_id: p for p in portfolio_premises(study)[0]}
+    assert by["home_a"].config.cost_test.participant_costs.upfront == 100
+    analysis.cost_test["without"] = {}
+    assert any("needs a mode for battery" in p for p in portfolio_premises(study)[1])
+    analysis.cost_test["without"] = {"battery": "removed"}
     analysis.select = {"segment": "late"}
     analysis.measure = {"template": ["battery_13kwh"]}
     premises, _ = portfolio_premises(study)
@@ -175,7 +182,7 @@ def test_cost_tests_need_a_whole_year(tmp_path):
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     data["analyses"]["portfolio"]["cost_test"] = {
         "start_year": 2027, "measure_life_years": 10, "avoided_costs": {"set": str(DATA / "avoided_costs" / "synthetic_2026")},
-        "discount_rates": {"utility": 0.075, "participant": 0.1, "societal": 0.03}}
+        "discount_rates": {"utility": 0.075, "participant": 0.1, "societal": 0.03}, "without": {"battery": "rule_based"}}
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
     report = validate_scenario(path).report
     assert any("cost_test needs a run covering all of 2026" in f.message for f in report.errors)
@@ -215,8 +222,6 @@ def test_a_study_reproduces_the_dr_battery_example(tmp_path):
 
     def same(data):
         data.pop("name")
-        if data["cost_test"]["measure_devices"] is None:  # unset means dr.measure_devices
-            data["cost_test"]["measure_devices"] = data["dr"]["measure_devices"]
         text = json.dumps(data, sort_keys=True).replace(', "tz": "America/Los_Angeles"', "")  # the study names it
         return json.loads(text)
 
@@ -236,7 +241,7 @@ def test_cli_runs_both_analyses(tmp_path):
     assert list(table["premise_id"]) == ["home_a", "home_b", "total"]
     assert table.iloc[-1]["dr_incentive_earned"] == pytest.approx(table.iloc[:2]["dr_incentive_earned"].sum(), abs=0.01)
     # each comparison case's bill, and a study-wide pair selector (cases spec section 6)
-    assert {"case_bill_no_devices", "case_bill_no_measure", "case_bill_optimized", "case_bill_responding"} <= set(table)
+    assert {"case_bill_no_devices", "case_bill_without", "case_bill_optimized", "case_bill_responding"} <= set(table)
     assert table.loc[0, "case_bill_optimized"] == pytest.approx(table.loc[0, "bill_optimal"], abs=0.01)
     assert '"study_cases"' in (out / "report.html").read_text(encoding="utf-8")
     record = json.loads((out / "run_record.json").read_text(encoding="utf-8"))

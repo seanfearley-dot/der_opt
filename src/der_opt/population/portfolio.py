@@ -4,9 +4,11 @@ tests, as a single-home scenario would run them; then a summary across premises.
 
 Per premise:
   - the measure is the devices the `measure` selector picks (default: all its devices);
-    DR's R3 and a device-scope cost test remove them;
-  - participant costs are the study's base, plus the measure devices' installed_cost
-    and annual_om, plus the premise's own participant_upfront / participant_annual_om;
+    DR's R3 removes them;
+  - the cost tests compare against the home `cost_test.without` describes (by device
+    name or type; cost test spec v1.3); participant costs are the study's base, plus the
+    installed_cost and annual_om of the devices that comparison removes, plus the
+    premise's own participant_upfront / participant_annual_om;
   - customer_class comes from the premise (DR settlement: 5-in-10 or 10-in-10).
 """
 
@@ -67,12 +69,21 @@ def portfolio_premises(study, resolved=None) -> tuple[list[PortfolioPremise], li
         if analysis.avoided_costs is not None:
             data["avoided_costs"] = analysis.avoided_costs.model_dump()
         if analysis.cost_test is not None:
+            from der_opt.cost_test.without import WithoutError, device_modes
+
+            try:  # the devices the comparison home removes are bought by the measure (cost test spec v1.3)
+                modes, _ = device_modes([(d.device_id, d.kind) for d in r.devices], analysis.cost_test.get("without")
+                                        or {})
+            except WithoutError as exc:
+                problems.append(f"{r.premise_id}: {exc}")
+                continue
+            bought = [d for d in r.devices if modes[d.device_id]["mode"] == "removed"]
             base = dict(analysis.cost_test.get("participant_costs") or {})
-            upfront = float(base.get("upfront", 0.0)) + sum(d.costs.get("installed_cost", 0.0) for d in devices)
+            upfront = float(base.get("upfront", 0.0)) + sum(d.costs.get("installed_cost", 0.0) for d in bought)
             upfront += float(r.settings.get("participant_upfront") or 0.0)
-            annual = float(base.get("annual_om", 0.0)) + sum(d.costs.get("annual_om", 0.0) for d in devices)
+            annual = float(base.get("annual_om", 0.0)) + sum(d.costs.get("annual_om", 0.0) for d in bought)
             annual += float(r.settings.get("participant_annual_om") or 0.0)
-            data["cost_test"] = {**analysis.cost_test, "measure_devices": measure,
+            data["cost_test"] = {**analysis.cost_test,
                                  "participant_costs": {**base, "upfront": upfront, "annual_om": annual}}
         try:
             config = ScenarioConfig.model_validate(data)

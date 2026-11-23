@@ -211,7 +211,7 @@ def problems(picks: list[Block], home: HomeData) -> list[str]:
 
     if by_kind.get("dr_addon") and not by_kind.get("dr"):
         found.append(f"{by_kind['dr_addon'][0].name} adds to a DR program; pick a program too")
-    for kind, section in (("dr", "dr"), ("cost_test", "cost_test")):
+    for kind, section in (("dr", "dr"),):
         for block in by_kind.get(kind, []):
             measure = block.data[section].get("measure_devices") or []
             missing = sorted(set(measure) - set(devices))

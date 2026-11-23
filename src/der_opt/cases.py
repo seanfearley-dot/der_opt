@@ -1,15 +1,13 @@
-"""Comparison cases (docs/COMPARISON_CASES_SPEC.md v1.0): the same home, load and
+"""Comparison cases (docs/COMPARISON_CASES_SPEC.md v1.2): the same home, load and
 weather over the same window, with different devices present or run differently, each
 priced the same way, so the report can compare any two.
 
   no_devices   the home's load alone (nothing to decide, so it's metered, not solved)
-  no_measure   every device except the measure's, optimized (DR's R3)
+  without      the cost tests' comparison home, built device by device from
+               cost_test.without (cost test spec v1.3; der_opt.cost_test.without)
   rule_based   every device, run by the counterfactual policies (R1)
   optimized    every device, optimized, no DR events (R2)
   responding   every device, optimized, responding to DR events
-
-The measure's devices are cost_test.measure_devices, then dr.measure_devices, then
-every device: the rules R3 and the cost tests use.
 """
 
 from __future__ import annotations
@@ -21,9 +19,9 @@ import pandas as pd
 
 from der_opt.results.schema import DispatchResult
 
-CASES = ("no_devices", "no_measure", "rule_based", "optimized", "responding")
+CASES = ("no_devices", "without", "rule_based", "optimized", "responding")
 # the study page's names: a premise's own labels depend on its devices
-GENERIC_LABELS = {"no_devices": "No devices", "no_measure": "Without the measure", "rule_based": "Rule-based",
+GENERIC_LABELS = {"no_devices": "No devices", "without": "Comparison home", "rule_based": "Rule-based",
                   "optimized": "Optimized", "responding": "Optimized + DR"}
 WORDS = {"solar": "solar", "battery": "battery", "ev_v2x": "EV", "thermostat": "thermostat",
          "curtailable_load": "curtailable load"}
@@ -52,23 +50,12 @@ class Case:
 # --- which cases, and their names --------------------------------------------------
 
 
-def measure_devices(config) -> list[str]:
-    names = [d.name for d in config.devices]
-    if config.cost_test is not None and config.cost_test.measure_devices is not None:
-        return list(config.cost_test.measure_devices)
-    if config.dr is not None and config.dr.measure_devices is not None:
-        return list(config.dr.measure_devices)
-    return names
-
-
 def unavailable(config, counterfactual: bool = True) -> dict[str, str]:
     """Each case this run can't make, and why."""
     out = {}
     if not config.devices:
         out["no_devices"] = "the home has no devices, so it's the optimized case"
-        out["no_measure"] = "the home has no devices"
-    elif set(measure_devices(config)) >= {d.name for d in config.devices}:
-        out["no_measure"] = "the measure is every device, so it would be no_devices"
+        out["without"] = "the home has no devices"
     if config.counterfactual is None:
         out["rule_based"] = "the scenario has no counterfactual section"
     elif not counterfactual:
@@ -108,9 +95,8 @@ def _first_upper(text: str) -> str:
 
 def labels(config) -> dict[str, tuple[str, str]]:
     """(label, description) for every case, from the scenario's devices."""
-    measure = set(measure_devices(config))
-    kept = [d for d in config.devices if d.name not in measure]
-    removed = [d for d in config.devices if d.name in measure]
+    from der_opt.cost_test.without import config_modes, label
+
     policies = (config.counterfactual.policies if config.counterfactual is not None else {}) or {}
     ruled = [d for d in config.devices if d.name in policies]
     ev_note = lambda gone: ("; without the EV, its charging load goes too" if any(d.type == "ev_v2x" for d in gone)
@@ -118,8 +104,7 @@ def labels(config) -> dict[str, tuple[str, str]]:
     program = config.dr.program.program_id if config.dr is not None else ""
     return {
         "no_devices": ("No devices", "the home's load alone" + ev_note(config.devices)),
-        "no_measure": (_first_upper(_join(_words(kept))) + " only",
-                       f"without the {_join(_words(removed))}, optimized" + ev_note(removed)),
+        "without": label(config, config_modes(config)) if config.devices else ("Comparison home", ""),
         "rule_based": (f"{_first_upper(_join(_words(ruled)))}, rule-based" if ruled else "Rule-based, devices passive",
                        "every device; " + (", ".join(f"{name}: {p.get('type')}" for name, p in policies.items())
                                            or "every device passive")),
@@ -130,12 +115,9 @@ def labels(config) -> dict[str, tuple[str, str]]:
 
 def buttons(config, names: list[str]) -> list[dict]:
     """The report's quick buttons: the usual questions, where both cases exist."""
-    measure = set(measure_devices(config))
-    kept = [d for d in config.devices if d.name not in measure]
-    removed = [d for d in config.devices if d.name in measure]
+    measure = cost_test_pair(config, names) or ("without", "responding" if "responding" in names else "optimized")
     out = [
-        (_first_upper(_join(_words(kept))), "no_devices", "no_measure"),
-        (f"The {_join(_words(removed))}, rule-based", "no_measure", "rule_based"),
+        ("The measure", *measure),
         ("Optimization", "rule_based", "optimized"),
         ("DR participation", "optimized", "responding"),
         ("Everything", "no_devices", "responding" if "responding" in names else "optimized"),
@@ -147,9 +129,8 @@ def cost_test_pair(config, names: list[str]) -> tuple[str, str] | None:
     """The two cases the cost tests compare, when both are cases."""
     if config.cost_test is None:
         return None
-    with_ = "responding" if config.dr is not None else "optimized"
-    without = "rule_based" if config.cost_test.scope == "control" else "no_measure"
-    return (without, with_) if without in names and with_ in names else None
+    with_ = config.cost_test.with_ or ("responding" if config.dr is not None else "optimized")
+    return ("without", with_) if "without" in names and with_ in names else None
 
 
 def opening_pair(config, names: list[str]) -> tuple[str, str, str]:
@@ -206,13 +187,13 @@ def build_cases(config, premise, dispatch: DispatchResult, counterfactual: Dispa
     """Every planned case, from the run's own results where it has them (the main solve,
     the counterfactual, the DR study's R3 and responding run), priced alike."""
     from der_opt.cost_test.impacts import config_without_devices
+    from der_opt.cost_test.without import build_without
     from der_opt.pricing import value_breakdown
     from der_opt.scenarios.loader import build_billing, build_premise
     from der_opt.simulation import CounterfactualSimulator
 
     names = names if names is not None else planned(config, counterfactual is not None)
     named = labels(config)
-    measure = measure_devices(config)
     all_names = [d.name for d in config.devices]
     run_billing = build_billing(config)
     out: dict[str, Case] = {}
@@ -229,15 +210,9 @@ def build_cases(config, premise, dispatch: DispatchResult, counterfactual: Dispa
             if dr_study is None:
                 raise CasesError("responding needs the DR study")
             case_premise, result, devices = premise, dr_study.responding[0], all_names  # priced without the DR stream
-        elif name == "no_measure":
-            reduced = config_without_devices(config, measure).model_copy(update={"cases": None})
-            case_premise = build_premise(reduced)
-            dr_measure = set(config.dr.measure_devices or all_names) if config.dr is not None else None
-            if dr_study is not None and dr_measure == set(measure):
-                result = dr_study.references["R3"]
-            else:
-                result = case_premise.solve()[0]
-            devices = [d.name for d in reduced.devices]
+        elif name == "without":  # the cost tests' comparison home, device by device
+            result, case_premise, without_incentive = build_without(config, dr_study)
+            devices = [d.name for d in case_premise.devices]
         else:  # no_devices: nothing to decide, so the meter reads the load
             reduced = config_without_devices(config, None).model_copy(update={"cases": None})
             case_premise = build_premise(reduced)
@@ -258,6 +233,8 @@ def build_cases(config, premise, dispatch: DispatchResult, counterfactual: Dispa
                 case.label += f" ({tariff.name})"
         if name == "responding":
             case.dr_incentive = _dr_incentive(dr_study)
+        elif name == "without":
+            case.dr_incentive = without_incentive
         out[name] = case
     return out
 

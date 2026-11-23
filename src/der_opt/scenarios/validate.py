@@ -155,8 +155,7 @@ def _check_devices(v: Validation) -> None:
     config = v.config
     names = {d.name for d in config.devices}
     found = []
-    for section, devices in (("dr.measure_devices", config.dr.measure_devices if config.dr else None),
-                             ("cost_test.measure_devices", config.cost_test.measure_devices if config.cost_test else None)):
+    for section, devices in (("dr.measure_devices", config.dr.measure_devices if config.dr else None),):
         unknown = sorted(set(devices or []) - names)
         if unknown:
             found.append(Finding("error", "device names", f"{section} names {unknown}, which aren't devices in this "
@@ -249,6 +248,22 @@ def _check_cost_test(v: Validation, cost_tests: bool, check_openbca: bool, openb
         if len(index) != len(whole) or index[0] != whole[0]:
             found.append(Finding("error", "cost test", f"cost_test needs a run covering all of {year} "
                                  f"(this one covers {index[0]} to {index[-1]})"))
+    from der_opt.cost_test.without import WithoutError, device_modes, kind_of
+
+    try:  # what each device is compared against (v1.3)
+        modes, unmatched = device_modes([(d.name, kind_of(d.type)) for d in v.config.devices],
+                                        v.config.cost_test.without)
+        if unmatched:
+            found.append(Finding("warning", "cost test", f"cost_test.without names {unmatched}, which match no device "
+                                 "here by name or type"))
+        gone = [name for name, m in modes.items() if m["mode"] == "removed"]
+        if gone:
+            found.append(Finding("warning", "cost test", f"the comparison home has no {', '.join(gone)}, so the "
+                                 f"measure buys {'them' if len(gone) > 1 else 'it'}: participant_costs.upfront "
+                                 f"(${v.config.cost_test.participant_costs.upfront:,.0f}) should include the installed "
+                                 "cost"))
+    except WithoutError as exc:
+        found.append(Finding("error", "cost test", str(exc)))
     if v.config.cost_test.discount_rates is None:
         found.append(Finding(level, "cost test", "cost_test.discount_rates (utility, participant, societal) are "
                              "needed to run the cost tests in OpenBCA"))

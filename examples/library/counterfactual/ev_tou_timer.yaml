@@ -1,0 +1,7 @@
+# der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
+# the EV charges on a TOU timer
+# R1 for an EV: charge at full power from the start of the tariff's cheapest period until
+# full, never discharge (the common EV behavior; needs a billing tariff, or start: "HH:MM")
+counterfactual:
+  policies:
+    ev: {type: tou_timer}

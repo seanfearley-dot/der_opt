@@ -265,8 +265,7 @@ window.addEventListener("load",show);
 
 # --- a study's portfolio (section 6) -------------------------------------------------
 
-STUDY_BUTTONS = (("The other devices", "no_devices", "no_measure"), ("The measure, rule-based", "no_measure", "rule_based"),
-                 ("Optimization", "rule_based", "optimized"), ("DR participation", "optimized", "responding"),
+STUDY_BUTTONS = (("The measure", "without", "responding"), ("Optimization", "rule_based", "optimized"), ("DR participation", "optimized", "responding"),
                  ("Everything", "no_devices", "responding"))
 
 

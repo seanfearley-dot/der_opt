@@ -211,8 +211,10 @@ def test_validate_checks_names_calendars_and_the_measure_life(tmp_path):
         return [f"{f.check}: {f.message}" for f in validate_scenario(path).report.errors]
 
     assert check(lambda d: None) == []
-    assert any("cost_test.measure_devices names ['batery']" in e
-               for e in check(lambda d: d["cost_test"].update(scope="device", measure_devices=["batery"])))
+    assert any("cost_test.scope is retired" in e for e in check(lambda d: d["cost_test"].update(scope="device")))
+    assert any("battery (battery) can't be 'sideways'" in e
+               for e in check(lambda d: d["cost_test"].update(without={"battery": "sideways"})))
+    assert any("needs a mode for battery" in e for e in check(lambda d: d["cost_test"].update(without={})))
     assert any("dr calendar" in e and "outside the program's season" in e for e in check(
         lambda d: d["dr"]["events"].update(random=None, schedule=[{"start": "17:00", "hours": 2, "dates": ["2026-01-15"]}])))
     assert any("life runs to 2029" in e and "not 2020" in e

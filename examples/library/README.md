@@ -69,6 +69,7 @@ What merges and what replaces:
 | | `non_export` | nothing back to the grid |
 | | `no_simultaneous_import_export` | a single meter: no import and export in the same step (needed when export can pay more than import; on/off variables only in those steps) |
 | `counterfactual/` | `battery_self_consumption` | R1: the battery self-consumes |
+| | `ev_tou_timer` | R1: the EV charges on a TOU timer, from the start of the cheapest period |
 | | `ev_plug_and_charge` | R1: the EV charges at full power on plug-in |
 | `billing/` | `pge_e_elec_2026-06_nbt` | E-ELEC with NBT export credits |
 | | `pge_e_tou_c_2026-06_nem2` | E-TOU-C with NEM 2.0; **the scenario supplies `baseline_territory`** |
@@ -76,8 +77,8 @@ What merges and what replaces:
 | | `summer_peak_commitment` | the same with a 3 kW firm commitment (extends `summer_peak_incentive`) |
 | | `monthly_test_events` | add after a program: year-round, a 2-hour test event the first Tuesday of each month |
 | `avoided_costs/` | `synthetic_2026` | first-year screening values from the synthetic set |
-| `cost_tests/` | `synthetic_2026` | cost-test settings on the synthetic set, illustrative costs and rates |
-| `study/` | `homes_bill` | a study's objective (each premise's own bill) and counterfactuals (rule-based EVs, self-consuming batteries) |
+| `cost_tests/` | `synthetic_2026` | cost-test settings on the synthetic set, illustrative costs and rates; the battery compared against self-consumption |
+| `study/` | `homes_bill` | a study's objective (each premise's own bill) and counterfactuals (EVs on a TOU timer, self-consuming batteries) |
 | | `device_params` | `defaults` for a study's batteries and EVs (sizes come from `devices.csv`) |
 
 Study blocks set `objective` and `defaults`. A study that extends several gets every

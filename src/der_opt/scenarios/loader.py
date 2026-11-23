@@ -43,6 +43,7 @@ from der_opt.simulation import (
     RuleBasedEVChargingPolicy,
     SelfConsumptionBatteryPolicy,
     SetpointThermostatPolicy,
+    TOUTimerEVPolicy,
 )
 from der_opt.time_grid import TimeGrid
 
@@ -287,7 +288,31 @@ def load_scenario(path: str | Path) -> Premise:
     return build_premise(load_scenario_config(path))
 
 
-def _build_policy(device_name: str, policy_config: dict, device: Device) -> ControlPolicy:
+def tou_window(config: ScenarioConfig, time_grid: TimeGrid, start: str | None = None) -> np.ndarray:
+    """When a TOU charging timer lets an EV charge: the import tariff's cheapest period
+    each day, or 12 hours from `start` ("HH:MM") each day."""
+    import pandas as pd
+
+    stamps = pd.DatetimeIndex(time_grid.timestamps())
+    if start:
+        hour, minute = (int(part) for part in str(start).split(":"))
+        since = (stamps.hour * 60 + stamps.minute - (hour * 60 + minute)) % 1440
+        return np.asarray(since < 12 * 60)
+    billing = build_billing(config)
+    if billing is not None:
+        rates = np.asarray(billing[0].total_rate(stamps), dtype=float)
+    else:  # no bill: the import price the scenario optimizes against (flat: every hour, so it charges on plug-in)
+        streams = [v for v in config.value_streams if v.type == "energy_arbitrage" and "import_price" in v.params]
+        if not streams:
+            raise ValueError('a tou_timer EV needs a tariff or an import price to find its cheapest period, or a '
+                             'start time (start: "00:00")')
+        rates = np.asarray(_build_price_series(streams[0].params["import_price"]).values(time_grid), dtype=float)
+    lowest = pd.Series(rates, index=stamps).groupby(stamps.normalize()).transform("min").to_numpy()
+    return rates <= lowest + 1e-9
+
+
+def _build_policy(device_name: str, policy_config: dict, device: Device,
+                  config: ScenarioConfig | None = None) -> ControlPolicy:
     kind = policy_config.get("type")
     overrides = {k: v for k, v in policy_config.items() if k != "type"}
 
@@ -312,13 +337,18 @@ def _build_policy(device_name: str, policy_config: dict, device: Device) -> Cont
         return RuleBasedEVChargingPolicy(
             p_max_charge_kw=device_attr("p_max_charge_kw"), soc_max=device_attr("soc_max")
         )
+    if kind == "tou_timer":
+        if config is None:
+            raise ValueError("a tou_timer policy needs the scenario (its tariff)")
+        return TOUTimerEVPolicy(p_max_charge_kw=device_attr("p_max_charge_kw"), soc_max=device_attr("soc_max"),
+                                window=tou_window(config, device.time_grid, overrides.get("start")))
     if kind == "setpoint":
         if not hasattr(device, "T_amb"):
             raise ValueError(f"counterfactual policy 'setpoint' on {device_name!r} is for thermostats")
         return SetpointThermostatPolicy(device, offset_c=overrides.get("offset_c", 0.0))
     raise ValueError(
         f"Unknown counterfactual policy type {kind!r} for {device_name!r}; "
-        "expected 'self_consumption', 'rule_based_ev', 'setpoint', or 'no_flexibility'"
+        "expected 'self_consumption', 'rule_based_ev', 'tou_timer', 'setpoint', or 'no_flexibility'"
     )
 
 
@@ -336,7 +366,7 @@ def build_counterfactual_policies(config: ScenarioConfig, premise: Premise) -> d
                 f"counterfactual policy for unknown device {device_name!r}; "
                 f"devices are {sorted(devices)}"
             )
-        policies[device_name] = _build_policy(device_name, policy_config, devices[device_name])
+        policies[device_name] = _build_policy(device_name, policy_config, devices[device_name], config)
     return policies
 
 

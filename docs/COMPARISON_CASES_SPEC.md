@@ -1,6 +1,7 @@
 # der-opt comparison cases specification
 
-**v1.1, 2026-11-22.** v1.0 was approved 2026-11-22 with the recommended answer to each
+**v1.2, 2026-11-22.** v1.2 replaces `no_measure` with `without`, the cost tests' comparison home
+built device by device (cost test spec v1.3, section 1a). v1.0 was approved 2026-11-22 with the recommended answer to each
 decision in section 8; v1.1 makes one A/B choice drive the whole report page, with
 every difference shown as A − B (section 5). Built as written, except where a note
 below says otherwise.
@@ -25,22 +26,23 @@ in which devices are present and how they're run.
 | Case | Devices | How they run | Today |
 |---|---|---|---|
 | `no_devices` | none: the home's load alone | — | new |
-| `no_measure` | every device except the measure's | optimized | DR's R3 |
+| `without` | as the cost tests' `without` says, device by device (v1.2; was `no_measure`) | removed, rule-based, on a TOU timer, events-only or backup-only | new |
 | `rule_based` | all | the `counterfactual` policies | R1, "counterfactual" |
 | `optimized` | all | optimized, no DR events | R2, "optimal" |
 | `responding` | all | optimized, responding to DR events | DR's responding run |
 
-- **The measure's devices** come from `cost_test.measure_devices`, then
-  `dr.measure_devices`, then all devices. These are the same rules R3 and the cost
-  tests use now. In `scenarios/new_home.yaml` the measure is the battery, so
-  `no_measure` is the home with solar only.
+- **`without` (v1.2)** is the cost tests' comparison home, each device as
+  `cost_test.without` says (cost test spec v1.3, section 1a). With no cost test, every
+  device takes its type's default and a battery is removed. In `scenarios/new_home.yaml`
+  the library's cost-test block compares the battery against self-consumption, so
+  `without` is the home with its solar and a self-consuming battery.
 - **A case appears only when the run can make it:**
   - `rule_based` needs a `counterfactual` section;
   - `responding` needs a `dr` section;
-  - `no_measure` is left out when the measure is every device, because it would equal
-    `no_devices`.
-- **Each case gets a label from its devices,** so the page reads "No devices", "Solar
-  only", "Battery, rule-based", "Optimized" and "Optimized + DR". The names in the
+  - `without` needs at least one device.
+- **Each case gets a label from its devices,** so the page reads "No devices",
+  "Battery on self-consumption" (the comparison home), "Battery, rule-based",
+  "Optimized" and "Optimized + DR". The names in the
   table are the ones used in files and settings.
 - **Removing a device removes everything it does.** Removing an EV also removes its
   charging load, so the case without it is a home without the car. The page says so
@@ -71,22 +73,21 @@ in which devices are present and how they're run.
 | `optimized` | the main solve | no |
 | `rule_based` | the counterfactual simulation | no |
 | `responding` | the DR study | no |
-| `no_measure` | DR's R3, when the DR study ran with the same measure devices; otherwise a new solve | only then |
+| `without` | a simulation of its rule-based and timer devices, plus one solve when a device is events-only or backup-only | only then |
 | `no_devices` | the meter reading the load | no |
 
 - **`no_devices` isn't solved.** With no devices there's nothing to decide: the meter
   imports the load. (As built; the draft had a solve here. A solve could only add
   simultaneous import and export where the meter allows it, which no real meter does.)
-- **`no_measure` reuses DR's R3** when the DR study removed the same devices, and the
-  cost tests reuse `no_measure` for `scope: device`, so the measure is solved without
-  once at most. With a solar-only remainder there's little to optimize: solar can at
-  most be curtailed.
+- **`without` is the cost tests' "without"** (v1.2): the impact package and screening
+  values use it, so it's built once. (v1.0's `no_measure` reused DR's R3; R3 stays as
+  it is for DR capacity.)
 - **Cases are on by default** in every single-home run (decision 2). A scenario can
   choose which to run:
 
 ```yaml
 cases:
-  include: [no_devices, no_measure, rule_based, optimized, responding]  # default: every case the run can make
+  include: [no_devices, without, rule_based, optimized, responding]  # default: every case the run can make
   compare: {without: rule_based, with: optimized}   # the page's opening pair; default in section 5
   no_devices: {billing: ../library/billing/pge_e_tou_c_2026.yaml}   # optional, per case (decision 1); this block doesn't exist yet
 ```
@@ -145,14 +146,13 @@ value breakdown and dispatch still showed optimal against counterfactual. Now:
 
 | Button | A | B |
 |---|---|---|
-| Solar | `no_devices` | `no_measure` |
-| The battery, rule-based | `no_measure` | `rule_based` |
+| The measure | `without` | the cost tests' "with" (`responding`, or `optimized`) |
 | Optimization | `rule_based` | `optimized` |
 | DR participation | `optimized` | `responding` |
 | Everything | `no_devices` | `responding` |
 
-  The labels come from the case labels; with an EV as the measure, the second reads
-  "The EV, rule-based". A button only appears when its cases exist.
+  A button only appears when its cases exist. (v1.2 replaced v1.0's "Solar" and "The
+  battery, rule-based" buttons with "The measure".)
 - **The page opens on the cost tests' own pair** (decision 4): `rule_based` →
   `responding` for `scope: control`, `no_measure` → `responding` for `scope: device`;
   without cost tests, `rule_based` → `optimized`. `cases.compare` overrides it.

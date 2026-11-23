@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
+import numpy as np
+
 
 class ControlPolicy(ABC):
     """A rule-based (non-optimal) controller for one device. decide() is handed that
@@ -60,6 +62,36 @@ class RuleBasedEVChargingPolicy(ControlPolicy):
         if soc >= self.soc_max:
             return {"p_ch": 0.0}
         return {"p_ch": self.p_max_charge_kw}
+
+
+class TOUTimerEVPolicy(ControlPolicy):
+    """An EV on a TOU charging timer (cost test spec v1.3): charges at full power while
+    the timer's window is open (the tariff's cheapest period, or a set start time) until
+    full; never discharges. Plugged in outside the window, it waits."""
+
+    def __init__(self, p_max_charge_kw: float, soc_max: float, window):
+        self.p_max_charge_kw = p_max_charge_kw
+        self.soc_max = soc_max
+        self.window = np.asarray(window, dtype=bool)
+
+    def decide(self, state: dict, observations: dict, t: int) -> dict:
+        if state.get("soc", 0.0) >= self.soc_max or not self.window[t]:
+            return {"p_ch": 0.0}
+        return {"p_ch": self.p_max_charge_kw}
+
+
+class HoldFullBatteryPolicy(ControlPolicy):
+    """A battery kept for backup: charges at full power until full, then waits; never
+    discharges (the resting behavior of `backup_only`, cost test spec v1.3)."""
+
+    def __init__(self, p_max_charge_kw: float, soc_max: float):
+        self.p_max_charge_kw = p_max_charge_kw
+        self.soc_max = soc_max
+
+    def decide(self, state: dict, observations: dict, t: int) -> dict:
+        if state.get("soc", 0.0) >= self.soc_max - 1e-9:
+            return {"p_ch": 0.0, "p_dis": 0.0}
+        return {"p_ch": self.p_max_charge_kw, "p_dis": 0.0}
 
 
 def setpoint_power(thermostat, temp: float, t: int, setpoint: float) -> float:

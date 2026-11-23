@@ -32,7 +32,7 @@ def _use(target: Path, names: list[str], *extra: str):
 def test_blocks_lists_every_block_by_kind_with_what_it_needs():
     result = runner.invoke(app, ["blocks"])
     assert result.exit_code == 0, result.output
-    assert f"{STARTER_LIBRARY} (der-opt's starter library): 32 blocks" in result.output
+    assert f"{STARTER_LIBRARY} (der-opt's starter library): 33 blocks" in result.output
     assert "devices/thermostat_cooling" in result.output and "needs: ambient_temp_c" in result.output
     assert "DR add-ons (after the program):\n  programs/monthly_test_events" in result.output
     kinds = {b.name: b.kind for b in read_library(STARTER_LIBRARY)}

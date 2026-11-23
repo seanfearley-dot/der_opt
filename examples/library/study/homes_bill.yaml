@@ -1,10 +1,10 @@
 # der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
 # every premise optimizes its own bill
 # Every premise in a study optimizes its own bill (nbt_bill or nem2_bill by its export
-# program), against rule-based EV charging and self-consumption batteries.
+# program), against EVs on a TOU charging timer and self-consumption batteries.
 objective: bill
 defaults:
   - where: {type: ev}
-    set: {device: {counterfactual: {type: rule_based_ev}}}
+    set: {device: {counterfactual: {type: tou_timer}}} # charges from the start of the cheapest TOU period
   - where: {type: battery}
     set: {device: {counterfactual: {type: self_consumption}}}
