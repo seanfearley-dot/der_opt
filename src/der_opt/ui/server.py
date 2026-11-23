@@ -118,6 +118,10 @@ def make_handler(app: App, port: int):
                     found = forms.data_files(project)
                     files = {"csv": found["files"], "tariffs": found["tariffs"], "sets": found["sets"]}
                     return self._send(200, creator.page(project, token, folder, files))
+                if route == "/create/file":
+                    from der_opt.ui import creator
+
+                    return self._send(200, creator.file_panel(project, params.get("path", "")))
                 if route == "/create/preset":
                     import json
 
@@ -201,6 +205,10 @@ def make_handler(app: App, port: int):
                                       "application/json")
                 if route == "/create/write":
                     return self._create_write(form)
+                if route == "/create/save-file":
+                    from der_opt.ui import creator
+
+                    return self._send(200, creator.save_file(project, form))
                 if route == "/cancel":
                     app.jobs.cancel(int(form["id"]))
                     return self._send(200, "", headers={"X-Location": f"/jobs/{form['id']}"})

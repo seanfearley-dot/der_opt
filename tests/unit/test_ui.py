@@ -210,3 +210,20 @@ def test_the_creator_previews_checks_and_writes(server, project):
     written = (project / "scenarios/home.yaml").read_text(encoding="utf-8")
     assert "premise_id: home_a" in written and "devices/battery_13kwh.yaml" in written  # the starter library's block
     assert "exists" in _post(port, "/create/write", form, app.token)[1]  # never overwritten
+
+
+def test_the_creator_opens_and_saves_a_selected_file(server, project):
+    app, port = server
+    shutil.copytree(REPO / "examples/data/tariffs", project / "tariffs")
+    shutil.copy(REPO / "examples/data/spec_sample/annual_home.csv", project / "annual_home.csv")
+    tariff = "tariffs/pge_e_elec_2026-06.yaml"
+    panel = _get(port, f"/create/file?path={tariff}")[1]
+    assert 'class="file-text"' in panel and "E-ELEC" in panel and "data-save-file" in panel
+    big = _get(port, "/create/file?path=annual_home.csv")[1]
+    assert "too big to edit here" in big and "file-text" not in big  # a year of data: shown, not edited
+    assert "pge_e_tou_c_2026-06.yaml" in _get(port, "/create/file?path=tariffs")[1]  # a folder lists its files
+    assert _post(port, "/create/save-file", {"path": tariff, "content": "x"})[0] == 403  # the page's token
+    text = (project / tariff).read_text(encoding="utf-8") + "# checked\n"
+    status, body, _ = _post(port, "/create/save-file", {"path": tariff, "content": text}, app.token)
+    assert status == 200 and "Saved." in body and (project / tariff).read_text(encoding="utf-8").endswith("# checked\n")
+    assert _post(port, "/create/save-file", {"path": "../outside.yaml", "content": "x"}, app.token)[0] == 403

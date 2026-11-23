@@ -470,11 +470,14 @@ def page(project, token: str, library: Path, files: dict[str, list[str]]) -> str
                            "files": {**files, "tariff_dirs": tariff_dirs}})
     body = f"""<div class="crumbs"><a href="/">Scenarios and runs</a> / new</div><h1>New scenario or study</h1>
 <p class="note">Start from a preset, or step by step. The file on the right is what will be written; each step lists
-its checks as you go. Nothing is written until Review.</p><div class="presets">Presets: {presets}</div>{lists}
+its checks as you go. Nothing is written until Review.</p><div class="presets">Presets: {presets}<span class="summary"></span></div>{lists}
 <div class="creator"><nav class="steps">{nav}</nav><form class="flow" onsubmit="return false">
 {steps_html(device_blocks, files)}<div class="row"><button type="button" class="small" data-prev>Back</button>
 <button type="button" class="small" data-next>Next</button></div></form>
-<aside class="preview"><div class="summary"></div><pre class="yaml"></pre></aside></div>
+<aside class="preview"><div class="pane-tabs"><button type="button" data-pane-tab="file">Selected file</button>
+<button type="button" data-pane-tab="yaml" class="on">The file it writes</button></div>
+<div class="pane" data-pane-box="file" hidden><p class="note">Select a file field, or pick a file in one, and it
+opens here to read or edit.</p></div><div class="pane" data-pane-box="yaml"><pre class="yaml"></pre></div></aside></div>
 <script type="application/json" id="creator-start">{start_json}</script>
 <script type="application/json" id="creator-defaults">{defaults_json}</script>
 <script type="application/json" id="creator-policies">{json.dumps(POLICIES)}</script>
@@ -521,8 +524,60 @@ def write_answers(project, form: dict, library: Path | None) -> Path:
     return target
 
 
+EDITABLE = (".yaml", ".yml", ".csv", ".txt", ".json")
+EDIT_LIMIT = 300_000  # bytes: bigger files are shown, not edited, here
+
+
+def file_panel(project, relative: str) -> str:
+    """The selected field's file, to read or edit beside the steps: a text file in an
+    editor (shown only, when it's big), a folder as its files."""
+    relative = (relative or "").strip()
+    if not relative or relative == "TODO":
+        return '<p class="note">Pick a file in this field and it opens here, to read or edit.</p>'
+    path = project.inside(relative)
+    shown = esc(project.relative(path)) if path.exists() else esc(relative)
+    if not path.exists():
+        return f'<p class="status bad">{shown} isn\'t there.</p>'
+    if path.is_dir():
+        entries = sorted(p for p in path.iterdir() if not p.name.startswith(".") and (p.is_dir() or p.suffix in EDITABLE))
+        items = "".join(f'<li><button type="button" class="link" data-open="{esc(project.relative(e))}">'
+                        f"{esc(e.name)}{'/' if e.is_dir() else ''}</button></li>" for e in entries)
+        return f'<h3 class="file-name">{shown}/</h3><ul class="files">{items or "<li>empty</li>"}</ul>'
+    size = path.stat().st_size
+    head = f'<h3 class="file-name">{shown}</h3>'
+    if path.suffix not in EDITABLE:
+        return head + f'<p class="note">{size:,} bytes; not a text file this page edits.</p>'
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if size > EDIT_LIMIT:
+        lines = text.splitlines()
+        return (head + f'<p class="note">{len(lines):,} lines ({size / 1e6:.1f} MB): too big to edit here, so its first '
+                       f"60 lines are shown. Edit it where you made it.</p><pre class=\"file-head\">"
+                + esc("\n".join(lines[:60])) + "</pre>")
+    return (head + f'<textarea class="file-text" spellcheck="false" data-path="{shown}">{esc(text)}</textarea>'
+            '<div class="row"><button type="button" class="small" data-save-file>Save</button> '
+            '<span class="file-status note"></span></div>')
+
+
+def save_file(project, form: dict) -> str:
+    path = project.inside(form["path"])
+    if path.suffix not in EDITABLE or not path.is_file():
+        raise ValueError("only an existing text file (YAML, CSV) is saved here")
+    path.write_text(form["content"].replace("\r\n", "\n"), encoding="utf-8")
+    return '<span class="status ok">Saved.</span>'
+
+
 CSS = """
 .presets{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:8px 0 14px}
+.presets .summary{margin-left:auto}.presets .summary p{margin:0}
+.pane-tabs{display:flex;gap:4px;margin-bottom:6px}.pane-tabs button{padding:3px 10px;font-size:12px;border-radius:6px;
+border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer}
+.pane-tabs button.on{color:var(--ink);border-color:var(--accent)}
+.pane .file-name{margin:4px 0 6px;font-size:13px;word-break:break-all}
+.pane textarea.file-text{width:100%;min-height:calc(100vh - 230px);font:11.5px/1.4 ui-monospace,Menlo,monospace;
+white-space:pre;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--bg);color:var(--ink)}
+.pane pre.file-head{font-size:11px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px}
+.pane ul.files{list-style:none;padding:0;margin:0}.pane button.link{background:none;border:0;color:var(--accent);
+cursor:pointer;padding:2px 0;font:inherit;text-align:left}
 .pickpath{display:flex;flex-direction:column;gap:4px;min-width:0}.pickpath select,.pickpath input{width:100%}
 .creator{display:grid;grid-template-columns:200px minmax(0,1fr) minmax(0,440px);gap:18px;align-items:start}
 nav.steps{position:sticky;top:12px;display:flex;flex-direction:column;gap:2px}
@@ -617,11 +672,27 @@ let list=sel.dataset.files;if(list==="tariffs"&&S.kind!=="home")list="tariff_dir
 const files=(X.files||{})[list]||[],input=sel.parentElement.querySelector("input"),cur=get(key);
 if(sel.dataset.add){sel.innerHTML=opt("","add a file…",true)+files.map(f=>opt(f,f,false)).join("");input.hidden=false;
 sel.onchange=()=>{if(sel.value){const l=get(key)||[];if(!l.includes(sel.value))l.push(sel.value);set(key,l);
-show(input,l);changed();}sel.value="";};return;}
+show(input,l);changed();openFile(sel.value);}sel.value="";};return;}
 const known=cur!=null&&files.includes(cur),other=cur!=null&&cur!==""&&!known;
 sel.innerHTML=opt("","choose…",cur==null)+files.map(f=>opt(f,f,f===cur)).join("")+opt("__other","another path…",other);
-input.hidden=!other;sel.onchange=()=>{if(sel.value==="__other"){input.hidden=false;input.value="";input.focus();}
-else{input.hidden=true;set(key,sel.value||null);show(input,get(key));changed();}};});}
+input.hidden=!other;input.onchange=()=>openFile(input.value);
+sel.onchange=()=>{if(sel.value==="__other"){input.hidden=false;input.value="";input.focus();}
+else{input.hidden=true;set(key,sel.value||null);show(input,get(key));changed();openFile(sel.value);}};});}
+function paneTab(t){document.querySelectorAll("[data-pane-tab]").forEach(b=>b.classList.toggle("on",b.dataset.paneTab===t));
+document.querySelectorAll("[data-pane-box]").forEach(p=>p.hidden=p.dataset.paneBox!==t);}
+document.querySelectorAll("[data-pane-tab]").forEach(b=>b.onclick=()=>paneTab(b.dataset.paneTab));
+let openPath=null;
+async function openFile(path){openPath=path||null;const box=document.querySelector('[data-pane-box="file"]');
+const r=await fetch("/create/file?path="+encodeURIComponent(path||""));box.innerHTML=await r.text();paneTab("file");
+box.querySelectorAll("[data-open]").forEach(b=>b.onclick=()=>openFile(b.dataset.open));
+const save=box.querySelector("[data-save-file]");if(save)save.onclick=async()=>{
+const ta=box.querySelector("textarea.file-text");const body=new URLSearchParams({path:ta.dataset.path,content:ta.value});
+const r2=await fetch("/create/save-file",{method:"POST",headers:{"X-Token":TOKEN},body});
+box.querySelector(".file-status").innerHTML=r2.ok?await r2.text():'<span class="status bad">'+await r2.text()+"</span>";
+changed();};}
+form.addEventListener("focusin",ev=>{const pick=ev.target.closest(".pickpath");if(!pick)return;
+const v=get(pick.querySelector("select[data-pick]").dataset.pick);const path=Array.isArray(v)?v[v.length-1]:v;
+if(path&&path!=="TODO"&&path!==openPath)openFile(path);});
 function render(){rows();behavior();without();rulesBox();
 const ev=form.querySelector("select[data-events]");if(ev&&S.dr&&S.dr.events){const k=Object.keys(S.dr.events)[0]||"random";
 ev.value=k.replace("_yaml","");}form.querySelectorAll("[data-k]").forEach(el=>show(el,el.dataset.k==="_target"?
@@ -644,7 +715,7 @@ b.innerHTML=list.length?"<ul>"+list.map(li).join("")+"</ul>":"";});
 document.querySelectorAll("[data-goto]").forEach(a=>{const list=by[a.dataset.goto]||[];const e=list.filter(i=>i.level==="error").length;
 const badge=a.querySelector(".badge");badge.textContent=list.length||"";badge.className="badge"+(e?" err":list.length?" warn":"");});
 const errors=d.items.filter(i=>i.level==="error").length,warnings=d.items.length-errors;
-document.querySelector(".preview .summary").innerHTML=errors?`<p class="status bad">${errors} error(s) to fix before
+document.querySelector(".presets .summary").innerHTML=errors?`<p class="status bad">${errors} error(s) to fix before
 writing${warnings?`, ${warnings} warning(s)`:""}.</p>`:`<p class="status ok">Ready to write${warnings?` (${warnings} warning(s))`:""}.</p>`;
 document.querySelector(".all-checks").innerHTML=d.items.length?"<ul>"+d.items.map(i=>`<li class="lv-${i.level}">step ${i.step}: `+
 i.message.replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]))+"</li>").join("")+"</ul>":"<p>Every check is clean.</p>";

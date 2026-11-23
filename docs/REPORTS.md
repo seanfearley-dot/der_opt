@@ -141,8 +141,11 @@ read from the files each time, and what it saves is the YAML you'd edit by hand.
   above the sections stay; comments inside them don't. Defaults inherited from the
   blocks the study extends are listed, read-only.
 - **New:** the scenario creator (docs/SCENARIO_CREATOR_SPEC.md): a home, a portfolio
-  study or a feeder study, step by step, with the file it will write beside the steps and
-  each step's checks as you go; presets start it filled in. It never overwrites a file,
+  study or a feeder study, step by step, with each step's checks as you go; presets start
+  it filled in. Beside the steps, two tabs: the file it will write, and the file a field
+  names (a tariff, a data file, a block), opened when the field is selected or a file is
+  picked, to read or edit and save (YAML and CSV up to 300 KB; a bigger file's first
+  lines; a folder's files, each opening on a click). It never overwrites a file,
   and opens the new one on its Check tab (or, with **Write and run**, the run).
 - **Run queue:** runs go one at a time, as `der-opt run` in a subprocess. Each one's
   log streams in, and when it's done its report opens from the same server. The queue
