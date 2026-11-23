@@ -144,49 +144,65 @@ It lists every scenario and study file and every run under `out/`. For a file it
 editor that checks as it saves, the population with each setting's source, a preview of
 which premises a `where` selector picks, the merged file, and a run queue whose logs
 stream in and whose reports open in place. A study's `defaults`, `overrides` and
-`add_devices` can be edited as forms, and **New** writes a file from a template or from
-library blocks. It works on the files themselves, on this
+`add_devices` can be edited as forms, and **New** is the scenario creator, below. It
+works on the files themselves, on this
 machine only ([docs/REPORTS.md](docs/REPORTS.md) section 3).
 
 ### Starting a scenario, and checking it before a long solve
 
-The quickest start is to pick blocks from a library:
+The scenario creator is the app's **New** page (`der-opt ui`;
+[docs/SCENARIO_CREATOR_SPEC.md](docs/SCENARIO_CREATOR_SPEC.md)). It builds a home, a
+portfolio study or a feeder study step by step:
+1. What
+2. When
+3. Data
+4. Network (feeder)
+5. Devices
+6. Prices and bill
+7. Meter
+8. Today's behavior
+9. Who takes part (feeder)
+10. DR program
+11. Coordination (feeder)
+12. Value and cost tests
+13. Review
+
+On the right it shows the file it will write, and each step lists its checks as you go:
+a missing data column (a thermostat needs `outdoor_temp_c`), a `TODO` left, a cost
+test without a whole year or a battery's comparison, a premise on an element that
+isn't there. Errors block writing; warnings don't. The file extends a library block
+wherever a choice matches one exactly. A size you change (a 10 kWh battery from the
+13.5 kWh block) is written beside its block, and everything else is written out with
+comments. **Presets** start the flow filled in: `dr-battery`, `home-bill`,
+`feeder-from-files` and `lmp-battery`. It never overwrites a file; **Write and run**
+queues the run too.
+
+From the command line, `der-opt new` writes the same files:
 
 ```bash
 der-opt blocks                                    # the library's blocks, by kind
-der-opt new scenarios/home_a.yaml --pick --timeseries data/home_a.csv
-```
-
-`--pick` shows a menu for each kind of block (time grid, devices, prices, meter,
-counterfactual, billing, DR program, add-ons, avoided costs, cost tests). It writes a
-scenario that extends your picks, with solar and load from the time series file. It
-ends by printing the same choice as a `--use` command, to repeat it without menus.
-Picks that don't fit together are refused and nothing is written: a counterfactual for
-a device you didn't pick, two batteries, the bill objective without billing, and so on.
-Per-home values a block needs (a thermostat's outdoor temperature, a baseline
-territory) are written into the scenario as `TODO`s. The library is `--library DIR`,
-the one `der-opt setup library DIR` remembered, or the starter library.
-
-Or start from a template:
-
-```bash
+der-opt new scenarios/home_a.yaml --use time/year_2026 --use devices/battery_13kwh ...
 der-opt new --list
 der-opt new dr-battery scenarios/home_a.yaml --timeseries data/timeseries.csv \
-    --tariff data/tariffs/pge_e_elec_2026-06.yaml --avoided-costs data/acc_2026 --library library
+    --tariff data/tariffs/pge_e_elec_2026-06.yaml --avoided-costs data/acc_2026
 der-opt validate scenarios/home_a.yaml
 ```
 
-`der-opt new` writes a commented starting scenario from a template: `dr-battery`,
-`home-bill` (`--program nbt|nem2`), `feeder-from-files` (a study: `--premises`, `--devices`, `--network`) or
-`lmp-battery` (`--price`). It fills in what the options give it, including the premise
-when the time series file has only one and the run period from the time series (or
-price) file, and writes `TODO` for the rest: incentives, costs, discount rates, a
-baseline territory. With `--library DIR` the shared parts (time grid, devices,
-prices or billing, meter limits, counterfactual, DR program, cost-test settings) go
-into fragment files under `DIR` that the scenario extends. A block already in `DIR` is
-used as it is, edits included, so a second scenario made with the same library shares
-them. `--library examples/library` uses the starter library (below) and says which of
-its blocks hold illustrative values.
+- **`--use`** writes a scenario that extends the named blocks, with solar and load from
+  `--timeseries`. Picks that don't fit together are refused and nothing is written: a
+  counterfactual for a device you didn't pick, two batteries, the bill objective without
+  billing, and so on. The library is `--library DIR`, the one `der-opt setup library
+  DIR` remembered, or the starter library.
+- **A template name** (`dr-battery`, `home-bill`, `feeder-from-files` with `--premises`,
+  `--devices` and `--network`, `lmp-battery` with `--price`) writes that preset. It fills
+  in what the options give it, including the premise when the time series file has only
+  one and the run period from the time series (or price) file, and writes `TODO` for the
+  rest: incentives, costs, discount rates, a baseline territory.
+- **With `--library DIR`**, a template's shared parts (time grid, devices, prices or
+  billing, meter limits, counterfactual, DR program, cost-test settings) go into fragment
+  files under `DIR` that the scenario extends. A block already there is used as it is,
+  edits included, so a second scenario made with the same library shares them.
+- **The terminal menus (`--pick`) are retired** in favor of the app.
 
 `der-opt validate` runs every check that doesn't need a solve, in about a second:
 what the scenario extends, the schema, `TODO`s left (naming the file each is in),

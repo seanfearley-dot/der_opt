@@ -164,7 +164,7 @@ der-opt setup library my_library                 # remember the library to pick 
   - feeder blocks aren't offered: these build a single home.
 - **Descriptions** are each block's first comment line, after der-opt's own header.
   **Needs** are the `TODO`s it leaves.
-- **Menus** (`--pick`) go kind by kind, and print the matching `--use` command at the
+- **Menus** (`--pick`, retired 2026-11-22 for the app's scenario creator) went kind by kind, and print the matching `--use` command at the
   end. `--use` takes `folder/name`, or the name alone when it's unique.
 - **The home's data:** `--timeseries` adds solar from `pv_kw` and the load from
   `load_kw` (or `net_kw`), for the file's only premise or `--premise`.

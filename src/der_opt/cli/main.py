@@ -968,19 +968,23 @@ def new(
     network: Path | None = typer.Option(None, help="feeder-from-files: network.csv"),
     year: int | None = typer.Option(None, help="Run year (default: the time series file's, else this year)"),
     library: Path | None = typer.Option(
-        None, help="Templates: put the shared parts in fragment files here. --pick/--use: the library to pick "
+        None, help="Templates: put the shared parts in fragment files here. --use: the library to pick "
         "from (default: `der-opt setup library`'s, else the starter library)"),
     force: bool = typer.Option(False, "--force", help="Overwrite the scenario file if it exists"),
-    pick: bool = typer.Option(False, "--pick", help="Choose blocks from the library from menus"),
+    pick: bool = typer.Option(False, "--pick", hidden=True, help="Retired: use `der-opt ui`'s New page"),
     use: list[str] | None = typer.Option(None, "--use", help="A library block to extend (repeat for each)"),
 ) -> None:
     """Write a starting scenario: from a template (`der-opt new TEMPLATE FILE`), or from
-    library blocks (`der-opt new FILE --pick`, or `--use BLOCK` for each). What isn't
-    filled in is written as TODO; `der-opt validate` lists what's left."""
-    if pick or use:
+    library blocks (`--use BLOCK` for each). What isn't filled in is written as TODO;
+    `der-opt validate` lists what's left. Step by step, with checks as you go: the New
+    page of `der-opt ui` (docs/SCENARIO_CREATOR_SPEC.md)."""
+    if pick:
+        raise typer.BadParameter("--pick is retired: `der-opt ui` opens the scenario creator (its New page), step "
+                                 "by step with checks as you go; `der-opt new FILE --use BLOCK` still works")
+    if use:
         if template is not None and target is not None:
             raise typer.BadParameter("--pick and --use take the scenario file only, not a template")
-        _new_from_blocks(Path(template) if target is None else target, use or [], pick, timeseries, premise,
+        _new_from_blocks(Path(template) if target is None else target, use or [], timeseries, premise,
                          library, force)
         return
     from der_opt.scenarios.templates import TEMPLATES, Options, write_template
@@ -990,7 +994,8 @@ def new(
             typer.echo(f"  {name:<19}{described}")
         if template is None and not list_templates:
             typer.echo("\nUsage: der-opt new TEMPLATE SCENARIO.yaml [options]")
-            typer.echo("   or: der-opt new SCENARIO.yaml --pick (menus of library blocks; `der-opt blocks` lists them)")
+            typer.echo("   or: der-opt new SCENARIO.yaml --use BLOCK ... (`der-opt blocks` lists them)")
+            typer.echo("   or, step by step: der-opt ui (its New page)")
         return
     if template not in TEMPLATES:
         raise typer.BadParameter(f"no template {template!r}; choose from {', '.join(TEMPLATES)}")
@@ -1007,7 +1012,16 @@ def new(
                    baseline_territory=baseline_territory, avoided_costs=avoided_costs, price=price,
                    premises=premises, devices=devices, network=network, year=year)
     try:
-        written = write_template(template, target, opts, library=library, force=force)
+        if library is None:  # the creator's writer (docs/SCENARIO_CREATOR_SPEC.md, decision 4)
+            from der_opt.creator.presets import preset
+            from der_opt.creator.writer import write
+            from der_opt.scenarios.templates import Written
+
+            done = write(preset(template, opts, scenario_name=target.stem.replace("-", "_")), target,
+                         base=Path.cwd(), force=force)
+            written = Written(target, todos=done.todos)
+        else:  # its shared parts as fragment files in that library
+            written = write_template(template, target, opts, library=library, force=force)
     except FileExistsError as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"Wrote {written.scenario}")
@@ -1024,16 +1038,9 @@ def new(
         typer.echo(f"Next: der-opt validate {target}")
 
 
-def _new_from_blocks(target: Path | None, use: list[str], pick: bool, timeseries: Path | None,
+def _new_from_blocks(target: Path | None, use: list[str], timeseries: Path | None,
                      premise: str | None, library: Path | None, force: bool) -> None:
-    from der_opt.scenarios.library import (
-        KINDS,
-        find,
-        home_data,
-        read_library,
-        time_matches,
-        write_picked,
-    )
+    from der_opt.scenarios.library import find, home_data, read_library, write_picked
     from der_opt.settings import library_dir
 
     if target is None:
@@ -1041,7 +1048,7 @@ def _new_from_blocks(target: Path | None, use: list[str], pick: bool, timeseries
     if timeseries is not None and not timeseries.exists():
         raise typer.BadParameter(f"--timeseries {timeseries} doesn't exist")
     try:
-        folder, source = library_dir(library)
+        folder, _ = library_dir(library)
     except FileNotFoundError as exc:
         raise typer.BadParameter(str(exc)) from exc
     blocks = read_library(folder)
@@ -1050,36 +1057,6 @@ def _new_from_blocks(target: Path | None, use: list[str], pick: bool, timeseries
         picks = [find(blocks, name) for name in use]
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
-    if pick:
-        typer.echo(f"Blocks from {folder} ({source}); Enter skips an optional menu.")
-        for kind in KINDS:
-            options = [b for b in blocks if b.kind == kind.key and b not in picks]
-            if not options:
-                continue
-            typer.echo(f"\n{kind.title}:")
-            width = max(len(b.stem) for b in options) + 2
-            for number, block in enumerate(options, 1):
-                marks = [m for m, on in (("matches your time series", time_matches(block, home)),
-                                         ("illustrative values", block.illustrative)) if on]
-                needs = f"  needs: {', '.join(n.split('.')[-1] for n in block.needs)}" if block.needs else ""
-                extra = f"  [{'; '.join(marks)}]" if marks else ""
-                typer.echo(f"  {number:>2} {block.stem:<{width}}{block.description}{needs}{extra}")
-            how = "any, e.g. 1,3" if kind.many else "one"
-            while True:
-                answer = typer.prompt(f"  {how}{'' if kind.required else ', or Enter'}", default="", show_default=False)
-                try:
-                    numbers = [int(x) for x in answer.replace(" ", ",").split(",") if x]
-                except ValueError:
-                    numbers = [0]
-                if any(not 1 <= n <= len(options) for n in numbers):
-                    typer.echo(f"  numbers 1-{len(options)}, please")
-                elif kind.required and not numbers:
-                    typer.echo("  this one is needed")
-                elif not kind.many and len(numbers) > 1:
-                    typer.echo("  just one here")
-                else:
-                    break
-            picks += [options[n - 1] for n in dict.fromkeys(numbers)]
     try:
         written = write_picked(target, picks, home, folder, force)
     except FileExistsError as exc:
@@ -1100,8 +1077,6 @@ def _new_from_blocks(target: Path | None, use: list[str], pick: bool, timeseries
         typer.echo(f"{written.todos_in_scenario} TODO(s) to fill in, in {written.scenario.name}")
     for where in written.todos_in_blocks:
         typer.echo(f"TODO left in a block (shared by every scenario that uses it): {where}")
-    if pick:
-        typer.echo(f"To make this again without the menus:\n  {written.command}")
     typer.echo(f"Next: der-opt validate {written.scenario}")
 
 
@@ -1119,7 +1094,8 @@ def blocks(
     except FileNotFoundError as exc:
         raise typer.BadParameter(str(exc)) from exc
     found = read_library(folder)
-    typer.echo(f"{folder} ({source}): {len(found)} blocks. Use them with `der-opt new FILE --pick` or --use NAME.")
+    typer.echo(f"{folder} ({source}): {len(found)} blocks. Use them with `der-opt new FILE --use NAME`, or in "
+               "`der-opt ui`'s New page.")
     titles = {k.key: k.title for k in KINDS} | {"study": "Study (objective and defaults for a study's premises)",
                                                 "feeder": "Feeder (the old feeder form)"}
     width = max((len(b.name) for b in found), default=0) + 2

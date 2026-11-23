@@ -140,11 +140,10 @@ read from the files each time, and what it saves is the YAML you'd edit by hand.
   those three sections, as the examples write them, and checks the study. Comments
   above the sections stay; comments inside them don't. Defaults inherited from the
   blocks the study extends are listed, read-only.
-- **New:** a file from a template (`der-opt new`'s templates, with only that template's
-  fields, and the project's CSVs, tariffs and avoided cost sets suggested), or a
-  single-home scenario from library blocks, picked by kind, with a live check that the
-  picks fit together. It never overwrites a file, and opens the new one on its Check
-  tab.
+- **New:** the scenario creator (docs/SCENARIO_CREATOR_SPEC.md): a home, a portfolio
+  study or a feeder study, step by step, with the file it will write beside the steps and
+  each step's checks as you go; presets start it filled in. It never overwrites a file,
+  and opens the new one on its Check tab (or, with **Write and run**, the run).
 - **Run queue:** runs go one at a time, as `der-opt run` in a subprocess. Each one's
   log streams in, and when it's done its report opens from the same server. The queue
   lasts while the app runs; the output folders stay.

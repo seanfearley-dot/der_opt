@@ -111,14 +111,19 @@ def make_handler(app: App, port: int):
                                                                 compact=bool(params.get("compact"))))
                 if route == "/fragment/study-settings":
                     return self._send(200, forms.study_settings_fragment(params["path"], app.study_state(params["path"])))
-                if route == "/new":
-                    folder, blocks = app.blocks()
-                    return self._send(200, forms.new_page(project, token, folder, blocks))
-                if route == "/fragment/blocks-check":
-                    _, blocks = app.blocks()
-                    picks = [v for k, values in lists.items() if k.startswith("block:") for v in values if v]
-                    return self._send(200, forms.blocks_check(blocks, picks, params.get("timeseries", ""),
-                                                              params.get("premise", ""), project))
+                if route == "/new":  # the scenario creator (docs/SCENARIO_CREATOR_SPEC.md)
+                    from der_opt.ui import creator
+
+                    folder, _ = app.blocks()
+                    found = forms.data_files(project)
+                    files = {"csv": found["files"], "tariffs": found["tariffs"], "sets": found["sets"]}
+                    return self._send(200, creator.page(project, token, folder, files))
+                if route == "/create/preset":
+                    import json
+
+                    from der_opt.ui import creator
+
+                    return self._send(200, json.dumps(creator.preset_form(params["name"])), "application/json")
                 if route == "/fragment/merged":
                     return self._send(200, views.merged_fragment(project, params["path"]))
                 if route == "/jobs":
@@ -186,11 +191,16 @@ def make_handler(app: App, port: int):
                     return self._send(200, "", headers={"X-Location": f"/jobs/{job.id}"})
                 if route == "/study-settings":
                     return self._send(200, self._study_settings(form))
-                if route == "/new/template":
-                    return self._new_template(form)
-                if route == "/new/blocks":
-                    picks = [v for k, values in lists.items() if k.startswith("block:") for v in values if v]
-                    return self._new_blocks(form, picks)
+                if route == "/create/preview":
+                    import json
+
+                    from der_opt.ui import creator
+
+                    folder, _ = app.blocks()
+                    return self._send(200, json.dumps(creator.preview(project, form, folder), default=str),
+                                      "application/json")
+                if route == "/create/write":
+                    return self._create_write(form)
                 if route == "/cancel":
                     app.jobs.cancel(int(form["id"]))
                     return self._send(200, "", headers={"X-Location": f"/jobs/{form['id']}"})
@@ -215,48 +225,19 @@ def make_handler(app: App, port: int):
             return ('<p class="status ok">Saved.</p>' + views.check_fragment(app.project, form["path"])
                     + f'<template id="newtext">{views.esc(text)}</template>')
 
-        def _target(self, form: dict) -> tuple[Path, str]:
-            relative = (form.get("target") or "").strip()
-            if not relative.endswith((".yaml", ".yml")):
-                raise ValueError("the file to write ends in .yaml")
-            path = app.project.inside(relative)
-            if path.exists():
-                raise ValueError(f"{relative} exists; pick another name (nothing was written)")
-            return path, str(app.project.relative(path))
-
-        def _new_template(self, form: dict) -> None:
-            from der_opt.scenarios.templates import Options, write_template
+        def _create_write(self, form: dict) -> None:
+            from der_opt.ui import creator
 
             try:
-                path, relative = self._target(form)
-                files = {k: app.project.inside(form[k]) if form.get(k, "").strip() else None
-                         for k in ("timeseries", "tariff", "export_rates", "avoided_costs", "price", "premises",
-                                   "devices", "network")}
-                missing = [f"{k}: {form[k]}" for k, v in files.items() if v is not None and not v.exists()]
-                if missing:
-                    raise ValueError("these aren't there: " + "; ".join(missing))
-                year = int(form["year"]) if form.get("year", "").strip() else None
-                opts = Options(premise=form.get("premise") or None, program=form.get("program") or "nbt",
-                               baseline_territory=form.get("baseline_territory") or None, year=year, **files)
-                written = write_template(form["template"], path, opts)
+                folder, _ = app.blocks()
+                path = creator.write_answers(app.project, form, folder)
             except (ValueError, FileExistsError) as exc:
                 return self._send(200, f'<p class="status bad">{views.esc(exc)}</p>')
-            note = f" ({written.todos} TODO to fill in)" if written.todos else ""
-            return self._send(200, f"written{note}", headers={"X-Location": forms.file_link(relative) + "#check"})
-
-        def _new_blocks(self, form: dict, picks: list[str]) -> None:
-            from der_opt.scenarios.library import find, home_data, write_picked
-
-            try:
-                path, relative = self._target(form)
-                folder, blocks = app.blocks()
-                chosen = [find(blocks, name) for name in picks]
-                series = form.get("timeseries", "").strip()
-                home = home_data(app.project.inside(series) if series else None, form.get("premise") or None)
-                write_picked(path, chosen, home, folder)
-            except (ValueError, FileExistsError) as exc:
-                text = views.esc(exc).replace("\n", "<br>")
-                return self._send(200, f'<p class="status bad">{text}</p>')
+            relative = str(app.project.relative(path))
+            if form.get("run"):
+                job = app.jobs.submit(relative, str(app.project.relative(app.project.inside(
+                    app.project.default_output(relative)))), [])
+                return self._send(200, "", headers={"X-Location": f"/jobs/{job.id}"})
             return self._send(200, "written", headers={"X-Location": forms.file_link(relative) + "#check"})
 
     return Handler

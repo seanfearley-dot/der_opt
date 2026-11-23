@@ -91,6 +91,11 @@ on the right and update as you go. **Step 1 decides which steps appear:**
 - `der-opt new` keeps working for scripts: `--use BLOCK` and the templates stay, as
   shortcuts to the same writer the flow uses (decision 4).
 - `der-opt new FILE --pick`, the terminal picker, is retired in favor of the app.
+- **As built:** `der-opt new TEMPLATE` goes through the creator's writer. With
+  `--library DIR` it still writes a template's shared parts as fragment files in that
+  library for later scenarios to reuse, something the flow doesn't do; that mode keeps
+  today's template writer. Each preset is tested to write, setting for setting, what its
+  template wrote.
 
 ## 5. What it doesn't do
 

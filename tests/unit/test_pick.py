@@ -96,26 +96,10 @@ def test_names_must_be_unique_or_have_their_folder(tmp_path):
     assert "no block 'nope'" in " ".join(_use(tmp_path / "x.yaml", ["nope"]).output.replace("│", " ").split())
 
 
-def test_pick_menus_write_the_scenario_and_print_the_use_command(tmp_path):
-    blocks = read_library(STARTER_LIBRARY)
-
-    def number(kind, name):
-        return str([b.name for b in blocks if b.kind == kind].index(name) + 1)
-
-    answers = ["9", number("time", "time/year_2026"),  # 9 is out of range, so it asks again
-               number("devices", "devices/battery_13kwh"),
-               number("value_streams", "value_streams/pge_e_elec_2026-06_import"),
-               number("meter", "meter/panel_20kw"), number("counterfactual", "counterfactual/battery_self_consumption"),
-               "", "", "", "", ""]  # billing, DR, add-ons, avoided costs, cost tests: none
-    target = tmp_path / "menu.yaml"
-    result = runner.invoke(app, ["new", str(target), "--pick", "--timeseries", str(HOME)], input="\n".join(answers) + "\n")
-    assert result.exit_code == 0, result.output
-    assert "numbers 1-6, please" in result.output and "[matches your time series" in result.output
-    assert f"der-opt new {target} --use time/year_2026 --use devices/battery_13kwh" in result.output
-    assert [p.name for p in compose_scenario(target).fragments] == [
-        "year_2026.yaml", "battery_13kwh.yaml", "pge_e_elec_2026-06_import.yaml", "panel_20kw.yaml",
-        "battery_self_consumption.yaml"]
-    assert runner.invoke(app, ["validate", str(target)]).exit_code == 0
+def test_pick_is_retired_for_the_app(tmp_path):
+    result = runner.invoke(app, ["new", str(tmp_path / "menu.yaml"), "--pick"])
+    assert result.exit_code != 0 and "der-opt ui" in " ".join(result.output.replace("│", " ").split())
+    assert not (tmp_path / "menu.yaml").exists()
 
 
 def test_setup_library_is_remembered_and_used(tmp_path):

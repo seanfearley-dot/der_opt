@@ -181,23 +181,32 @@ def test_study_settings_save_through_the_app(server, project):
     assert "Saved." in body and "overrides a premise that" in body  # saved; the check names the mistake
 
 
-def test_new_files_from_a_template_and_from_blocks(server, project):
+def test_the_creator_previews_checks_and_writes(server, project):
+    import json
+
     app, port = server
-    data = REPO / "examples/data/spec_sample"
-    shutil.copytree(data, project / "data")
-    assert "New scenario or study" in _get(port, "/new")[1]
-    form = {"template": "feeder-from-files", "target": "studies/sample.yaml", "premises": "data/premises.csv",
-            "devices": "data/devices.csv", "network": "data/network.csv", "timeseries": "data/timeseries.csv"}
-    _, _, headers = _post(port, "/new/template", form, app.token)
-    assert headers.get("X-Location") == "/file?path=studies/sample.yaml#check"
-    assert "population:" in (project / "studies/sample.yaml").read_text(encoding="utf-8")
-    assert "exists" in _post(port, "/new/template", form, app.token)[1]  # never overwritten
-    query = "block:time=time/2026-07-13T12_72x60min&block:value_streams=value_streams/bill"
-    assert "needs a billing block" in _get(port, f"/fragment/blocks-check?{query}")[1]
-    picks = {"target": "scenarios/home.yaml", "timeseries": "data/timeseries.csv", "premise": "home_06",
-             "block:time": "time/2026-07-13T12_72x60min",
-             "block:value_streams": "value_streams/pge_e_elec_2026-06_import", "block:devices": "devices/battery_13kwh"}
-    _, body, headers = _post(port, "/new/blocks", picks, app.token)
-    assert headers.get("X-Location") == "/file?path=scenarios/home.yaml#check", body
+    shutil.copytree(REPO / "examples/data/spec_sample", project / "data")
+    shutil.copytree(REPO / "examples/data/tariffs", project / "tariffs")
+    page = _get(port, "/new")[1]
+    assert "New scenario or study" in page and "13. Review" in page and 'data-preset="home-bill"' in page
+    status, preset, _ = _get(port, "/create/preset?name=home-bill")
+    answers = json.loads(preset)
+    assert status == 200 and answers["devices"][0]["template"] == "battery_13kwh"
+
+    def preview(answers, target="scenarios/home.yaml"):
+        body = _post(port, "/create/preview", {"answers": json.dumps(answers), "target": target}, app.token)[1]
+        return json.loads(body)
+
+    first = preview(answers)  # nothing filled in yet: each gap is filed under its step
+    steps = {i["step"] for i in first["items"] if i["level"] == "error"}
+    assert {3, 6} <= steps and "name: home_bill" in first["text"]
+    answers["data"].update(timeseries="data/annual_home.csv", premise="home_a")
+    answers["prices"].update(tariff="tariffs/pge_e_elec_2026-06.yaml", program="none")
+    ready = preview(answers)
+    assert not [i for i in ready["items"] if i["level"] == "error"], ready["items"]
+    form = {"answers": json.dumps(answers), "target": "scenarios/home.yaml"}
+    _, _, headers = _post(port, "/create/write", form, app.token)
+    assert headers.get("X-Location") == "/file?path=scenarios/home.yaml#check"
     written = (project / "scenarios/home.yaml").read_text(encoding="utf-8")
-    assert "battery_13kwh.yaml" in written and "premise_id: home_06" in written
+    assert "premise_id: home_a" in written and "devices/battery_13kwh.yaml" in written  # the starter library's block
+    assert "exists" in _post(port, "/create/write", form, app.token)[1]  # never overwritten

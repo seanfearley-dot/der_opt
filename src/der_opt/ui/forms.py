@@ -4,32 +4,9 @@ or from library blocks, and a study's defaults, overrides and add_devices."""
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from der_opt.ui.project import Project
-from der_opt.ui.views import esc, layout, q
-
-# the options each template takes (`der-opt new TEMPLATE --help`)
-TEMPLATE_FIELDS = {
-    "dr-battery": ("timeseries", "premise", "tariff", "avoided_costs", "year"),
-    "home-bill": ("timeseries", "premise", "tariff", "program", "export_rates", "baseline_territory", "year"),
-    "feeder-from-files": ("premises", "devices", "network", "timeseries", "export_rates", "year"),
-    "lmp-battery": ("price", "year"),
-}
-FIELD_LABELS = {
-    "timeseries": ("Time series file", "files", "input-spec CSV with load_kw (and pv_kw)"),
-    "premise": ("Premise", None, "its premise_id (default: the file's only one)"),
-    "tariff": ("Retail tariff", "tariffs", "a tariff YAML"),
-    "program": ("Export program", None, "nbt or nem2"),
-    "export_rates": ("NBT export rates", "files", "CSV"),
-    "baseline_territory": ("Baseline territory", None, "PG&E territory letter, for tariffs with a baseline"),
-    "avoided_costs": ("Avoided cost set", "sets", "a folder with manifest.yaml"),
-    "price": ("Price file", "files", "CSV from `der-opt fetch-lmp`"),
-    "premises": ("premises.csv", "files", ""),
-    "devices": ("devices.csv", "files", "input spec 2.0"),
-    "network": ("network.csv", "files", ""),
-    "year": ("Year", None, "default: the time series file's"),
-}
+from der_opt.ui.views import esc, q
 
 
 def data_files(project: Project) -> dict[str, list[str]]:
@@ -49,96 +26,6 @@ def data_files(project: Project) -> dict[str, list[str]]:
 def _datalists(lists: dict[str, list[str]]) -> str:
     return "".join(f'<datalist id="dl-{name}">' + "".join(f'<option value="{esc(v)}">' for v in values) + "</datalist>"
                    for name, values in lists.items())
-
-
-# --- new ------------------------------------------------------------------------------
-
-
-def new_page(project: Project, token: str, library: Path, blocks) -> str:
-    from der_opt.scenarios.library import KINDS
-    from der_opt.scenarios.templates import TEMPLATES
-
-    lists = data_files(project)
-    template_options = "".join(f'<option value="{esc(n)}">{esc(n)}: {esc(d)}</option>' for n, d in TEMPLATES.items())
-    fields = []
-    for name, (label, listed, hint) in FIELD_LABELS.items():
-        uses = " ".join(t for t, f in TEMPLATE_FIELDS.items() if name in f)
-        if name == "program":
-            control = '<select name="program"><option>nbt</option><option>nem2</option></select>'
-        else:
-            control = (f'<input name="{name}" class="wide" autocomplete="off"'
-                       + (f' list="dl-{listed}"' if listed else "") + ">")
-        fields.append(f'<label data-for="{uses}">{esc(label)} {control} <span class="note">{esc(hint)}</span></label>')
-    groups = []
-    for kind in KINDS:
-        options = [b for b in blocks if b.kind == kind.key]
-        if not options:
-            continue
-        kind_input = "checkbox" if kind.many else "radio"
-        items = "".join(
-            f'<label class="check"><input type="{kind_input}" name="block:{esc(kind.key)}" value="{esc(b.name)}">'
-            f'<span><b>{esc(b.stem)}</b> <span class="note">{esc(b.description)}'
-            + (" · illustrative values" if b.illustrative else "")
-            + (f" · needs {esc(', '.join(n.split('.')[-1] for n in b.needs))}" if b.needs else "")
-            + "</span></span></label>" for b in options)
-        none = ("" if kind.required or kind.many else
-                f'<label class="check"><input type="radio" name="block:{esc(kind.key)}" value="" checked>'
-                '<span class="note">none</span></label>')
-        groups.append(f'<fieldset><legend>{esc(kind.title)}{" (required)" if kind.required else ""}</legend>'
-                      f"{none}{items}</fieldset>")
-    body = f"""<div class="crumbs"><a href="/">Scenarios and runs</a> / new</div><h1>New scenario or study</h1>
-{_datalists(lists)}
-<div class="tabs" data-tabs><button data-tab="template" class="on">From a template</button>
-<button data-tab="blocks">From library blocks</button></div>
-<section data-pane="template">
-<p class="note">A commented starting file, as <code>der-opt new TEMPLATE</code> writes it: what the files tell it is
-filled in, the rest is TODO for the Check tab to list. <b>feeder-from-files</b> writes a study.</p>
-<form data-post="/new/template" data-target="#template-result" class="grid">
-<label>Template <select name="template" data-switch>{template_options}</select></label>
-<label>File to write <input name="target" class="wide" value="scenarios/new_scenario.yaml"> <span class="note">
-in the project; relative paths in it are written from its folder</span></label>
-{''.join(fields)}
-<div class="row"><button type="submit">Write it</button></div></form><div id="template-result"></div></section>
-<section data-pane="blocks" hidden>
-<p class="note">A single-home scenario that extends the blocks you pick from {esc(library)}. (For a study, start
-from the feeder-from-files template; study blocks go in its <code>extends</code>.) The check below says whether
-the picks fit together.</p>
-<form data-post="/new/blocks" data-target="#blocks-result" data-check="/fragment/blocks-check" class="grid">
-<label>File to write <input name="target" class="wide" value="scenarios/new_home.yaml"></label>
-<label>Time series file <input name="timeseries" class="wide" list="dl-files" autocomplete="off">
-<span class="note">optional: load and solar come from it</span></label>
-<label>Premise <input name="premise"> <span class="note">its premise_id in that file</span></label>
-{''.join(groups)}
-<div id="blocks-check" class="check-box"></div>
-<div class="row"><button type="submit">Write it</button></div></form><div id="blocks-result"></div></section>"""
-    return layout(project, "New", body, token, "new", extra=NEW_JS)
-
-
-NEW_JS = """<script>
-(function(){const sel=document.querySelector("select[data-switch]");
-function sync(){const t=sel.value;document.querySelectorAll("label[data-for]").forEach(l=>{
-l.hidden=!l.dataset.for.split(" ").includes(t);});}
-if(sel){sel.addEventListener("change",sync);sync();}
-const form=document.querySelector("form[data-check]");if(!form)return;let timer;
-const check=async()=>{const body=new URLSearchParams(new FormData(form));
-const r=await fetch(form.dataset.check+"?"+body);document.getElementById("blocks-check").innerHTML=await r.text();};
-form.addEventListener("change",()=>{clearTimeout(timer);timer=setTimeout(check,150);});check();})();
-</script>"""
-
-
-def blocks_check(blocks, picks_names: list[str], timeseries: str, premise: str, project: Project) -> str:
-    from der_opt.scenarios.library import find, home_data, problems
-
-    picks = [find(blocks, n) for n in picks_names]
-    try:
-        home = home_data(project.inside(timeseries) if timeseries else None, premise or None)
-    except Exception as exc:  # noqa: BLE001 -- shown as it is
-        return f'<p class="status bad">The time series file doesn\'t read: {esc(exc)}</p>'
-    found = problems(picks, home)
-    if found:
-        return '<p class="status bad">These picks don\'t fit together yet:</p><ul>' + "".join(
-            f"<li>{esc(p)}</li>" for p in found) + "</ul>"
-    return f'<p class="status ok">{len(picks)} blocks that fit together.</p>'
 
 
 # --- a study's settings --------------------------------------------------------------
