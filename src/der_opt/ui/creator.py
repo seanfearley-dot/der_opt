@@ -591,16 +591,26 @@ def file_panel(project, relative: str) -> str:
     size = path.stat().st_size
     head = f'<h3 class="file-name">{shown}</h3>'
     if path.suffix not in EDITABLE:
-        return head + f'<p class="note">{size:,} bytes; not a text file this page edits.</p>'
+        return head + f'<p class="note">{size:,} bytes; not a text file this page edits.</p>' + _file_buttons(shown)
     text = path.read_text(encoding="utf-8", errors="replace")
     if size > EDIT_LIMIT:
         lines = text.splitlines()
         return (head + f'<p class="note">{len(lines):,} lines ({size / 1e6:.1f} MB): too big to edit here, so its first '
-                       f"60 lines are shown. Edit it where you made it.</p><pre class=\"file-head\">"
+                       "60 lines are shown.</p>" + _file_buttons(shown) + '<pre class="file-head">'
                 + esc("\n".join(lines[:60])) + "</pre>")
-    return (head + f'<textarea class="file-text" spellcheck="false" data-path="{shown}">{esc(text)}</textarea>'
+    return (head + _file_buttons(shown)
+            + f'<textarea class="file-text" spellcheck="false" data-path="{shown}">{esc(text)}</textarea>'
             '<div class="row"><button type="button" class="small" data-save-file>Save</button> '
             '<span class="file-status note"></span></div>')
+
+
+def _file_buttons(shown: str) -> str:
+    """Open the file in this computer's app for it, show it in its folder, or the raw file."""
+    return (f'<div class="row file-actions"><button type="button" class="small" data-open-app="{shown}">'
+            "Open in its app</button> "
+            f'<button type="button" class="small" data-reveal="{shown}">Show in {REVEAL_IN}</button> '
+            f'<a class="small button" href="/files/{shown}" target="_blank" rel="noopener">Raw file</a>'
+            '<span class="open-status note"></span></div>')
 
 
 def block_panel(project, library: Path | None, name: str) -> str:
@@ -621,6 +631,32 @@ def block_panel(project, library: Path | None, name: str) -> str:
             f'<pre class="file-head">{esc(path.read_text(encoding="utf-8"))}</pre>')
 
 
+REVEAL_IN = {"darwin": "Finder", "win32": "Explorer"}.get(__import__("sys").platform, "its folder")
+
+
+def open_file(project, form: dict) -> str:
+    """Opens a project file in this computer's app for it, or shows it in its folder
+    (the app runs on the user's own machine; the page's token guards it)."""
+    import subprocess
+    import sys
+
+    path = project.inside(form["path"])
+    if not path.is_file():
+        raise ValueError(f"{form['path']} isn't a file in the project")
+    reveal = form.get("how") == "reveal"
+    if sys.platform == "darwin":
+        command = ["open", "-R", str(path)] if reveal else ["open", str(path)]
+    elif sys.platform == "win32":
+        command = ["explorer", f"/select,{path}"] if reveal else ["cmd", "/c", "start", "", str(path)]
+    else:
+        command = ["xdg-open", str(path.parent if reveal else path)]
+    try:
+        subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError as exc:
+        raise ValueError(f"couldn't open it here: {exc}") from exc
+    return f'<span class="status ok">{"Shown" if reveal else "Opened"}.</span>'
+
+
 def save_file(project, form: dict) -> str:
     path = project.inside(form["path"])
     if path.suffix not in EDITABLE or not path.is_file():
@@ -639,6 +675,8 @@ border:1px solid var(--line);background:transparent;color:var(--muted);cursor:po
 .pane textarea.file-text{width:100%;min-height:calc(100vh - 230px);font:11.5px/1.4 ui-monospace,Menlo,monospace;
 white-space:pre;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--bg);color:var(--ink)}
 .pane pre.file-head{font-size:11px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px}
+.file-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:6px 0}
+a.button{border:1px solid var(--line);border-radius:6px;padding:2px 8px;text-decoration:none;font-size:12px}
 .pane ul.files{list-style:none;padding:0;margin:0}.pane button.link{background:none;border:0;color:var(--accent);
 cursor:pointer;padding:2px 0;font:inherit;text-align:left}
 input.todo::placeholder{color:#b45309}
@@ -751,6 +789,10 @@ let openPath=null;
 async function openFile(path){openPath=path||null;const box=document.querySelector('[data-pane-box="file"]');
 const r=await fetch("/create/file?path="+encodeURIComponent(path||""));box.innerHTML=await r.text();paneTab("file");
 box.querySelectorAll("[data-open]").forEach(b=>b.onclick=()=>openFile(b.dataset.open));
+box.querySelectorAll("[data-open-app],[data-reveal]").forEach(b=>b.onclick=async()=>{const body=new URLSearchParams({
+path:b.dataset.openApp||b.dataset.reveal,how:b.dataset.reveal?"reveal":"open"});const r=await fetch("/create/open-file",
+{method:"POST",headers:{"X-Token":TOKEN},body});box.querySelector(".open-status").innerHTML=r.ok?await r.text():
+'<span class="status bad">'+await r.text()+"</span>";});
 const save=box.querySelector("[data-save-file]");if(save)save.onclick=async()=>{
 const ta=box.querySelector("textarea.file-text");const body=new URLSearchParams({path:ta.dataset.path,content:ta.value});
 const r2=await fetch("/create/save-file",{method:"POST",headers:{"X-Token":TOKEN},body});

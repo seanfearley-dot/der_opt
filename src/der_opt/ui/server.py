@@ -208,6 +208,10 @@ def make_handler(app: App, port: int):
                                       "application/json")
                 if route == "/create/write":
                     return self._create_write(form)
+                if route == "/create/open-file":
+                    from der_opt.ui import creator
+
+                    return self._send(200, creator.open_file(project, form))
                 if route == "/create/save-file":
                     from der_opt.ui import creator
 

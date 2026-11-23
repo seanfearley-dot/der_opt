@@ -235,3 +235,22 @@ def test_a_device_block_opens_beside_the_devices_step(server, project):
     assert "capacity_kwh: 13.5" in panel and "read-only" in panel and "file-text" not in panel
     assert "No block" in _get(port, "/create/file?block=devices/nope")[1]
     assert "No block" in _get(port, "/create/file?block=../../pyproject")[1]  # nothing outside the library
+
+
+def test_a_file_opens_in_its_app_or_its_folder(server, project, monkeypatch):
+    import subprocess
+
+    app, port = server
+    shutil.copy(REPO / "examples/data/spec_sample/annual_home.csv", project / "annual_home.csv")
+    ran = []
+    monkeypatch.setattr(subprocess, "Popen", lambda command, **_: ran.append(command))  # nothing really opens
+    panel = _get(port, "/create/file?path=annual_home.csv")[1]
+    assert "data-open-app" in panel and "data-reveal" in panel and 'href="/files/annual_home.csv"' in panel
+    assert "data-open-app" in _get(port, "/create/file?path=scenarios/basic.yaml")[1]  # an editable file has them too
+    assert _post(port, "/create/open-file", {"path": "annual_home.csv"})[0] == 403  # the page's token
+    status, body, _ = _post(port, "/create/open-file", {"path": "annual_home.csv"}, app.token)
+    assert status == 200 and "Opened" in body and ran[-1][-1].endswith("annual_home.csv")
+    status, body, _ = _post(port, "/create/open-file", {"path": "annual_home.csv", "how": "reveal"}, app.token)
+    assert status == 200 and "Shown" in body and len(ran) == 2
+    assert _post(port, "/create/open-file", {"path": "../outside.csv"}, app.token)[0] == 403
+    assert _post(port, "/create/open-file", {"path": "missing.csv"}, app.token)[0] == 400
