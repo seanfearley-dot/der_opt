@@ -1047,6 +1047,21 @@ analyses:
 * **Elements:** `rating_kw` applies to load and backfeed. Without
   `overload_cost_per_kwh` it's a hard limit (a run is infeasible if uncontrollable load
   alone exceeds it); with one, flow may exceed it at that cost per kWh over.
+* **Normal and emergency ratings**
+  ([docs/COORDINATION_SPEC.md](docs/COORDINATION_SPEC.md) section 1b): add
+  `emergency_rating_kw` and flow between normal and emergency costs
+  `overload_cost_per_kwh`. Above emergency it costs `violation_cost_per_kwh`, or, without
+  one, the emergency rating is a hard wall. `emergency_kwh_per_day` caps the kWh above
+  normal each day; past it, flow over normal is priced as a violation. Every band is
+  linear, so congestion prices stay exact duals. A price at the overload cost means the
+  element is in its emergency band; one between 0 and that cost is set by the homes'
+  flexibility. A `violation_cost_per_kwh` (say $100) keeps a run solvable when
+  uncontrollable load alone exceeds the emergency rating, and the `emergency ratings`
+  check names the hours. The same columns work in `network.csv`.
+  ```yaml
+  - {name: tx_1, rating_kw: 75, emergency_rating_kw: 90, overload_cost_per_kwh: 1.0,
+     violation_cost_per_kwh: 100, emergency_kwh_per_day: 30}
+  ```
 * **`capacity_deferral`:** `value_per_kw` x (peak flow above `threshold_kw`, default 0).
   It takes an annual $/kW-year and applies it to the run's peak, so use it on a horizon
   that contains the element's annual peak.

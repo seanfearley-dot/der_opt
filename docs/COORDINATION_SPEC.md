@@ -1,7 +1,8 @@
 # der-opt feeder coordination specification
 
-**Version 1.0**, approved 2026-11-21. Decision 4 was approved with `pro_rata_need` as the
-default allocation method.
+**Version 1.1**, approved 2026-11-22 (normal and emergency ratings, section 1b). Version
+1.0 was approved 2026-11-21; decision 4 with `pro_rata_need` as the default allocation
+method.
 - v0.2: mechanisms combine in one run (section 2, decision 7).
 - v0.3: decisions 1–3 and 5–7 approved. Background load is the one way to add load
   that isn't a customer. Envelope allocation is a set of interchangeable methods
@@ -159,6 +160,47 @@ A house with no devices is still a customer: it has a bill and can be a
 non-participant, but it has nothing to flex. `feeder_bank_planning_trace.yaml` uses a
 device-less, unbilled house to stand in for the bank's existing load; it moves to
 `background_load`.
+
+### 1b. Element ratings: normal, emergency, and beyond (v1.1)
+
+A hard rating gives the cleanest congestion prices, but a run fails outright when load
+nobody can move exceeds it in a single hour. Utilities rate equipment twice, normal and
+emergency, and the model follows them with up to three bands per element:
+
+| Flow (either direction) | Treatment | The congestion price there |
+|---|---|---|
+| up to `rating_kw` (normal) | free | 0, or up to the overload cost while it binds at normal |
+| normal to `emergency_rating_kw` | allowed at `overload_cost_per_kwh` | the overload cost |
+| above emergency | at `violation_cost_per_kwh`; without one, a hard wall at the emergency rating | up to the violation cost |
+
+```yaml
+elements:
+  - name: tx_1
+    rating_kw: 75                 # normal
+    emergency_rating_kw: 90
+    overload_cost_per_kwh: 1.0    # between normal and emergency
+    violation_cost_per_kwh: 100   # above emergency; left out: a hard wall there
+    emergency_kwh_per_day: 30     # optional: at most this much above normal each day
+```
+
+- **Without an emergency rating** nothing changes: `overload_cost_per_kwh` prices every
+  kWh over normal, or, left out, normal is a hard limit.
+- **An emergency rating needs `overload_cost_per_kwh`** (what running between the two
+  costs), and must be above normal; `violation_cost_per_kwh` and `emergency_kwh_per_day`
+  need an emergency rating. Validation says so.
+- **`emergency_kwh_per_day`** is a linear stand-in for a time limit on emergency
+  operation (counting hours would need on/off variables and cost exact prices): the
+  kWh above normal, both directions, summed over each local day, is at most this.
+  What doesn't fit goes to the violation band, or, without one, can make the run
+  infeasible.
+- **Every band is linear,** so the run stays an LP and congestion prices stay exact duals
+  (the single meter's on/off variables aside).
+- **Envelopes and feeder DR triggers** work from the normal rating, as before.
+- **Reported:** hours and kWh over normal and over emergency, per element and run; the
+  overload (emergency band) and violation costs apart; and a warning naming each element
+  that went above its emergency rating in the coordinated run, with how many hours and by
+  how much.
+- **`network.csv`** gains the three columns, all optional.
 
 ## 2. The runs
 
@@ -404,8 +446,9 @@ coordination:
 For every run (coordinated, independent, counterfactual, each run in `runs`, and the twins
 without events):
 - **Network:**
-  - peak loading of each element, and the hours over its rating;
-  - overload and deferral costs;
+  - peak loading of each element, and the hours over its rating (and over its emergency
+    rating, v1.1);
+  - overload, violation and deferral costs;
   - for mechanisms, the **share of the ideal captured**: (network cost, independent −
     the run's) ÷ (independent − coordinated).
   - for a run combining mechanisms, the same share for each of its mechanisms alone,
@@ -460,3 +503,9 @@ All approved 2026-11-21.
    are adjustable per mechanism and device, as actions with settings. The defaults are
    in section 1a, including V2X EVs and batteries discharging to the home or exporting.
    New actions plug in. Approved.
+
+Approved with v1.1 (2026-11-22):
+
+10. **Normal and emergency ratings** (section 1b): an emergency band priced at the
+    overload cost, a violation band above it (or a hard wall), and an optional daily kWh
+    budget above normal, all linear.

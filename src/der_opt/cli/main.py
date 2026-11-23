@@ -165,7 +165,7 @@ def _run_feeder(scenario: Path, output_dir: Path | None, no_counterfactual: bool
         "Battery/EV degradation": {k: r.house_costs["degradation"].sum() for k, r in runs.items()},
     }
     for cost_name in next(iter(runs.values())).network_costs:
-        rows["Transformer overload" if cost_name == "overload" else cost_name] = {
+        rows[{"overload": "Transformer overload", "violation": "Beyond emergency ratings"}.get(cost_name, cost_name)] = {
             k: r.network_costs[cost_name] for k, r in runs.items()
         }
     rows["Total"] = {k: r.total for k, r in runs.items()}
@@ -184,9 +184,13 @@ def _run_feeder(scenario: Path, output_dir: Path | None, no_counterfactual: bool
             text = f"{label} {row['peak_kw']:.1f} kW"
             if element.rating_kw:
                 text += f" ({row['peak_pct_of_rating']:.0f}%"
-                text += f", {row['hours_over']:.0f} h over)" if row["hours_over"] else ")"
+                text += f", {row['hours_over']:.0f} h over" if row["hours_over"] else ""
+                text += (f", {row['hours_over_emergency']:.0f} h over emergency"
+                         if row.get("hours_over_emergency") else "") + ")"
             parts.append(text)
-        rating = f" [{element.rating_kw:g} kW]" if element.rating_kw else ""
+        rating = (f" [{element.rating_kw:g} kW" + (f", emergency {element.emergency_rating_kw:g} kW"
+                                                   if element.emergency_rating_kw else "") + "]"
+                  if element.rating_kw else "")
         typer.echo(f"  {element.name}{rating}: " + "; ".join(parts))
 
     prices = study.congestion_prices

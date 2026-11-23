@@ -182,7 +182,10 @@ One row per transformer or line section. `network.csv`:
 | `element_id` | yes | unique |
 | `parent_id` | no | the element upstream; empty for the root |
 | `rating_kw` | no | thermal limit in kW, both directions (convert kVA with power factor before writing) |
-| `overload_cost_per_kwh` | no | empty = hard limit; a number = soft limit at that cost |
+| `overload_cost_per_kwh` | no | empty = hard limit; a number = soft limit at that cost (with an emergency rating: the cost between normal and emergency) |
+| `emergency_rating_kw` | no | the emergency rating, above `rating_kw` (coordination spec v1.1, section 1b) |
+| `violation_cost_per_kwh` | no | the cost above the emergency rating; empty = a hard wall there |
+| `emergency_kwh_per_day` | no | at most this many kWh above normal each local day |
 
 ## Validation
 

@@ -140,3 +140,54 @@ def test_ties_between_equally_cheap_hours_go_to_the_earliest():
         # in hour 1, the last 1 kW in hour 2, then serves the load from storage
         assert dispatch.grid_import.tolist() == pytest.approx([6, 2, 0, 0])
         assert dispatch.objective_value == pytest.approx(0.1 * 8)  # tie-break not reported
+
+
+# --- normal and emergency ratings (coordination spec v1.1, section 1b) ----------------
+
+
+def _emergency(**kw):
+    base = {"rating_kw": 4, "emergency_rating_kw": 6, "overload_cost_per_kwh": 1.0}
+    return Feeder("f", [NetworkElement("tx", **(base | kw))], attachments={"h1": "tx"})
+
+
+def test_an_emergency_rating_needs_its_costs_in_order():
+    with pytest.raises(ValueError, match="must be above its rating_kw"):
+        NetworkElement("tx", rating_kw=4, emergency_rating_kw=3, overload_cost_per_kwh=1.0)
+    with pytest.raises(ValueError, match="needs overload_cost_per_kwh"):
+        NetworkElement("tx", rating_kw=4, emergency_rating_kw=6)
+    with pytest.raises(ValueError, match="need an emergency_rating_kw"):
+        NetworkElement("tx", rating_kw=4, violation_cost_per_kwh=100.0)
+
+
+def test_the_emergency_band_prices_at_the_overload_cost_and_the_violation_band_beyond():
+    # no battery: load 5 then 8 kW through a 4 kW (normal) / 6 kW (emergency) transformer
+    house = _house("h1", [5, 8, 3, 3], battery=False)
+    network = NetworkDispatchModel(_emergency(violation_cost_per_kwh=100.0), [house])
+    result, model, backend = network.solve()
+    costs = network.network_costs(result.flows)
+    # 1 kW over normal in hour 0; in hour 1, 2 kW in the emergency band and 2 kW beyond it
+    assert costs["overload"] == pytest.approx(1.0 * (1 + 2))
+    assert costs["violation"] == pytest.approx(100.0 * 2)
+    prices, exact = network.congestion_prices(model, backend)
+    assert exact
+    assert prices["tx"].iloc[0] == pytest.approx(1.0, abs=1e-3)  # in the emergency band: its cost
+    assert prices["tx"].iloc[1] == pytest.approx(100.0, abs=1e-3)  # beyond it: the violation cost
+    summary = loading_summary(result.flows, network.feeder, TG).loc["tx"]
+    assert summary["hours_over"] == 2 and summary["hours_over_emergency"] == 1
+    assert summary["kwh_over_emergency"] == pytest.approx(2.0)
+
+
+def test_without_a_violation_cost_the_emergency_rating_is_a_wall_the_battery_works_under():
+    # the battery covers the 8 kW hour by charging when there's room (at the 4 kW normal
+    # rating while it's free, then into the emergency band, which costs $1/kWh)
+    house = _house("h1", [2, 8, 2, 2], price=(0.1, 0.1, 0.1, 0.1))
+    result, _, _ = NetworkDispatchModel(_emergency(), [house]).solve()
+    assert result.flows["tx"].max() <= 6 + 1e-6
+
+
+def test_a_daily_emergency_budget_sends_the_rest_to_the_violation_band():
+    house = _house("h1", [6, 6, 3, 3], battery=False)  # 2 kW over normal for 2 h: 4 kWh in the band
+    network = NetworkDispatchModel(_emergency(violation_cost_per_kwh=100.0, emergency_kwh_per_day=3.0), [house])
+    result, _, _ = network.solve()
+    costs = network.network_costs(result.flows)
+    assert costs["overload"] == pytest.approx(3.0) and costs["violation"] == pytest.approx(100.0 * 1)

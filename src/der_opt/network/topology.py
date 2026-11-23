@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import numpy as np
+
 
 @dataclass(frozen=True)
 class NetworkElement:
@@ -23,12 +25,54 @@ class NetworkElement:
         transformer loss of life. A hard limit can make a run infeasible when
         uncontrollable load alone exceeds the rating.
     parent: the element upstream (toward the substation); None for the root.
+    emergency_rating_kw: an emergency rating above the normal one (coordination spec
+        v1.1, section 1b): flow between the two costs overload_cost_per_kwh; above it,
+        violation_cost_per_kwh, or a hard wall without one.
+    emergency_kwh_per_day: at most this many kWh above normal each local day.
     """
 
     name: str
     rating_kw: float | None = None
     overload_cost_per_kwh: float | None = None
     parent: str | None = None
+    emergency_rating_kw: float | None = None
+    violation_cost_per_kwh: float | None = None
+    emergency_kwh_per_day: float | None = None
+
+    def __post_init__(self):
+        where = f"network element {self.name}"
+        if self.emergency_rating_kw is None:
+            if self.violation_cost_per_kwh is not None or self.emergency_kwh_per_day is not None:
+                raise ValueError(f"{where}: violation_cost_per_kwh and emergency_kwh_per_day need an emergency_rating_kw")
+            return
+        if self.rating_kw is None or self.emergency_rating_kw <= self.rating_kw:
+            raise ValueError(f"{where}: emergency_rating_kw ({self.emergency_rating_kw:g}) must be above its rating_kw "
+                             f"({self.rating_kw})")
+        if self.overload_cost_per_kwh is None:
+            raise ValueError(f"{where}: an emergency rating needs overload_cost_per_kwh, the cost of running between "
+                             "normal and emergency")
+
+    def bands(self, flow_kw: np.ndarray, dt: float, days: np.ndarray | None = None) -> tuple[float, float, np.ndarray]:
+        """(overload cost, violation cost, kW above the hard limit) for flows (either
+        direction): what a run's flows cost on this element's bands."""
+        flow = np.abs(np.asarray(flow_kw, dtype=float))
+        if self.rating_kw is None:
+            return 0.0, 0.0, np.zeros(len(flow))
+        if self.emergency_rating_kw is None:
+            over = np.clip(flow - self.rating_kw, 0, None)
+            if self.overload_cost_per_kwh is None:
+                return 0.0, 0.0, over
+            return self.overload_cost_per_kwh * float(over.sum()) * dt, 0.0, np.zeros(len(flow))
+        band = np.clip(flow - self.rating_kw, 0, self.emergency_rating_kw - self.rating_kw) * dt
+        beyond = np.clip(flow - self.emergency_rating_kw, 0, None)
+        spill = 0.0  # emergency-band kWh past the daily budget: priced as violation
+        if self.emergency_kwh_per_day is not None and days is not None:
+            for day in np.unique(days):
+                spill += max(0.0, float(band[days == day].sum()) - self.emergency_kwh_per_day)
+        overload = self.overload_cost_per_kwh * (float(band.sum()) - spill)
+        if self.violation_cost_per_kwh is None:
+            return overload, 0.0, beyond
+        return overload, self.violation_cost_per_kwh * (float(beyond.sum()) * dt + spill), np.zeros(len(flow))
 
 
 @dataclass

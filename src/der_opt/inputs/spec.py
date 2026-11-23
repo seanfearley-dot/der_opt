@@ -49,7 +49,8 @@ PREMISE_CHOICES = {
 }
 PREMISE_COLUMNS = ("premise_id", "element_id", "customer_class", "tariff", "export_program", "baseline_territory",
                    *PREMISE_NUMERIC, *PREMISE_CHOICES, "ev_v2x")
-NETWORK_NUMERIC = ("rating_kw", "overload_cost_per_kwh")
+NETWORK_NUMERIC = ("rating_kw", "overload_cost_per_kwh", "emergency_rating_kw", "violation_cost_per_kwh",
+                   "emergency_kwh_per_day")
 
 
 class SpecError(ValueError):

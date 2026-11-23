@@ -133,7 +133,9 @@ def feeder_summary(built, study, loading: dict, report=None) -> dict:
     houses = built.houses
     out["premises"] = len(built.premises)
     out["elements"] = [{"name": e.name, "rating_kw": e.rating_kw, "parent": e.parent,
-                        "overload_cost_per_kwh": e.overload_cost_per_kwh} for e in built.feeder.elements]
+                        "overload_cost_per_kwh": e.overload_cost_per_kwh, "emergency_rating_kw": e.emergency_rating_kw,
+                        "violation_cost_per_kwh": e.violation_cost_per_kwh,
+                        "emergency_kwh_per_day": e.emergency_kwh_per_day} for e in built.feeder.elements]
     mix = {}
     for element, group in houses.groupby("element"):
         devices = [d.split(", ") for d in group["devices"]]

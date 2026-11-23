@@ -110,7 +110,8 @@ def assemble_feeder(config: FeederScenarioConfig, resolved, file_elements, file_
     if file_elements is not None and config.feeder.elements:
         raise ValueError("network elements come from premise_data.network or feeder.elements, not both")
     elements = file_elements if file_elements is not None else [
-        NetworkElement(e.name, e.rating_kw, e.overload_cost_per_kwh, e.parent) for e in config.feeder.elements
+        NetworkElement(e.name, e.rating_kw, e.overload_cost_per_kwh, e.parent, e.emergency_rating_kw,
+                       e.violation_cost_per_kwh, e.emergency_kwh_per_day) for e in config.feeder.elements
     ]
     if not elements:
         raise ValueError("the feeder has no network elements (feeder.elements or premise_data.network)")
@@ -303,13 +304,32 @@ def check_feeder_study(scenario: FeederScenario, runs: dict[str, RunSummary]) ->
     found = []
     if "coordinated" in runs:
         flows = runs["coordinated"].flows
+        dt = scenario.premises[0].time_grid.dt_hours
+        emergency = []
         for element in scenario.feeder.elements:
-            if element.rating_kw is None or element.overload_cost_per_kwh is not None:
+            if element.rating_kw is None:
                 continue
-            over = float(flows[element.name].abs().max()) - element.rating_kw
+            peak = float(flows[element.name].abs().max())
+            if element.emergency_rating_kw is not None:  # v1.1
+                beyond = flows[element.name].abs() - element.emergency_rating_kw
+                if element.violation_cost_per_kwh is None and beyond.max() > 1e-3:
+                    found.append(Finding("error", "hard ratings hold", f"{element.name} exceeds its "
+                                         f"{element.emergency_rating_kw:g} kW emergency rating (a hard wall) by "
+                                         f"{beyond.max():.3f} kW", "coordinated"))
+                elif beyond.max() > 1e-3:
+                    emergency.append(Finding("warning", "emergency ratings", f"{element.name} exceeds its "
+                                             f"{element.emergency_rating_kw:g} kW emergency rating in "
+                                             f"{(beyond > 1e-3).sum() * dt:g} h, by up to {beyond.max():.2f} kW",
+                                             "coordinated"))
+                continue
+            if element.overload_cost_per_kwh is not None:
+                continue
+            over = peak - element.rating_kw
             if over > 1e-3:
                 found.append(Finding("error", "hard ratings hold", f"{element.name} exceeds its {element.rating_kw:g} kW "
                                      f"hard rating by {over:.3f} kW", "coordinated"))
+        if any(e.emergency_rating_kw is not None for e in scenario.feeder.elements):
+            report.ran("emergency ratings", emergency)
     report.ran("hard ratings hold", found)
     from der_opt.billing import load_retail_tariff
 

@@ -703,7 +703,9 @@ def _premise_rows(config, study: _Study | None = None, require_element: bool = T
     elements = None
     if network is not None:
         elements = [
-            NetworkElement(element, _number(r, "rating_kw"), _number(r, "overload_cost_per_kwh"), r["parent_id"] or None)
+            NetworkElement(element, _number(r, "rating_kw"), _number(r, "overload_cost_per_kwh"), r["parent_id"] or None,
+                           _number(r, "emergency_rating_kw"), _number(r, "violation_cost_per_kwh"),
+                           _number(r, "emergency_kwh_per_day"))
             for element, r in network.table.iterrows()
         ]
     return out, elements, background

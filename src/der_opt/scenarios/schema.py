@@ -280,9 +280,12 @@ class ScenarioConfig(BaseModel):
 
 class NetworkElementConfig(BaseModel):
     name: str
-    rating_kw: float | None = None
-    overload_cost_per_kwh: float | None = None  # omitted = hard limit
+    rating_kw: float | None = None  # normal
+    overload_cost_per_kwh: float | None = None  # omitted = hard limit; with an emergency rating, the band up to it
     parent: str | None = None
+    emergency_rating_kw: float | None = None  # coordination spec v1.1, section 1b
+    violation_cost_per_kwh: float | None = None  # above emergency; omitted = a hard wall there
+    emergency_kwh_per_day: float | None = None  # at most this many kWh above normal each day
 
 
 class NetworkValueStreamConfig(BaseModel):

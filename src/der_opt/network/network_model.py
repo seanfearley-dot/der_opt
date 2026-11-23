@@ -136,14 +136,21 @@ def element_flows(feeder: Feeder, dispatches: dict[str, DispatchResult], fixed: 
     return pd.DataFrame(flows)
 
 
+def _days(time_grid: TimeGrid) -> np.ndarray:
+    """Each step's local day, for daily emergency budgets; a run without dates is one day."""
+    try:
+        return np.asarray(pd.DatetimeIndex(time_grid.timestamps()).normalize())
+    except ValueError:
+        return np.zeros(time_grid.horizon_steps)
+
+
 def overload_cost(flows: pd.DataFrame, feeder: Feeder, time_grid: TimeGrid) -> float:
-    total = 0.0
-    for element in feeder.elements:
-        if element.rating_kw is None or element.overload_cost_per_kwh is None:
-            continue
-        over = np.clip(flows[element.name].abs().to_numpy() - element.rating_kw, 0, None)
-        total += element.overload_cost_per_kwh * float(over.sum()) * time_grid.dt_hours
-    return total
+    return sum(e.bands(flows[e.name].to_numpy(), time_grid.dt_hours, _days(time_grid))[0] for e in feeder.elements)
+
+
+def violation_cost(flows: pd.DataFrame, feeder: Feeder, time_grid: TimeGrid) -> float:
+    """Above the emergency rating, or past the daily emergency budget (v1.1)."""
+    return sum(e.bands(flows[e.name].to_numpy(), time_grid.dt_hours, _days(time_grid))[1] for e in feeder.elements)
 
 
 def loading_summary(flows: pd.DataFrame, feeder: Feeder, time_grid: TimeGrid) -> pd.DataFrame:
@@ -163,6 +170,11 @@ def loading_summary(flows: pd.DataFrame, feeder: Feeder, time_grid: TimeGrid) ->
             row["peak_pct_of_rating"] = 100 * float(np.abs(flow).max()) / element.rating_kw
             row["hours_over"] = float((over > 1e-6).sum() * time_grid.dt_hours)
             row["kwh_over"] = float(over.sum() * time_grid.dt_hours)
+        if element.emergency_rating_kw:
+            beyond = np.clip(np.abs(flow) - element.emergency_rating_kw, 0, None)
+            row["emergency_rating_kw"] = element.emergency_rating_kw
+            row["hours_over_emergency"] = float((beyond > 1e-6).sum() * time_grid.dt_hours)
+            row["kwh_over_emergency"] = float(beyond.sum() * time_grid.dt_hours)
         rows.append(row)
     return pd.DataFrame(rows).set_index("element")
 
@@ -234,7 +246,10 @@ class NetworkDispatchModel:
             if element.rating_kw is None:
                 continue
             rating = element.rating_kw
-            if element.overload_cost_per_kwh is None:
+            if element.emergency_rating_kw is not None:  # normal, emergency and beyond (v1.1)
+                over_load, over_back, cost = self._emergency_bands(model, element, dt)
+                network_cost += cost
+            elif element.overload_cost_per_kwh is None:
                 over_load = over_back = {t: 0 for t in model.T}
             else:
                 over_load = pyo.Var(model.T, domain=pyo.NonNegativeReals)
@@ -285,9 +300,39 @@ class NetworkDispatchModel:
             network_costs=self.network_costs(flows),
         )
 
+    def _emergency_bands(self, model, element, dt: float):
+        """(load-direction kW over normal, backfeed kW over normal, their cost): an
+        emergency band up to the emergency rating at the overload cost, then a violation
+        band at its cost, or none (a hard wall); and the daily kWh budget on the first."""
+        name, periods = element.name, list(model.T)
+        width = element.emergency_rating_kw - element.rating_kw
+        bands = {}
+        for side in ("load", "back"):
+            bands[side] = pyo.Var(model.T, bounds=(0, width))
+            model.add_component(f"net_{name}_emergency_{side}", bands[side])
+        cost = element.overload_cost_per_kwh * dt * sum(bands["load"][t] + bands["back"][t] for t in periods)
+        beyond = {"load": {t: 0 for t in periods}, "back": {t: 0 for t in periods}}
+        if element.violation_cost_per_kwh is not None:
+            for side in ("load", "back"):
+                beyond[side] = pyo.Var(model.T, domain=pyo.NonNegativeReals)
+                model.add_component(f"net_{name}_violation_{side}", beyond[side])
+            cost += element.violation_cost_per_kwh * dt * sum(beyond["load"][t] + beyond["back"][t] for t in periods)
+        days = _days(self.time_grid)
+        if element.emergency_kwh_per_day is not None:
+            # past the day's budget, flow over normal can only come from the violation band
+            day_steps = [[t for t in periods if days[t] == d] for d in np.unique(days)]
+            model.add_component(f"net_{name}_emergency_budget", pyo.Constraint(
+                list(range(len(day_steps))), rule=lambda _m, i: dt * sum(
+                    bands["load"][t] + bands["back"][t] for t in day_steps[i]) <= element.emergency_kwh_per_day))
+        over_load = {t: bands["load"][t] + beyond["load"][t] for t in periods}
+        over_back = {t: bands["back"][t] + beyond["back"][t] for t in periods}
+        return over_load, over_back, cost
+
     def network_costs(self, flows: pd.DataFrame) -> dict[str, float]:
         """Overload and network value-stream costs for flows from any dispatch."""
         costs = {"overload": overload_cost(flows, self.feeder, self.time_grid)}
+        if any(e.violation_cost_per_kwh is not None for e in self.feeder.elements):
+            costs["violation"] = violation_cost(flows, self.feeder, self.time_grid)
         for stream in self.value_streams:
             costs[stream.label] = stream.evaluate_numeric(flows, self.feeder, self.time_grid)
         return costs

@@ -107,14 +107,16 @@ def _loading(page: Page, folder: Path, summary: dict, labels: list[str]) -> None
                            "y": _round(flows[(label, element)]), "visible": True if main else "legendonly",
                            "line": {"color": _run_color(label, labels), "width": 1.6 if main else 1.2}})
         rating = (elements.get(element) or {}).get("rating_kw")
+        emergency = (elements.get(element) or {}).get("emergency_rating_kw")
         layout = {"yaxis": {"title": "kW"}}
-        if rating:
-            layout["shapes"] = [{"type": "line", "xref": "paper", "x0": 0, "x1": 1, "y0": rating, "y1": rating,
-                                 "line": {"color": "#b91c1c", "dash": "dash", "width": 1}}]
+        lines = [(rating, "dash"), (emergency, "dot")]
+        layout["shapes"] = [{"type": "line", "xref": "paper", "x0": 0, "x1": 1, "y0": kw, "y1": kw,
+                             "line": {"color": "#b91c1c", "dash": dash, "width": 1}} for kw, dash in lines if kw]
         page.chart(section, traces, layout, height=400, zoom=True, window=opening_window(flows.max(axis=1)), unit="kW",
-                   caption=f"{element}" + (f", rating {rating:g} kW" if rating else ""))
-    page.text(section, "Flow through each element, kW (backfeed negative); the dashed line is its rating. Mechanism "
-                       "runs are in the legend.")
+                   caption=f"{element}" + (f", rating {rating:g} kW" if rating else "")
+                   + (f", emergency {emergency:g} kW" if emergency else ""))
+    page.text(section, "Flow through each element, kW (backfeed negative); the dashed line is its normal rating, the "
+                       "dotted one its emergency rating where it has one. Mechanism runs are in the legend.")
 
 
 def _congestion(page: Page, folder: Path, summary: dict) -> None:
