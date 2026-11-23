@@ -52,3 +52,21 @@ def test_broadcast_rejects_mismatched_array_length():
             ambient_temp_c=[22.0, 35.0], comfort_min_c=20.0, comfort_max_c=24.0,
             cop=3.0, p_max_kw=5.0, initial_temp_c=22.0,
         )
+
+
+def test_a_cooling_thermostat_in_the_cold_follows_the_unheated_house():
+    # a winter day: the house falls below 20 C on its own and nothing electric heats it;
+    # the lower limit becomes the free-floating temperature, so the solve stays feasible
+    tg = TimeGrid(resolution_minutes=60, horizon_steps=24)
+    ambient = [5.0] * 12 + [30.0] * 12  # cold, then hot enough to need cooling
+    ac = SmartThermostat("ac", tg, thermal_resistance_r=2.5, thermal_capacitance_c=2.0, ambient_temp_c=ambient,
+                         comfort_min_c=20.0, comfort_max_c=24.0, cop=3.0, p_max_kw=5.0, initial_temp_c=21.0)
+    free = ac.free_floating()
+    assert free[11] < 20.0 and ac.T_min[11] == pytest.approx(free[11]) and ac.T_min[0] == pytest.approx(20.0)
+    model = pyo.ConcreteModel()
+    ac.register(model)
+    model.obj = pyo.Objective(expr=sum(ac.p_hvac[t] for t in tg.periods), sense=pyo.minimize)
+    get_solver(SolverConfig(name="highs")).solve(model)
+    temps = [pyo.value(ac.temp[t]) for t in tg.periods]
+    assert all(pyo.value(ac.p_hvac[t]) == pytest.approx(0, abs=1e-6) for t in range(12))  # no cooling in the cold
+    assert all(temp <= 24.0 + 1e-6 for temp in temps)  # and the upper limit still holds when it's hot

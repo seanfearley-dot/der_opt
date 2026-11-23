@@ -13,7 +13,13 @@ class SmartThermostat(Device):
     band is an inequality (not an equality), its dual is directly the $/degC marginal
     value of comfort at each period -- the intended demonstration case for the dual
     story. `mode="heating"` adds COP*p_hvac to the thermal balance; `mode="cooling"`
-    subtracts it."""
+    subtracts it.
+
+    A thermostat that only cools can't hold the lower comfort limit when the house is
+    colder than that on its own (winter, with heating that isn't electric or isn't
+    modeled), so there the lower limit is the free-floating temperature, the house with
+    the HVAC off; a heating thermostat's upper limit likewise. A run that holds the band
+    everywhere is unchanged: cooling only ever lowers the temperature below free-floating."""
 
     def __init__(
         self,
@@ -41,6 +47,21 @@ class SmartThermostat(Device):
         self.p_max_kw = p_max_kw
         self.initial_temp_c = initial_temp_c
         self.sign = 1.0 if mode == "heating" else -1.0
+        free = self.free_floating()
+        if mode == "cooling":
+            self.T_min = np.minimum(self.T_min, free)
+        else:
+            self.T_max = np.maximum(self.T_max, free)
+
+    def free_floating(self) -> np.ndarray:
+        """Indoor temperature at the start of each step with the HVAC off."""
+        dt = self.time_grid.dt_hours
+        out = np.empty(len(self.T_amb))
+        temp = self.initial_temp_c
+        for t, ambient in enumerate(self.T_amb):
+            out[t] = temp
+            temp = temp + (dt / self.C) * (ambient - temp) / self.R
+        return out
 
     @staticmethod
     def _broadcast(value, time_grid: TimeGrid) -> np.ndarray:
