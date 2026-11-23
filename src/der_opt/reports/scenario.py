@@ -65,8 +65,12 @@ def build(folder: Path, summary: dict, page: Page | None = None) -> Page:
         featured.append(Card(f"{name} ratio · {title}", number(ratio),
                              f"OpenBCA · net benefits {money(test.get('net_benefits'), 0)}",
                              ("good" if (ratio or 0) >= 1 else "bad") + " feature"))
-    cards = featured + cards  # the cost tests lead the panel
-    page.cards(top, cards)
+    from der_opt.reports import cases as compare
+
+    if featured:
+        page.cards(top, featured)  # the cost tests lead the panel
+    if not compare.selector(page, top, folder, summary):  # a folder written before cases: the old cards
+        page.cards(top, cards)
     devices = ", ".join(f"{d['name']} ({d['type']}{', ' + Path(d['template']).stem if d.get('template') else ''})"
                         for d in summary.get("devices") or []) or "no devices"
     page.text(top, f"Devices: {devices}. Status: {summary.get('status')}.")
@@ -86,6 +90,8 @@ def build(folder: Path, summary: dict, page: Page | None = None) -> Page:
         page.chart(section, traces, {"barmode": "group", "yaxis": {"title": "$ over the run (cost +, value −)"},
                                      "hovermode": "closest"}, height=320)
 
+    imported = _series(folder, "grid_import.csv")
+    compare.section(page, summary, opening_window(imported) if imported is not None else None)
     _dispatch(page, folder, summary)
     _energy(page, folder)
     _dr(page, folder, summary)

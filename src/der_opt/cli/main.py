@@ -105,6 +105,22 @@ def _print_bills(bills: dict, tariff, program) -> None:
                 typer.echo(f"  Note ({label}): {note}")
 
 
+def _print_cases(cases: dict, dt: float) -> None:
+    from der_opt.cases import printed_rows
+
+    if not cases:
+        return
+    table = printed_rows(cases, dt)
+    typer.echo("\nCases (each priced the same way; the report compares any two):")
+    width = max(len(c) for c in table["case"])
+    typer.echo(f"  {'case':<{width}}  {'bill':>11}  {'total cost':>11}  {'import kWh':>11}  {'export kWh':>11}  "
+               f"{'peak kW':>8}")
+    for _, row in table.iterrows():
+        bill = _money(row["bill"]) if row["bill"] is not None and row["bill"] == row["bill"] else "-"
+        typer.echo(f"  {row['case']:<{width}}  {bill:>11}  {_money(row['total cost']):>11}  "
+                   f"{row['import kWh']:>11,.0f}  {row['export kWh']:>11,.0f}  {row['peak kW']:>8,.2f}")
+
+
 def _money(value: float) -> str:
     return f"-${-value:,.2f}" if value < 0 else f"${value:,.2f}"
 
@@ -700,6 +716,16 @@ def _run_scenario(scenario: Path, output_dir: Path | None = None, duals: bool = 
         _print_dr(dr_study, config, bills.get("optimal"))
         report.extend(dr_study.checks)
 
+    from der_opt.cases import CasesError, build_cases, opening_pair, planned
+
+    try:
+        case_names = planned(config, counterfactual is not None)
+        cases = build_cases(config, premise, dispatch, counterfactual, dr_study, case_names)
+        compare = opening_pair(config, case_names)
+    except CasesError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    _print_cases(cases, premise.time_grid.dt_hours)
+
     screening, impact_runs, screening_info = None, None, None
     set_path = (config.cost_test.avoided_costs.set if config.cost_test is not None
                 else config.avoided_costs.set if config.avoided_costs is not None else None)
@@ -709,7 +735,9 @@ def _run_scenario(scenario: Path, output_dir: Path | None = None, duals: bool = 
         from der_opt.cost_test import resolve_runs
 
         acs = read_set(set_path)
-        without, with_, without_label = resolve_runs(config, premise, dispatch, counterfactual, dr_study)
+        no_measure = cases["no_measure"].result if "no_measure" in cases else None
+        without, with_, without_label = resolve_runs(config, premise, dispatch, counterfactual, dr_study,
+                                                     no_measure)
         impact_runs = (without, with_, without_label)
         capacity_kw = capacity_measures(dr_study.capacity) if dr_study is not None else {}
         screening = screening_values(acs, without.grid_import - without.grid_export,
@@ -726,7 +754,9 @@ def _run_scenario(scenario: Path, output_dir: Path | None = None, duals: bool = 
     runs_checked = {"optimal": dispatch} | ({"counterfactual": counterfactual} if counterfactual is not None else {})
     for label, result in runs_checked.items():
         report.extend(check_dispatch(premise, result, run=label))
-    report.extend(check_end_states(premise, runs_checked))
+    ended = runs_checked | {name: case.result for name, case in cases.items()
+                            if name in ("no_measure", "responding")}
+    report.extend(check_end_states(premise, ended))
     if billing is not None and validation is None:
         report.extend(check_tariff_dates(billing[0], premise.time_grid))
     _print_checks(report)
@@ -805,11 +835,19 @@ def _run_scenario(scenario: Path, output_dir: Path | None = None, duals: bool = 
                                  for label, r in (("without", without), ("with", with_))}
             write_impact_package(output_dir, config, without_label, without, with_, premise.time_grid,
                                  dr_study, package_bills, tz=config.dr.tz if config.dr else "America/Los_Angeles")
+        from der_opt.cases import cases_table, net_load_table
+
+        dt = premise.time_grid.dt_hours
+        cases_table(cases, dt).to_csv(output_dir / "cases.csv", index=False)
+        net_load_table(cases).round(4).to_csv(output_dir / "cases_net_load_kw.csv", index_label="timestamp")
+        results["cases"] = {name: {"bill": case.bill.summary["net_cost"] if case.bill is not None else None,
+                                   "total": case.costs["total"]} for name, case in cases.items()}
         _write_checks(output_dir, scenario, config, report, results, composed)
         from der_opt.results.summary import scenario_summary, write_summary
 
         write_summary(output_dir, scenario_summary(config, premise, dispatch, breakdown, counterfactual, cf_breakdown,
-                                                   bills, dr_study, screening, screening_info, ev_patterns, report))
+                                                   bills, dr_study, screening, screening_info, ev_patterns, report,
+                                                   cases, compare))
         import matplotlib.pyplot as plt
 
         plt.close("all")  # charts are saved; free them (matters when runs are scripted in a loop)

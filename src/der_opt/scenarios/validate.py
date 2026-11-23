@@ -212,6 +212,26 @@ def _check_dr(v: Validation) -> None:
     v.report.ran("dr calendar", found)
 
 
+def _check_cases(v: Validation) -> None:
+    """The comparison cases the run will make: what `cases` asks for must be makeable,
+    and each case's own billing must build."""
+    from der_opt.cases import CasesError, case_billing, opening_pair, planned
+    from der_opt.scenarios.loader import build_billing
+
+    found = []
+    try:
+        names = planned(v.config)
+        opening_pair(v.config, names)
+        run_billing = build_billing(v.config)
+        for name in names:
+            case_billing(v.config, name, run_billing)
+    except CasesError as exc:
+        found.append(Finding("error", "cases", str(exc)))
+    except (ValueError, OSError) as exc:
+        found.append(Finding("error", "cases", f"{type(exc).__name__}: {exc}"))
+    v.report.ran("cases", found)
+
+
 def _check_cost_test(v: Validation, cost_tests: bool, check_openbca: bool, openbca=None) -> None:
     from der_opt.settings import openbca_dir
 
@@ -428,5 +448,6 @@ def validate_scenario(path: str | Path, cost_tests: bool = False, build: bool = 
     _check_ev_patterns(v)
     _check_billing(v)
     _check_dr(v)
+    _check_cases(v)
     _check_cost_test(v, cost_tests, check_openbca=cost_tests or not before_run, openbca=openbca)
     return v

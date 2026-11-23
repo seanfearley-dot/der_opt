@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class TimeGridConfig(BaseModel):
@@ -189,6 +189,40 @@ class CostTestConfig(BaseModel):
         default_factory=lambda: ["PCT", "RIM", "TRC", "PAC", "SCT"])
 
 
+# --- comparison cases (docs/COMPARISON_CASES_SPEC.md v1.0) ------------------------------
+
+CaseName = Literal["no_devices", "no_measure", "rule_based", "optimized", "responding"]
+
+
+class CaseCompareConfig(BaseModel):
+    """The pair the report opens on: what moved going from `without` to `with`."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    without: CaseName
+    with_: CaseName = Field(alias="with")
+
+
+class CaseConfig(BaseModel):
+    """One case's own settings. `billing` prices it on another tariff: a billing block
+    file (with a top-level `billing:`) or a billing section written out here."""
+
+    billing: str | BillingConfig | None = None
+
+
+class CasesConfig(BaseModel):
+    """Which comparison cases a single-home run makes and compares. Every case the run
+    can make is on unless `include` names a subset."""
+
+    include: list[CaseName] | None = None
+    compare: CaseCompareConfig | None = None
+    no_devices: CaseConfig | None = None
+    no_measure: CaseConfig | None = None
+    rule_based: CaseConfig | None = None
+    optimized: CaseConfig | None = None
+    responding: CaseConfig | None = None
+
+
 class ScenarioConfig(BaseModel):
     """Top-level structure of a scenario YAML file. Per-device and per-value-stream
     `params` are intentionally left as loose dicts rather than one pydantic model per
@@ -218,6 +252,7 @@ class ScenarioConfig(BaseModel):
     weather_case: str | None = None  # the load forecast scenario's weather label, recorded only
     avoided_costs: AvoidedCostsConfig | None = None  # first-year screening values
     cost_test: CostTestConfig | None = None  # measure impact package and OpenBCA export
+    cases: CasesConfig | None = None  # comparison cases; omitted = every case the run can make
 
 
 # --- feeder (multi-premise) scenarios ------------------------------------------------

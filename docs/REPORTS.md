@@ -17,7 +17,7 @@ Common fields:
 
 | Field | What it holds |
 |---|---|
-| `summary_version` | `1.0`; changes when a shape changes in a way readers must know |
+| `summary_version` | `1.1` (1.1 added a single home's `cases` and `case_compare`); changes when a shape changes in a way readers must know |
 | `kind` | `scenario` (a single home), `feeder` or `study` |
 | `name`, `created` | the scenario's name; when it was written (UTC) |
 | `time_grid` | `start`, `end`, `resolution_minutes`, `steps` |
@@ -29,7 +29,11 @@ By kind:
   counterfactual by value stream, with totals, and `value_of_optimization`),
   `counterfactual_policies`, `bills` (each run's bill summary), `dr` (the DR summary and
   capacity by month), `screening` (the avoided cost set, the reference, and values by
-  category and part), and `cost_tests` (each test's benefits, costs, ratio and net
+  category and part), `cases` (each comparison case's label, description, devices,
+  policies, tariff, program, costs by value stream, bill summary, energy, DR incentive
+  and months; [docs/COMPARISON_CASES_SPEC.md](COMPARISON_CASES_SPEC.md)),
+  `case_compare` (the pair the page opens on and why, the cost tests' pair, and the
+  quick buttons), and `cost_tests` (each test's benefits, costs, ratio and net
   benefits, as OpenBCA reports them) once they've run.
 - **`feeder`:** `premises`, `elements`, `mix` (premises and devices by element),
   `background`, `runs` (total, customer bills, degradation and network costs per run),
@@ -71,8 +75,14 @@ folder's `summary.json` and CSVs.
 - **Light and dark** follow the system setting.
 
 What each page shows:
-- **Single home:** headline cards (optimal and counterfactual cost, value of
-  optimization, bills, DR incentive, TRC and RIM ratios, leading the panel); the value breakdown; the meter
+- **Single home:** the TRC and RIM ratios, leading the panel; then "Compare [case]
+  with [case]", with quick buttons for the usual questions (the solar, the measure
+  under rule-based control, optimization, DR participation, everything) and cards for
+  what moved: bill, total cost, import, export, peak import and the DR incentive. It
+  opens on the cost tests' own pair, so the cards describe the change the ratios do.
+  Then the value breakdown; a Compare section for the same pair (bills by month, value
+  streams, net load on the linked time axis, the average day by month and the change
+  by month and hour), all drawn in the page, so changing the pair needs no re-run; the meter
   and each device's power and stored energy (counterfactual dotted); where optimization
   moved load, by hour and day; energy by month; DR capacity by month and the events;
   screening values; cost tests (OpenBCA's results); bills; checks; every setting
@@ -82,8 +92,10 @@ What each page shows:
   its rating; congestion prices; each premise's bill change under coordination and its
   bills by run; the coordination runs against the ideal; checks; settings.
 - **Study:** cards (premises, device types, analyses); the feeder analysis's headline
-  figures, linked to its page; the portfolio (a bar per premise for a chosen measure,
-  and the table, each premise linked to its page); the population by element, the
+  figures, linked to its page; the portfolio (a bar per premise for a chosen measure;
+  a case pair for the whole study, with each premise's bill savings for it, largest
+  first, and the total; and the table, with each case's bill, each premise linked to
+  its page); the population by element, the
   premises table, and what `add_devices` chose; checks; settings. Each run's page links
   back to the study's.
 

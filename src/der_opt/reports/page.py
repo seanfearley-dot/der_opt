@@ -112,6 +112,8 @@ class Page:
         self.charts: list[dict] = []
         self.axes: dict[str, dict] = {}
         self.links: list[tuple[str, str]] = []  # (label, href) above the title
+        self.extra: dict = {}  # more data for `scripts`, at report-data's "extra"
+        self.scripts: list[str] = []  # run after the page's own script (charts are drawn first)
 
     # sections and parts
     def section(self, id: str, title: str) -> Section:
@@ -143,13 +145,17 @@ class Page:
         self.axes[name] = {"start": index[0].strftime("%Y-%m-%dT%H:%M:%S"), "minutes": minutes, "n": len(index)}
         return {"axis": name}
 
+    def next_chart_id(self) -> str:
+        """The id the next chart gets: a script can fill a chart drawn empty."""
+        return f"chart{len(self.charts)}"
+
     def chart(self, section: Section, traces: list[dict], layout: dict | None = None, height: int = 360,
               zoom: bool = False, window: tuple[str, str] | None = None, caption: str = "", unit: str = "",
               unit2: str = "") -> None:
         """A Plotly chart. `zoom` adds day/week/month/all buttons and a range slider;
         `window` is the range it opens on. A color "ink" follows the page's theme. With
         `unit` (and `unit2` for the right-hand axis), hovering shows each value with it."""
-        chart_id = f"chart{len(self.charts)}"
+        chart_id = self.next_chart_id()
         layout = dict(layout or {})
         if unit or unit2:
             for trace in traces:
@@ -216,12 +222,13 @@ class Page:
         body = "".join(f'<section id="{s.id}"><h2>{html.escape(s.title)}</h2>{"".join(s.parts)}</section>'
                        for s in self.sections if s.parts)
         crumbs = " / ".join(f'<a href="{html.escape(h)}">{html.escape(t)}</a>' for t, h in self.links)
-        data = json.dumps(jsonable({"axes": self.axes, "charts": self.charts}), separators=(",", ":"))
+        data = json.dumps(jsonable({"axes": self.axes, "charts": self.charts, "extra": self.extra}),
+                          separators=(",", ":"))
         data = data.replace("</", "<\\/")
         return TEMPLATE.format(
             title=html.escape(self.title), subtitle=html.escape(self.subtitle), kind=html.escape(self.kind),
             crumbs=f'<div class="crumbs">{crumbs}</div>' if crumbs else "", nav=nav, body=body, script=script,
-            data=data, css=CSS, js=JS)
+            data=data, css=CSS, js=JS + "".join(self.scripts))
 
 
 CSS = """
@@ -266,6 +273,13 @@ tbody tr:hover{background:var(--chip)}
 color:var(--ink);width:260px}
 details summary{cursor:pointer;color:var(--accent);margin:4px 0}
 .level-error{color:var(--bad);font-weight:600} .level-warning{color:#b45309}
+.picker{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:14px 0 8px}
+.picker select{padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);
+font:inherit}
+.quick{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+.quick button{padding:3px 10px;border:1px solid var(--line);border-radius:999px;background:var(--panel);
+color:var(--ink);font:inherit;font-size:12px;cursor:pointer}
+.quick button:hover{background:var(--chip)} .quick button.on{border-color:var(--accent);color:var(--accent)}
 @media (max-width:820px){.layout{grid-template-columns:1fr;padding:12px}nav{position:static;flex-direction:row;
 flex-wrap:wrap}header{padding:16px 12px}}
 """

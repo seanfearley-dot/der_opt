@@ -235,6 +235,10 @@ def test_cli_runs_both_analyses(tmp_path):
     table = pd.read_csv(out / "portfolio" / "portfolio.csv")
     assert list(table["premise_id"]) == ["home_a", "home_b", "total"]
     assert table.iloc[-1]["dr_incentive_earned"] == pytest.approx(table.iloc[:2]["dr_incentive_earned"].sum(), abs=0.01)
+    # each comparison case's bill, and a study-wide pair selector (cases spec section 6)
+    assert {"case_bill_no_devices", "case_bill_no_measure", "case_bill_optimized", "case_bill_responding"} <= set(table)
+    assert table.loc[0, "case_bill_optimized"] == pytest.approx(table.loc[0, "bill_optimal"], abs=0.01)
+    assert '"study_cases"' in (out / "report.html").read_text(encoding="utf-8")
     record = json.loads((out / "run_record.json").read_text(encoding="utf-8"))
     assert record["results"]["analyses"] == ["feeder", "portfolio"]
     assert any(i["path"].endswith("devices.csv") for i in record["inputs"])

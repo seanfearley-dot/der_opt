@@ -123,6 +123,11 @@ def summarize(folder: Path, premises: list[PortfolioPremise]) -> pd.DataFrame:
         row |= _counted(run)
         for key, value in (results.get("screening") or {}).items():
             row[f"screening {key}"] = value
+        summary_path = run / "summary.json"
+        cases = json.loads(summary_path.read_text(encoding="utf-8")).get("cases") if summary_path.exists() else None
+        for name, case in (cases or {}).items():  # each comparison case's bill and total cost
+            row[f"case_bill_{name}"] = round(case["bill"]["net_cost"], 2) if case.get("bill") else None
+            row[f"case_cost_{name}"] = round(case["costs"]["total"], 2)
         tests = run / "openbca" / "cost_tests.csv"
         if tests.exists():
             for _, t in pd.read_csv(tests).iterrows():

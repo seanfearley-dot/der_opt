@@ -20,7 +20,7 @@ in three places, marked ①–③:
    R3, depending on `cost_test.scope`.
 
 Specs: [scenario building blocks](SCENARIO_COMPOSITION_SPEC.md), [input data](INPUT_DATA_SPEC.md), [DR events and capacity](DR_CAPACITY_SPEC.md),
-[avoided costs](AVOIDED_COST_SPEC.md), [cost tests](COST_TEST_SPEC.md).
+[avoided costs](AVOIDED_COST_SPEC.md), [cost tests](COST_TEST_SPEC.md), [comparison cases](COMPARISON_CASES_SPEC.md).
 
 ## 1. `der-opt run`: the measure's year, DR study, screening values, impact package
 
@@ -69,6 +69,8 @@ sequenceDiagram
     DR-->>CLI: DR study
     end
 
+    Note over CLI: comparison cases: no devices (metered load),<br/>no measure (R3, or a solve),<br/>rule-based (R1), optimized (R2),<br/>responding; each priced and billed
+
     rect rgba(120, 120, 120, 0.08)
     CLI->>AC: read, validate set
     Note over CLI: ③ without = R1 (control)<br/>or R3 (device)<br/>with = responding run
@@ -76,7 +78,7 @@ sequenceDiagram
     end
 
     Note over CLI: checks on every run
-    CLI->>F: CSVs, charts, dr_*.csv
+    CLI->>F: CSVs, charts, dr_*.csv, cases*.csv
     CLI->>F: measure_impacts/
     CLI->>F: run_record.json
     CLI-->>U: summary and checks

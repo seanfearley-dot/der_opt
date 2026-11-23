@@ -120,6 +120,8 @@ Files written with `-o`:
 | `counterfactual_*.csv`, `counterfactual_dispatch.png` | the same for the counterfactual |
 | `comparison.png` | optimal vs. counterfactual grid flows and value breakdown |
 | `duals.csv`, `duals.png` | all dual families (long format), and a chart of the marginal value of energy at the meter (with `--duals`) |
+| `cases.csv` | the comparison cases ([docs/COMPARISON_CASES_SPEC.md](docs/COMPARISON_CASES_SPEC.md)): per case and billing cycle, the bill, import, export and peak; and a whole-run row per case with its cost by value stream |
+| `cases_net_load_kw.csv` | net load at the meter (import − export), one column per case, every step |
 | `bill_cycles.csv`, `counterfactual_bill_cycles.csv` | per billing cycle: kWh, charges by bucket, credits earned and applied, amount due, credit balances (with `billing`) |
 | `checks.csv` | every check finding: level, check, message, run, premise |
 | `summary.json` | the numbers the run prints, as data, for reports and scripts ([docs/REPORTS.md](docs/REPORTS.md)) |
@@ -462,6 +464,36 @@ available, batteries/EVs/thermostats sit idle, curtailable load is fully served.
 Power limits default to the device's own. The counterfactual follows its rule only —
 it doesn't enforce `departure_period`, `soc_final_min_frac`, or `charge_sources`
 (those are optimizer constraints).
+
+### Comparison cases
+
+Every single-home run also prices the same home as a fixed set of **cases**, so the
+report can compare any two ([docs/COMPARISON_CASES_SPEC.md](docs/COMPARISON_CASES_SPEC.md)):
+
+| Case | The home | Made from |
+|---|---|---|
+| `no_devices` | its load alone | the meter reading the load (nothing to decide) |
+| `no_measure` | without the measure's devices, optimized | DR's R3, or its own solve |
+| `rule_based` | every device, under the `counterfactual` policies | the counterfactual |
+| `optimized` | every device, optimized, no DR events | the main solve |
+| `responding` | every device, optimized, responding to DR events | the DR study |
+
+The measure's devices are `cost_test.measure_devices`, then `dr.measure_devices`, then
+every device. A case appears only when the run can make it (`rule_based` needs a
+`counterfactual`, `responding` a `dr` section, and `no_measure` a measure that isn't
+every device). Each is priced on the run's value streams (degradation counts; the
+smoothing cost never does) and billed on its tariff; the DR incentive is
+`responding`'s own line. The run prints a table of them, and writes `cases.csv` and
+`cases_net_load_kw.csv`. An optional section chooses:
+
+```yaml
+cases:
+  include: [no_devices, rule_based, optimized]   # default: every case the run can make
+  compare: {without: rule_based, with: optimized} # the report's opening pair; default: the cost tests' pair
+  no_devices: {billing: ../library/billing/some_rate.yaml}  # a billing block file, or a billing section inline
+```
+
+A case billed on another tariff carries the tariff's name in its label.
 
 ## Billing
 

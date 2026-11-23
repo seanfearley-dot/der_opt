@@ -39,11 +39,13 @@ def config_without_devices(config, devices: list[str] | None):
         sources = set(device.params.get("charge_sources", [])) & removed
         if sources:
             raise ValueError(f"{device.name} charges from {sorted(sources)}, which the 'without' case removes")
-    return config.model_copy(update={"devices": kept, "counterfactual": None, "dr": None, "cost_test": None})
+    return config.model_copy(update={"devices": kept, "counterfactual": None, "dr": None, "cost_test": None,
+                                     "cases": None})
 
 
-def resolve_runs(config, premise, dispatch, counterfactual, dr_study):
-    """(without, with, description) for the measure's scope (cost-test spec section 1)."""
+def resolve_runs(config, premise, dispatch, counterfactual, dr_study, no_measure: DispatchResult | None = None):
+    """(without, with, description) for the measure's scope (cost-test spec section 1).
+    `no_measure` is the comparison cases' run without the measure devices, if made."""
     from der_opt.scenarios.loader import build_premise
     from der_opt.simulation import CounterfactualSimulator
 
@@ -60,6 +62,8 @@ def resolve_runs(config, premise, dispatch, counterfactual, dr_study):
         devices = config.dr.measure_devices
     if dr_study is not None and devices == (config.dr.measure_devices if config.dr else None):
         return dr_study.references["R3"], with_, "R3 (no measure devices)"
+    if no_measure is not None:  # the cases use the same measure devices
+        return no_measure, with_, "R3 (no measure devices)"
     return build_premise(config_without_devices(config, devices)).solve()[0], with_, "R3 (no measure devices)"
 
 

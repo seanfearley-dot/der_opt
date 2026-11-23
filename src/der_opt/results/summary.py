@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-SUMMARY_VERSION = "1.0"
+SUMMARY_VERSION = "1.1"  # 1.1 adds cases and case_compare (docs/COMPARISON_CASES_SPEC.md)
 FILE = "summary.json"
 
 
@@ -87,7 +87,8 @@ def update_summary(folder: str | Path, **sections) -> None:
 
 def scenario_summary(config, premise, dispatch, breakdown: dict, counterfactual=None, cf_breakdown: dict | None = None,
                      bills: dict | None = None, dr_study=None, screening=None, screening_info: dict | None = None,
-                     ev_patterns: list | None = None, report=None) -> dict:
+                     ev_patterns: list | None = None, report=None, cases: dict | None = None,
+                     compare: tuple | None = None) -> dict:
     out = _base("scenario", premise.name, premise.time_grid, report)
     out["status"] = str(dispatch.solver_status)
     out["devices"] = [{"name": d.name, "type": d.type, "template": d.template} for d in config.devices]
@@ -110,6 +111,15 @@ def scenario_summary(config, premise, dispatch, breakdown: dict, counterfactual=
         for (category, part), value in screening.groupby(["category", "part"])["value"].sum().items():
             values.setdefault(category, {})[part] = round(float(value), 2)
         out["screening"] = {**(screening_info or {}), "values": values}
+    if cases:
+        from der_opt.cases import buttons, case_summary, cost_test_pair
+
+        dt = premise.time_grid.dt_hours
+        names = list(cases)
+        out["cases"] = {name: case_summary(case, dt) for name, case in cases.items()}
+        tested = cost_test_pair(config, names)
+        out["case_compare"] = {"without": compare[0], "with": compare[1], "why": compare[2],
+                               "cost_tests": list(tested) if tested else None, "buttons": buttons(config, names)}
     return out
 
 

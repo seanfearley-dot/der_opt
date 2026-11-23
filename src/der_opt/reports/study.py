@@ -88,10 +88,13 @@ def _portfolio(page: Page, folder: Path, portfolio: dict) -> None:
                                                       "yanchor": "top", "direction": "down"}],
                                      "margin": {"t": 60}}, height=340)
         page.text(section, "One bar per premise, largest first; pick the measure from the menu.")
-    first = [c for c in PORTFOLIO_FIRST if c in table]
+    from der_opt.reports import cases as compare
+
+    compare.study_selector(page, section, folder, table, premises)
+    first = [c for c in PORTFOLIO_FIRST if c in table] + [c for c in table.columns if c.startswith("case_bill_")]
     links = {"premise_id": {p: f"{item['folder']}/report.html" for p, item in premises.items() if item.get("folder")}}
     money_columns = [c for c in table.columns if c.endswith(("_cost", "_optimization", "_earned", "_net_benefits"))
-                     or c.startswith(("bill_", "screening"))]
+                     or c.startswith(("bill_", "screening", "case_bill_", "case_cost_"))]
     page.table(section, table[first], links=links, filter=True, formats={c: money for c in money_columns if c in first})
     page.table(section, table, links=links, filter=True, collapsed=f"Every column ({len(table.columns)})",
                formats={c: money for c in money_columns})
