@@ -67,3 +67,18 @@ def test_rules_and_comparisons_from_selects():
     home = to_form(preset("dr-battery", OPTIONS))
     home["value"]["cost_test"]["without"] = {"battery": "backup_only", "ev": ""}
     assert from_form(home)[0].value.cost_test["without"] == {"battery": "backup_only"}
+
+
+def test_a_window_from_a_date_a_time_and_days():
+    from der_opt.ui.creator import from_form, to_form
+
+    form = to_form(preset("home-bill", OPTIONS))
+    form["when"] = {"mode": "window", "date": "2026-07-13", "time": "12:00", "days": 3, "resolution_minutes": "60"}
+    answers, problems = from_form(form)
+    assert not problems
+    assert (answers.when.start, answers.when.steps, answers.when.year) == ("2026-07-13T12:00:00", 72, None)
+    form["when"] = {"mode": "window", "date": None, "time": "00:00", "days": 3}
+    assert any("start date" in m for _, m in from_form(form)[1])
+    form["when"] = {"mode": "year", "year": 2026, "date": "2026-07-13", "days": 3}
+    answers, _ = from_form(form)
+    assert (answers.when.year, answers.when.start) == (2026, None)

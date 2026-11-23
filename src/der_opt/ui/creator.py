@@ -98,6 +98,13 @@ def to_form(answers: Answers) -> dict:
     """The answers as the page holds them: YAML boxes as text, sizes and the rest of a
     device's settings apart."""
     data = json.loads(answers.model_dump_json())
+    when = data["when"]
+    if when.get("start"):  # a window, as the page asks for it
+        steps = when.get("steps") or 0
+        when.update(mode="window", date=when["start"][:10], time=when["start"][11:16] or "00:00",
+                    days=round(steps * when["resolution_minutes"] / 1440, 4) or None)
+    else:
+        when["mode"] = "year"
     for device in data.get("devices", []):
         sizes = SIZE_KEYS.get(device["type"], ())
         more = {k: v for k, v in device["params"].items() if k not in sizes}
@@ -139,6 +146,16 @@ def from_form(data: dict) -> tuple[Answers, list[tuple[str, str]]]:
 
     data = json.loads(json.dumps(data))
     walk(data)
+    when = data.setdefault("when", {})
+    mode, date, time, days = (when.pop(k, None) for k in ("mode", "date", "time", "days"))
+    if mode == "window" and not (date and days):
+        problems.append(("when", "a window needs its start date and its length in days"))
+    if mode == "window":  # a start and a length, as the time grid needs them
+        resolution = int(when.get("resolution_minutes") or 60)
+        when.update(year=None, resolution_minutes=resolution, start=f"{date}T{time or '00:00'}:00" if date else None,
+                    steps=round(float(days) * 1440 / resolution) if days else None)
+    elif mode == "year":
+        when.update(start=None, steps=None, resolution_minutes=60)
     for device in data.get("devices", []):
         more = device.pop("more", None) or {}
         device["params"] = {**more, **{k: v for k, v in (device.get("params") or {}).items() if v is not None}}
@@ -171,7 +188,7 @@ def from_form(data: dict) -> tuple[Answers, list[tuple[str, str]]]:
     return Answers.model_validate(data), problems
 
 
-YAML_STEPS = {"devices": 5, "device_settings": 5, "add_devices": 5, "dr": 10, "coordination": 11, "value": 12,
+YAML_STEPS = {"when": 2, "devices": 5, "device_settings": 5, "add_devices": 5, "dr": 10, "coordination": 11, "value": 12,
               "network": 4, "participation": 9}
 
 
@@ -183,10 +200,19 @@ def _f(label: str, key: str, kind: str = "text", hint: str = "", options=None, a
     if kind == "select":
         control = (f'<select data-k="{key}" {attrs}>'
                    + "".join(f'<option value="{esc(v)}">{esc(t)}</option>' for v, t in options) + "</select>")
+    elif kind == "date":
+        control = f'<input type="date" data-k="{key}" {attrs}>'
     elif kind == "bool":
         control = f'<input type="checkbox" data-k="{key}" data-t="bool" {attrs}>'
     elif kind == "yaml":
         control = f'<textarea data-k="{key}_yaml" rows="4" spellcheck="false" {attrs}></textarea>'
+    elif 'list="dl-' in attrs:  # a file: a dropdown of the project's, or another path typed in
+        files = attrs.split('list="dl-')[1].split('"')[0]
+        add = ' data-add="1"' if kind == "list" else ""
+        typed = ' data-t="list"' if kind == "list" else ""
+        control = (f'<span class="pickpath"><select data-pick="{key}" data-files="{files}"{add}></select>'
+                   f'<input data-k="{key}"{typed} autocomplete="off" placeholder="a path in the project" hidden>'
+                   "</span>")
     else:
         t = {"num": ' data-t="num" inputmode="decimal"', "list": ' data-t="list"', "pairs": ' data-t="pairs"'}.get(
             kind, "")
@@ -248,10 +274,16 @@ def steps_html(device_blocks: list[str], files: dict[str, list[str]]) -> str:
         ("home", "a single home"), ("portfolio", "a study: several homes, each on its own (portfolio)"),
         ("feeder", "a study: homes on a network (feeder)"), ("both", "a study: feeder and portfolio")],
         attrs="data-rerender") + _f("Name", "name", hint="letters, digits and _")))
-    s.append(_step(2, _f("Year", "when.year", "num", "a whole calendar year, hourly (cost tests need one)")
-             + '<p class="note">Or a window (a start wins over the year):</p>'
-             + _f("Start", "when.start", hint="2026-07-13T12:00:00") + _f("Steps", "when.steps", "num")
-             + _f("Minutes a step", "when.resolution_minutes", "num")))
+    hours = [(f"{h:02d}:00", f"{h:02d}:00") for h in range(24)]
+    s.append(_step(2, _f("Period", "when.mode", "select", options=[
+        ("year", "a calendar year, hourly"), ("window", "a window: a start and a length")])
+        + '<div data-when="when.mode=year">'
+        + _f("Year", "when.year", "num", "cost tests need a whole calendar year") + "</div>"
+        + '<div data-when="when.mode=window">' + _f("Starts", "when.date", "date")
+        + _f("At", "when.time", "select", options=hours, attrs='data-default="00:00"')
+        + _f("Length, days", "when.days", "num", "e.g. 7, or 3 for a peak's three days")
+        + _f("Step", "when.resolution_minutes", "select", attrs='data-default="60"',
+             options=[("60", "1 hour"), ("30", "30 minutes"), ("15", "15 minutes")]) + "</div>"))
     s.append(_step(3, '<div data-kinds="home">' + _f("Time series file", "data.timeseries", hint=files_hint,
                                                        attrs='list="dl-csv"')
              + _f("Premise", "data.premise", hint="its premise_id in that file") + "</div>"
@@ -433,7 +465,9 @@ def page(project, token: str, library: Path, files: dict[str, list[str]]) -> str
         return json.dumps(value).replace("</", "<\\/")
 
     start_json, defaults_json = embedded(start), embedded(DEFAULTS)
-    extra_json = embedded({"blocks": block_params, "modes": MODES, "rules": RULES})
+    tariff_dirs = sorted({str(Path(t).parent) for t in files.get("tariffs", [])})
+    extra_json = embedded({"blocks": block_params, "modes": MODES, "rules": RULES,
+                           "files": {**files, "tariff_dirs": tariff_dirs}})
     body = f"""<div class="crumbs"><a href="/">Scenarios and runs</a> / new</div><h1>New scenario or study</h1>
 <p class="note">Start from a preset, or step by step. The file on the right is what will be written; each step lists
 its checks as you go. Nothing is written until Review.</p><div class="presets">Presets: {presets}</div>{lists}
@@ -489,6 +523,7 @@ def write_answers(project, form: dict, library: Path | None) -> Path:
 
 CSS = """
 .presets{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:8px 0 14px}
+.pickpath{display:flex;flex-direction:column;gap:4px;min-width:0}.pickpath select,.pickpath input{width:100%}
 .creator{display:grid;grid-template-columns:200px minmax(0,1fr) minmax(0,440px);gap:18px;align-items:start}
 nav.steps{position:sticky;top:12px;display:flex;flex-direction:column;gap:2px}
 nav.steps a{color:var(--muted);text-decoration:none;padding:5px 8px;border-radius:6px;display:flex;gap:6px;align-items:center}
@@ -575,12 +610,24 @@ if(!acts){h+="<span></span>";return;}const cur=((R[m]||{})[k]||{}).action||"";
 h+=`<select data-rule="${m}.${k}"><option value="">default</option>`+acts.map(a=>`<option ${a===cur?"selected":""}>${a}</option>`)
 .join("")+"</select>";});});box.innerHTML=h+"</div>";box.querySelectorAll("select").forEach(sel=>sel.onchange=()=>{
 const[m,k]=sel.dataset.rule.split(".");R[m]=R[m]||{};if(sel.value)R[m][k]={action:sel.value};else delete R[m][k];changed();});}
+const opt=(v,label,on)=>`<option value="${v.replace(/"/g,"&quot;")}" ${on?"selected":""}>`+
+label.replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]))+"</option>";
+function picks(){form.querySelectorAll("select[data-pick]").forEach(sel=>{const key=sel.dataset.pick;
+let list=sel.dataset.files;if(list==="tariffs"&&S.kind!=="home")list="tariff_dirs";
+const files=(X.files||{})[list]||[],input=sel.parentElement.querySelector("input"),cur=get(key);
+if(sel.dataset.add){sel.innerHTML=opt("","add a file…",true)+files.map(f=>opt(f,f,false)).join("");input.hidden=false;
+sel.onchange=()=>{if(sel.value){const l=get(key)||[];if(!l.includes(sel.value))l.push(sel.value);set(key,l);
+show(input,l);changed();}sel.value="";};return;}
+const known=cur!=null&&files.includes(cur),other=cur!=null&&cur!==""&&!known;
+sel.innerHTML=opt("","choose…",cur==null)+files.map(f=>opt(f,f,f===cur)).join("")+opt("__other","another path…",other);
+input.hidden=!other;sel.onchange=()=>{if(sel.value==="__other"){input.hidden=false;input.value="";input.focus();}
+else{input.hidden=true;set(key,sel.value||null);show(input,get(key));changed();}};});}
 function render(){rows();behavior();without();rulesBox();
 const ev=form.querySelector("select[data-events]");if(ev&&S.dr&&S.dr.events){const k=Object.keys(S.dr.events)[0]||"random";
 ev.value=k.replace("_yaml","");}form.querySelectorAll("[data-k]").forEach(el=>show(el,el.dataset.k==="_target"?
 S._target:get(el.dataset.k)));form.querySelectorAll("[data-enable]").forEach(cb=>{cb.checked=get(cb.dataset.enable)!=null;});
 form.querySelectorAll("[data-needs]").forEach(d=>d.hidden=get(d.dataset.needs)==null);
-form.querySelectorAll("[data-when]").forEach(d=>d.hidden=!holds(d.dataset.when));
+form.querySelectorAll("[data-when]").forEach(d=>d.hidden=!holds(d.dataset.when));picks();
 const allowed=KINDS[S.kind]||KINDS.home;document.querySelectorAll("[data-goto]").forEach(a=>{
 a.hidden=!allowed.includes(+a.dataset.goto);a.classList.toggle("on",+a.dataset.goto===step);});
 form.querySelectorAll("[data-kinds]").forEach(d=>d.hidden=!d.dataset.kinds.split(" ").includes(S.kind)||
