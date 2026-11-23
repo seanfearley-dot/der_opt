@@ -131,6 +131,7 @@ def test_a_run_makes_prices_and_writes_every_case(tmp_path):
                                                                  "checks", "settings")]
     assert order == sorted(order)  # the page's order
     assert '"dr_events":1' in page and "During DR events" in page  # the summary card over the event hours
+    assert 'class="section-meta case-tariffs"' in page and "NBT export credits" in page  # the bills' tariffs
     # the DR section: an event's day with the settlement baseline, and capacity against two references
     assert dr["S_replicate_0"].notna().sum() == 2 and dr["S_replicate_0"].loc["2026-07-16 17:00":"2026-07-16 18:00"].notna().all()
     assert "An event&#x27;s day" in page and "Thu Jul 16, 17:00" in page

@@ -284,6 +284,7 @@ padding:10px 16px;margin-bottom:18px;box-shadow:0 4px 14px rgba(0,0,0,.12)}
 .ab{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:5px;
 font-weight:700;font-size:12px;color:#fff} .ab.a{background:#9ca3af;color:#111} .ab.b{background:#2563eb}
 .fixed{border-left:3px solid var(--line);padding-left:8px}
+.section-meta{text-align:right;color:var(--muted);font-size:13px;margin:-6px 0 8px}
 .quick{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
 .quick button{padding:3px 10px;border:1px solid var(--line);border-radius:999px;background:var(--panel);
 color:var(--ink);font:inherit;font-size:12px;cursor:pointer}

@@ -131,6 +131,7 @@ def bills(page: Page) -> None:
     if not any(c.get("bill") for c in page.extra["cases"]["cases"].values()):
         return  # no billing section
     section = page.section("bills", "Bills")
+    page.html(section, '<div class="section-meta case-tariffs"></div>')  # import and export tariff, by the pair
     page.text(section, "Amount due each billing cycle, A and B, and the difference.")
     _chart(page, section, "bills", {"barmode": "group", "xaxis": {"type": "category"}, "yaxis": {"title": "$"},
                                     "hovermode": "x unified"}, 320)
@@ -234,6 +235,10 @@ react(ids.bills,[{type:"bar",name:"A: "+A.label,x:months,y:ya,marker:{color:CA},
 {type:"bar",name:"B: "+B.label,x:months,y:yb,marker:{color:CB},hovertemplate:"$%{y:,.2f}"},
 {type:"scatter",mode:"lines+markers",name:"difference",x:months,y:ya.map((v,i)=>diff(v,yb[i])),line:{color:CD},
 hovertemplate:"$%{y:,.2f}"}],base(ids.bills));}
+const meta=document.querySelector(".case-tariffs");
+if(meta){const exp={nbt:"NBT export credits",nem2:"NEM 2.0 net metering"};
+const line=C=>C.tariff?`Import: ${esc(C.tariff)} · Export: ${C.program?exp[C.program]||esc(C.program):"none (exports earn nothing)"}`:"";
+meta.innerHTML=(A.tariff===B.tariff&&A.program===B.program)?line(A):`A ${line(A)}<br>B ${line(B)}`;}
 const box=document.querySelector(".case-bill-table");if(!box)return;
 if(!A.bill||!B.bill){box.innerHTML='<p class="note">No bill: the scenario has no billing section.</p>';return;}
 const flat=b=>{const o={};for(const [k,v] of Object.entries(b)){if(v&&typeof v==="object"){for(const [k2,v2] of
@@ -244,8 +249,7 @@ const cell=(k,v,s)=>bad(v)?"":(k.includes("kwh")?(s?snum(v,1," kWh"):num(v,1," k
 box.innerHTML='<table><thead><tr><th></th><th class="num">A: '+esc(A.label)+'</th><th class="num">B: '+esc(B.label)+
 '</th><th class="num">Difference</th></tr></thead><tbody>'+keys.map(k=>`<tr><td>${esc(k)}</td><td class="num">${cell(k,fa[k])}</td>`+
 `<td class="num">${cell(k,fb[k])}</td><td class="num">${cell(k,diff(fa[k],fb[k]),true)}</td></tr>`).join("")+
-"</tbody></table>"+(A.tariff?`<p class="note">A on ${esc(A.tariff)}${A.program?", "+esc(A.program):""}; B on `+
-`${esc(B.tariff)}${B.program?", "+esc(B.program):""}.</p>`:"");}
+"</tbody></table>";}
 function show(){const [a,b]=pair,A=cases[a],B=cases[b];
 document.querySelectorAll(".case-pick").forEach(s=>{s.value=pair[+s.dataset.side];});
 document.querySelectorAll(".quick button").forEach(q=>q.classList.toggle("on",q.dataset.without===a&&q.dataset.with===b));
