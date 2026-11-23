@@ -31,14 +31,14 @@ on the right and update as you go. **Step 1 decides which steps appear:**
 
 | Kind | Steps |
 |---|---|
-| A single home | 1, 2, 3, 5, 6, 7, 8, 10, 12, 13 |
-| A portfolio study (each home on its own) | 1, 2, 3, 5, 6, 7, 8, 10, 12, 13 |
-| A feeder study (homes on a network, coordinated) | every step |
-| Both | every step |
+| Single home | 1, 2, 3, 5, 6, 7, 8, 10, 12, 13 |
+| Portfolio (many homes, each on its own) | 1, 2, 3, 5, 6, 7, 8, 10, 12, 13 |
+| Feeder (homes on a network, optimized together) | every step |
+| Feeder and portfolio (the same homes, both ways) | every step |
 
 | # | Step | A home, or a portfolio | A feeder |
 |---|---|---|---|
-| 1 | **What** | a single home; or several homes, run each on its own (portfolio) | homes on a network (feeder), or both |
+| 1 | **What** | Single home, or Portfolio | Feeder, or Feeder and portfolio |
 | 2 | **When** | the year, or a window (start, length, resolution); a cost test needs a whole calendar year, and the flow says so | the same; a planning window around a peak is a preset (three days, noon to noon) |
 | 3 | **Data** | a home: a time series file (load, and optionally solar, EV and outdoor temperature) and the premise in it; a study: the premises, devices and time series files (input spec 2.0) | the same, plus the network file if there is one |
 | 4 | **Network** | — | the elements: each one's name, normal rating (kW), parent (the tree is drawn as you go), and either a hard limit or an overload cost ($/kWh over normal); optionally an emergency rating, with a violation cost above it (or a hard wall) and a daily kWh budget above normal (coordination spec v1.1, section 1b). The fields say what each choice does to congestion prices: a hard limit gives exact prices but an hour that can't fit stops the run; a violation cost keeps it solvable and flags those hours. From `network.csv` or entered here. Which element each premise is on (the premises file's `element_id`, or assigned here). Load that isn't a customer, per element: a time series column, a loadcast trace (`poe10`, `poe50`, `poe90`, `max`, or a quantile), or none |

@@ -294,10 +294,17 @@ def steps_html(device_blocks: list[str], files: dict[str, list[str]]) -> str:
                     + _f("Above kW", ".threshold_kw", "num") + "</div>")
     files_hint = "in the project; " + (f"e.g. {files['csv'][0]}" if files.get("csv") else "a CSV")
     s = []
-    s.append(_step(1, _f("What to build", "kind", "select", options=[
-        ("home", "a single home"), ("portfolio", "a study: several homes, each on its own (portfolio)"),
-        ("feeder", "a study: homes on a network (feeder)"), ("both", "a study: feeder and portfolio")],
-        attrs="data-rerender") + _f("Name", "name", hint="letters, digits and _")))
+    kinds = (("home", "Single home", "One home and its devices: dispatch, bill, DR and cost tests."),
+             ("portfolio", "Portfolio", "Many homes, each optimized on its own, with no network between them: "
+                                        "each home's DR and cost tests, and their totals."),
+             ("feeder", "Feeder", "Many homes on a network, optimized together within its ratings: loading, "
+                                  "congestion prices and coordination mechanisms. No cost tests."),
+             ("both", "Feeder and portfolio", "The same homes run both ways in one file: the feeder's network "
+                                              "results and each home's DR and cost tests."))
+    s.append(_step(1, _f("What to build", "kind", "select", options=[(k, name) for k, name, _ in kinds],
+                         attrs="data-rerender")
+                   + "".join(f'<p class="note" data-kinds="{k}">{esc(text)}</p>' for k, _, text in kinds)
+                   + _f("Name", "name", hint="letters, digits and _")))
     hours = [(f"{h:02d}:00", f"{h:02d}:00") for h in range(24)]
     s.append(_step(2, _f("Period", "when.mode", "select", options=[
         ("year", "a calendar year, hourly"), ("window", "a window: a start and a length")])
