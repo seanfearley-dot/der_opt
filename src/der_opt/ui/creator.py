@@ -17,9 +17,9 @@ import yaml
 from der_opt.creator.answers import STEPS, Answers, steps_for
 
 # the answers' YAML boxes: (path, where `*` is any list index)
-YAML_FIELDS = ("device_settings", "dr.events", "dr.program.season", "participation.rules", "coordination.runs",
+YAML_FIELDS = ("device_settings", "dr.events.schedule", "dr.events.price", "coordination.runs",
                "coordination.price_signal.schedule", "network.background.*.load", "add_devices.*.where",
-               "devices.*.more", "value.cost_test.without")
+               "devices.*.more")
 SIZE_KEYS = {"battery": ("capacity_kwh", "p_max_charge_kw", "p_max_discharge_kw"),
              "ev_v2x": ("capacity_kwh", "p_max_charge_kw", "p_max_discharge_kw"),
              "thermostat": ("p_max_kw", "comfort_min_c", "comfort_max_c"),
@@ -37,16 +37,20 @@ DEFAULTS = {
                        "window": "16:00-21:00", "min_hours": 1, "max_hours": 4, "max_events_per_month": 4,
                        "max_consecutive_days": 2, "response": "incentive", "delivery": "uniform",
                        "incentive_per_kwh": None, "settlement_basis": "net", "capacity_reference": "all"},
-           "events_yaml": "random: {events_per_month: {6: 2, 7: 3, 8: 3, 9: 2}, seed: 1, hours: 4, "
-                          "min_days_between: 1}\n"},
+           "events": {"random": {"events_per_month": {6: 2, 7: 3, 8: 3, 9: 2}, "seed": 1, "hours": 4,
+                                 "min_days_between": 1}}},
+    "events": {  # each event constructor's starting point (dr.events holds just one)
+        "random": {"random": {"events_per_month": {6: 2, 7: 3, 8: 3, 9: 2}, "seed": 1, "hours": 4,
+                              "min_days_between": 1}},
+        "schedule": {"schedule_yaml": '- {start: "17:00", hours: 4, dates: ["2026-07-15"]}\n'},
+        "price": {"price_yaml": "series: {type: retail_tariff, path: }\nevents_per_year: 10\n"},
+        "file": {"file": None}},
     "cost_test": {"start_year": None, "measure_life_years": 10, "net_to_gross": 1.0, "bill_escalation": 0.03,
                   "cost_escalation": 0.025, "avoided_costs": {"set": None},
                   "capacity_value": {"reference": "R2", "basis": "import", "measure": "counted"},
                   "participant_costs": {"upfront": None, "annual_om": 0},
                   "program_costs": {"admin_upfront": 0, "admin_annual": 0, "upfront_incentive": 0},
-                  "discount_rates": {"utility": None, "participant": None, "societal": None},
-                  "without_yaml": "battery: rule_based   # removed | rule_based | backup_only\n"
-                                  "ev: tou_timer        # tou_timer | events_only | removed | rule_based\n"},
+                  "discount_rates": {"utility": None, "participant": None, "societal": None}, "without": {}},
     "price_signal": {"source": "coordinated", "paid": True},
     "envelopes": {"import": {"method": "pro_rata_need"}, "headroom": {"margin_pct": 0}, "granularity": "step",
                   "min_kw": 1.0, "violation_penalty_per_kwh": 5.0},
@@ -54,6 +58,12 @@ DEFAULTS = {
                   "program": {"program_id": "feeder_peak", "season": [6, 7, 8, 9], "window": "16:00-21:00",
                               "min_hours": 1, "max_hours": 4, "response": "incentive", "incentive_per_kwh": None}},
 }
+MODES = {"battery": ["removed", "rule_based", "backup_only"], "ev_v2x": ["tou_timer", "events_only", "removed", "rule_based"],
+         "thermostat": ["rule_based"], "curtailable_load": ["rule_based", "removed"]}
+RULES = {"dr_event": {"ev": ["pause", "discharge", "none"], "battery": ["discharge", "none"],
+                      "thermostat": ["setback", "none"]},
+         "price_signal": {"ev": ["pause", "none"], "battery": ["discharge", "none"], "thermostat": ["setback", "none"]},
+         "envelope": {"ev": ["limit", "none"], "battery": ["limit", "none"], "solar": ["curtail", "none"]}}
 POLICIES = {"battery": ["self_consumption", "no_flexibility"], "ev_v2x": ["tou_timer", "rule_based_ev", "no_flexibility"],
             "thermostat": ["setpoint", "no_flexibility"], "curtailable_load": ["no_flexibility"]}
 
@@ -134,6 +144,27 @@ def from_form(data: dict) -> tuple[Answers, list[tuple[str, str]]]:
         device["params"] = {**more, **{k: v for k, v in (device.get("params") or {}).items() if v is not None}}
     for item in data.get("add_devices", []):
         item["where"] = item.get("where") or {}
+    participation = data.get("participation") or {}
+    rules = {m: {k: dict(r) for k, r in (kinds or {}).items() if isinstance(r, dict) and r.get("action")}
+             for m, kinds in (participation.get("rules") or {}).items()}
+    for mechanism, kinds in (participation.pop("more_rules", None) or {}).items():  # settings beside the actions
+        for kind, settings in (kinds or {}).items():
+            rules.setdefault(mechanism, {}).setdefault(kind, {}).update(settings or {})
+    if participation:
+        participation["rules"] = {m: k for m, k in rules.items() if k}
+    cost_test = (data.get("value") or {}).get("cost_test")
+    if cost_test:
+        cost_test["without"] = {k: v for k, v in (cost_test.get("without") or {}).items() if v}
+    dr = data.get("dr")
+    for program in (dr, ((data.get("coordination") or {}).get("dr_events"))):  # months as numbers (JSON made them text)
+        random = ((program or {}).get("events") or {}).get("random")
+        if isinstance(random, dict) and isinstance(random.get("events_per_month"), dict):
+            random["events_per_month"] = {int(k) if str(k).isdigit() else k: v
+                                          for k, v in random["events_per_month"].items()}
+    if dr and isinstance(dr.get("events"), dict):  # one constructor: the one picked
+        for kind in list(dr["events"]):
+            if dr["events"][kind] in (None, {}):
+                dr["events"].pop(kind)
     for key in ("dr", "value"):
         if data.get(key) is None:
             data.pop(key, None)
@@ -157,7 +188,8 @@ def _f(label: str, key: str, kind: str = "text", hint: str = "", options=None, a
     elif kind == "yaml":
         control = f'<textarea data-k="{key}_yaml" rows="4" spellcheck="false" {attrs}></textarea>'
     else:
-        t = {"num": ' data-t="num" inputmode="decimal"', "list": ' data-t="list"'}.get(kind, "")
+        t = {"num": ' data-t="num" inputmode="decimal"', "list": ' data-t="list"', "pairs": ' data-t="pairs"'}.get(
+            kind, "")
         control = f'<input data-k="{key}"{t} autocomplete="off" {attrs}>'
     return (f'<label class="f"><span class="lab">{esc(label)}</span>{control}'
             + (f'<span class="note">{esc(hint)}</span>' if hint else "") + "</label>")
@@ -246,14 +278,20 @@ def steps_html(device_blocks: list[str], files: dict[str, list[str]]) -> str:
     s.append(_step(6, _f("Optimize", "prices.objective", "select", options=[
         ("bill", "the bill (tariff and export program)"), ("arbitrage", "an import price (the tariff) and a flat export"),
         ("lmp", "a wholesale price file, both ways")], attrs="data-rerender")
+        + '<div data-when="prices.objective=bill|arbitrage">'
         + _f("Tariff", "prices.tariff", hint="a tariff YAML (a study: the tariffs folder)", attrs='list="dl-tariffs"')
-        + _f("Export program", "prices.program", "select",
+        + '<div data-kinds="home" data-when="prices.objective=arbitrage">'
+        + _f("Flat export $/kWh", "prices.export_price", "num", "what the optimizer is paid for exports")
+        + _f("Bill it too", "prices.billed", "bool", "a billing section, so the report shows the bill") + "</div>"
+        + '<div data-when="prices.objective=bill||prices.billed=true">'
+        + _f("Export program", "prices.program", "select", attrs="data-rerender",
              options=[("nbt", "NBT export credits"), ("nem2", "NEM 2.0"), ("none", "none: exports earn nothing")])
-        + _f("NBT export rates", "prices.export_rates", hint="CSV", attrs='list="dl-csv"')
+        + '<div data-when="prices.program=nbt">' + _f("NBT export rates", "prices.export_rates", hint="CSV",
+                                                         attrs='list="dl-csv"') + "</div>"
         + _f("Baseline territory", "prices.baseline_territory", hint="PG&E, for a tariff with a baseline (e.g. X)")
-        + _f("Bill it", "prices.billed", "bool", "a billing section, whatever it optimizes")
-        + _f("Flat export $/kWh", "prices.export_price", "num") + _f("Price file", "prices.price",
-                                                                    hint="lmp: timestamp, lmp_per_kwh")))
+        + "</div></div>"
+        + '<div data-when="prices.objective=lmp">' + _f("Price file", "prices.price", hint="timestamp, lmp_per_kwh",
+                                                       attrs='list="dl-csv"') + "</div>"))
     s.append(_step(7, _f("Meter limit, kW", "meter.poi_limit_kw", "num", "both directions")
              + _f("Import limit, kW", "meter.import_limit_kw", "num") + _f("Export limit, kW", "meter.export_limit_kw",
                                                                             "num", "0 = non-export")
@@ -265,9 +303,13 @@ def steps_html(device_blocks: list[str], files: dict[str, list[str]]) -> str:
                          options=[("participant", "participant"), ("non_participant", "non-participant")])
                    + _f("Baseline behavior", "participation.baseline_behavior", "select",
                         options=[("own_bill", "optimizes its own bill"), ("rule_based", "rule-based")])
-                   + _f("Response", "participation.response", "select",
+                   + _f("Response", "participation.response", "select", attrs="data-rerender",
                         options=[("optimized", "optimized"), ("rules", "by rules")])
-                   + _f("Rules", "participation.rules", "yaml", "for rule responders: dr_event: {ev: pause}")
+                   + '<div data-when="participation.response=rules"><h3>Rules</h3><p class="note">What each device '
+                     'type does in each mechanism; blank keeps der-opt\'s default (an EV pauses for an event, a '
+                     'battery discharges to the home, a thermostat sets back 2 °C).</p><div class="rules"></div>'
+                   + _f("More rule settings", "participation.more_rules", "yaml",
+                        "dr_event: {ev: {catch_up: true}, battery: {to: export}}") + "</div>"
                    + '<p class="note">Study-wide defaults; a premises column of the same name wins, and single '
                      'premises change in the Study settings tab afterwards.</p>'))
     s.append(_step(10, '<label class="f"><span class="lab">A DR program</span><input type="checkbox" data-enable="dr">'
@@ -278,15 +320,33 @@ def steps_html(device_blocks: list[str], files: dict[str, list[str]]) -> str:
                    + _f("Shortest event, h", "dr.program.min_hours", "num") + _f("Longest event, h", "dr.program.max_hours",
                                                                                "num")
                    + _f("Events a month, at most", "dr.program.max_events_per_month", "num")
-                   + _f("Response", "dr.program.response", "select", options=[
+                   + _f("Response", "dr.program.response", "select", attrs="data-rerender", options=[
                        ("incentive", "incentive"), ("commitment", "commitment"), ("import_cap", "import cap")])
+                   + '<div data-when="dr.program.response=incentive">'
                    + _f("Incentive $/kWh", "dr.program.incentive_per_kwh", "num")
-                   + _f("Committed kW", "dr.program.committed_kw", "num") + _f("Import cap kW", "dr.program.cap_kw", "num")
-                   + _f("Delivery", "dr.program.delivery", "select", options=[
-                       ("uniform", "uniform: the kW held every event hour"), ("per_kwh", "per kWh")])
-                   + _f("Settled on", "dr.program.settlement_basis", "select", options=[
+                   + _f("Delivery", "dr.program.delivery", "select", attrs='data-default="per_kwh"', options=[
+                       ("uniform", "uniform: the kW held every event hour"), ("per_kwh", "per kWh")]) + "</div>"
+                   + '<div data-when="dr.program.response=commitment">'
+                   + _f("Committed kW", "dr.program.committed_kw", "num", "below the baseline, every event hour")
+                   + "</div>"
+                   + '<div data-when="dr.program.response=import_cap">'
+                   + _f("Import cap kW", "dr.program.cap_kw", "num") + "</div>"
+                   + _f("Settled on", "dr.program.settlement_basis", "select", attrs='data-default="net"', options=[
                        ("net", "net load (exports count)"), ("import", "grid import only")])
-                   + _f("Events", "dr.events", "yaml", "random, schedule, price or file")
+                   + '<label class="f"><span class="lab">Events</span><select data-events>'
+                     '<option value="random">random, by month</option><option value="schedule">a schedule</option>'
+                     '<option value="price">on the highest prices</option><option value="file">from a file</option>'
+                     "</select></label>"
+                   + '<div data-when="dr.events.random">'
+                   + _f("Events by month", "dr.events.random.events_per_month", "pairs", "month: count, e.g. 6: 2, 7: 3")
+                   + _f("Hours each", "dr.events.random.hours", "num") + _f("Seed", "dr.events.random.seed", "num")
+                   + _f("Days between, at least", "dr.events.random.min_days_between", "num") + "</div>"
+                   + '<div data-when="?dr.events.schedule_yaml">' + _f("Schedule", "dr.events.schedule", "yaml",
+                     "rules: {start, hours, dates | days and months | nth_weekday}") + "</div>"
+                   + '<div data-when="?dr.events.price_yaml">' + _f("Price-based", "dr.events.price", "yaml",
+                     "series, events_per_year, duration") + "</div>"
+                   + '<div data-when="?dr.events.file">' + _f("Events file", "dr.events.file",
+                     hint="event_id, start, end, program_id, event_type", attrs='list="dl-csv"') + "</div>"
                    + '<div data-kinds="home">' + _f("Customer class", "dr.customer_class", "select", options=[
                        ("residential", "residential (5-in-10)"), ("commercial", "commercial (10-in-10)")]) + "</div>"
                    + "</div>"))
@@ -296,8 +356,12 @@ def steps_html(device_blocks: list[str], files: dict[str, list[str]]) -> str:
         for k, t, body in (
             ("price_signal", "A price signal", _f("Source", "coordination.price_signal.source", "select", options=[
                 ("coordinated", "the coordinated run's congestion prices"), ("schedule", "a schedule"),
-                ("file", "a file")]) + _f("Paid", "coordination.price_signal.paid", "bool")
-             + _f("Schedule", "coordination.price_signal.schedule", "yaml", "[{element, per_kwh, hours}]")),
+                ("file", "a file")], attrs="data-rerender") + _f("Paid", "coordination.price_signal.paid", "bool")
+             + '<div data-when="coordination.price_signal.source=schedule">'
+             + _f("Schedule", "coordination.price_signal.schedule", "yaml", "[{element, per_kwh, hours}]") + "</div>"
+             + '<div data-when="coordination.price_signal.source=file">'
+             + _f("Price file", "coordination.price_signal.path", hint="timestamp, element_id, price_per_kwh",
+                  attrs='list="dl-csv"') + "</div>"),
             ("envelopes", "Operating envelopes", _f("Import shared by", "coordination.envelopes.import.method", "select",
                                                     options=[(m, m) for m in ("pro_rata_need", "equal", "service_size",
                                                                               "weights", "max_min", "fixed", "file")])
@@ -326,9 +390,11 @@ def steps_html(device_blocks: list[str], files: dict[str, list[str]]) -> str:
                    + _f("Discount rate, utility", "value.cost_test.discount_rates.utility", "num")
                    + _f("Discount rate, participant", "value.cost_test.discount_rates.participant", "num")
                    + _f("Discount rate, societal", "value.cost_test.discount_rates.societal", "num")
-                   + _f("Compared against", "value.cost_test.without", "yaml",
-                        "each device (by name or type): battery removed | rule_based | backup_only; "
-                        "ev tou_timer | events_only | removed | rule_based")
+                   + '<h3>What each device is compared against</h3><div class="without"></div>'
+                     '<p class="note">removed: the home without it (its cost belongs in the participant cost); '
+                     'rule_based: its ordinary rule; tou_timer: an EV charging from the cheapest TOU period; '
+                     'events_only: that EV, responding to events; backup_only: a battery held full, discharging only '
+                     'into events. A battery has no default.</p>'
                    + "</div></div>"
                    + '<div data-kinds="feeder both"><h3>The network\'s own value</h3>'
                    + _rows("deferral", "value.deferral", deferral_row, "Add capacity deferral") + "</div>"))
@@ -345,6 +411,15 @@ def page(project, token: str, library: Path, files: dict[str, list[str]]) -> str
     from der_opt.ui.views import layout
 
     device_blocks = sorted(p.stem for p in (library / "devices").glob("*.yaml")) if library else []
+    from der_opt.scenarios.compose import CompositionError, compose_scenario
+
+    block_params = {}  # each device block's settings, shown as placeholders
+    for stem in device_blocks:
+        try:
+            devices = compose_scenario(library / "devices" / f"{stem}.yaml").data.get("devices") or [{}]
+            block_params[stem] = devices[0].get("params", {})
+        except CompositionError:
+            continue
     nav = "".join(f'<a href="#" data-goto="{n}"><span class="n">{n}</span> {esc(t)}<span class="badge"></span></a>'
                   for n, (_, t) in STEPS.items())
     presets = "".join(f'<button type="button" class="small" data-preset="{esc(k)}" title="{esc(v)}">{esc(k)}</button>'
@@ -358,6 +433,7 @@ def page(project, token: str, library: Path, files: dict[str, list[str]]) -> str
         return json.dumps(value).replace("</", "<\\/")
 
     start_json, defaults_json = embedded(start), embedded(DEFAULTS)
+    extra_json = embedded({"blocks": block_params, "modes": MODES, "rules": RULES})
     body = f"""<div class="crumbs"><a href="/">Scenarios and runs</a> / new</div><h1>New scenario or study</h1>
 <p class="note">Start from a preset, or step by step. The file on the right is what will be written; each step lists
 its checks as you go. Nothing is written until Review.</p><div class="presets">Presets: {presets}</div>{lists}
@@ -368,6 +444,7 @@ its checks as you go. Nothing is written until Review.</p><div class="presets">P
 <script type="application/json" id="creator-start">{start_json}</script>
 <script type="application/json" id="creator-defaults">{defaults_json}</script>
 <script type="application/json" id="creator-policies">{json.dumps(POLICIES)}</script>
+<script type="application/json" id="creator-extra">{extra_json}</script>
 <script type="application/json" id="creator-kinds">{json.dumps({k: steps_for(k) for k in
                                                                   ("home", "portfolio", "feeder", "both")})}</script>"""
     return layout(project, "New", body, token, "new", extra=f"<style>{CSS}</style><script>{JS}</script>")
@@ -423,7 +500,14 @@ label.f{display:grid;grid-template-columns:190px minmax(0,1fr);gap:4px 10px;alig
 label.f .note{grid-column:2;font-size:12px} label.f input,label.f select,label.f textarea{width:100%}
 label.f textarea{font-family:ui-monospace,Menlo,monospace;font-size:12px}
 label.f input[type=checkbox]{width:auto;justify-self:start}
-.rows .item{border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin:8px 0}
+.rows .item{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:8px 0}
+.row-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:2px 12px}
+.row-grid>div{display:contents}
+.row-grid label.f{grid-template-columns:1fr;gap:2px;margin:2px 0;align-content:start}
+.row-grid label.f .lab{font-size:12px;color:var(--muted)} .row-grid label.f .note{grid-column:1;font-size:11px}
+.row-grid label.f:has(textarea){grid-column:1/-1}
+.rules-grid{display:grid;grid-template-columns:110px repeat(3,minmax(0,1fr));gap:4px 10px;align-items:center;
+margin:6px 0 10px}.rules-grid .head{color:var(--muted);font-size:12px}
 .preview{position:sticky;top:12px;max-height:calc(100vh - 40px);overflow:auto}
 .preview pre.yaml{font-size:11.5px;line-height:1.35;white-space:pre;overflow:auto;border:1px solid var(--line);
 border-radius:8px;padding:10px;margin:6px 0 0}
@@ -437,6 +521,7 @@ const START=JSON.parse(document.getElementById("creator-start").textContent);
 const DEF=JSON.parse(document.getElementById("creator-defaults").textContent);
 const POL=JSON.parse(document.getElementById("creator-policies").textContent);
 const KINDS=JSON.parse(document.getElementById("creator-kinds").textContent);
+const X=JSON.parse(document.getElementById("creator-extra").textContent);
 let S=START,step=1,timer=null,seq=0;
 const form=document.querySelector("form.flow");
 const parts=p=>p.split(".").map(x=>/^\d+$/.test(x)?+x:x);
@@ -445,14 +530,22 @@ function set(p,v){const ks=parts(p);let o=S;ks.slice(0,-1).forEach((k,i)=>{if(o[
 o[k]=typeof ks[i+1]==="number"?[]:{};o=o[k];});o[ks[ks.length-1]]=v;}
 function value(el){const t=el.dataset.t;if(t==="bool")return el.checked;if(t==="num")return el.value.trim()===""?null:
 (isNaN(+el.value)?el.value:+el.value);if(t==="list")return el.value.split(",").map(x=>x.trim()).filter(Boolean)
-.map(x=>isNaN(+x)?x:+x);return el.value===""?null:el.value;}
-function show(el,v){if(el.dataset.t==="bool"){el.checked=!!v;return;}
+.map(x=>isNaN(+x)?x:+x);if(t==="pairs"){const o={};el.value.split(",").forEach(p=>{const[k,v]=p.split(":").map(x=>
+x&&x.trim());if(k&&v!==undefined&&v!=="")o[k]=isNaN(+v)?v:+v;});return o;}return el.value===""?null:el.value;}
+function show(el,v){if(el.dataset.t==="bool"){el.checked=!!v;return;}if(el.dataset.t==="pairs"){
+el.value=v&&typeof v==="object"?Object.entries(v).map(([k,x])=>k+": "+x).join(", "):"";return;}
+if(v==null&&el.dataset.default){el.value=el.dataset.default;return;}
 el.value=v==null?"":Array.isArray(v)?v.join(", "):v;}
+function holds(cond){return cond.split("||").some(c=>{if(c.startsWith("?")){const ks=parts(c.slice(1));
+let o=S;for(const k of ks.slice(0,-1)){if(o==null)return false;o=o[k];}return o!=null&&ks[ks.length-1] in o;}
+const[p,vals]=c.split("=");const v=get(p);if(vals===undefined)return v!=null;return vals.split("|").includes(String(v));});}
 function rows(){form.querySelectorAll("[data-list]").forEach(box=>{const path=box.dataset.list,list=get(path)||[];
 const items=box.querySelector(".items"),tpl=box.querySelector("template");items.innerHTML="";
 list.forEach((row,i)=>{const div=document.createElement("div");div.className="item";div.innerHTML=tpl.innerHTML;
 div.querySelectorAll("[data-k]").forEach(el=>{if(el.dataset.k.startsWith("."))el.dataset.k=path+"."+i+el.dataset.k;});
 div.querySelectorAll("[data-types]").forEach(t=>t.hidden=!t.dataset.types.split(" ").includes(row.type));
+const block=(X.blocks||{})[row.template]||{};div.querySelectorAll("[data-k*='.params.']").forEach(el=>{
+const k=el.dataset.k.split(".params.")[1];el.placeholder=block[k]!=null?String(block[k])+" (block)":"";});
 div.querySelector("[data-remove]").onclick=()=>{list.splice(i,1);render();changed();};items.appendChild(div);});
 box.querySelector("[data-add]").onclick=()=>{const n=JSON.parse(box.dataset.new);if(!get(path))set(path,[]);
 get(path).push(n);render();changed();};});}
@@ -464,12 +557,34 @@ return `<label class="f"><span class="lab">${n}</span><select data-behavior="${n
 `<option value="${o}" ${S.behavior[n]===o?"selected":""}>${o||"passive (no rule)"}</option>`).join("")+"</select></label>";
 }).join("")||'<p class="note">No devices yet.</p>';box.querySelectorAll("select").forEach(s=>s.onchange=()=>{
 if(s.value)S.behavior[s.dataset.behavior]=s.value;else delete S.behavior[s.dataset.behavior];changed();});}
-function render(){rows();behavior();form.querySelectorAll("[data-k]").forEach(el=>show(el,el.dataset.k==="_target"?
+function without(){const box=form.querySelector(".without");if(!box||!S.value||!S.value.cost_test)return;
+const ct=S.value.cost_test;if(!ct.without)ct.without={};const study=S.kind!=="home";
+const items=study?[["battery","battery"],["ev","ev_v2x"],["thermostat","thermostat"]]:
+(S.devices||[]).map(d=>[d.name,d.type]);const deflt={ev_v2x:"tou_timer",thermostat:"rule_based",curtailable_load:"rule_based"};
+box.innerHTML=items.map(([n,t])=>{const modes=X.modes[t]||[];const first=deflt[t]?`default (${deflt[t]})`:"pick one (required)";
+return `<label class="f"><span class="lab">${n}</span><select data-without="${n}"><option value="">${first}</option>`+
+modes.map(m=>`<option ${ct.without[n]===m?"selected":""}>${m}</option>`).join("")+"</select></label>";}).join("")+
+(S.solar_from_data&&!study?'<p class="note">solar: unchanged (it has nothing to decide)</p>':"")||
+'<p class="note">No devices yet.</p>';box.querySelectorAll("select").forEach(sel=>sel.onchange=()=>{
+if(sel.value)ct.without[sel.dataset.without]=sel.value;else delete ct.without[sel.dataset.without];changed();});}
+function rulesBox(){const box=form.querySelector(".rules");if(!box)return;const R=S.participation.rules=S.participation.rules||{};
+const kinds=["ev","battery","thermostat","solar"];let h='<div class="rules-grid"><span></span>'+
+Object.keys(X.rules).map(m=>`<span class="head">${m.replace("_"," ")}</span>`).join("");
+kinds.forEach(k=>{h+=`<span>${k}</span>`;Object.keys(X.rules).forEach(m=>{const acts=X.rules[m][k];
+if(!acts){h+="<span></span>";return;}const cur=((R[m]||{})[k]||{}).action||"";
+h+=`<select data-rule="${m}.${k}"><option value="">default</option>`+acts.map(a=>`<option ${a===cur?"selected":""}>${a}</option>`)
+.join("")+"</select>";});});box.innerHTML=h+"</div>";box.querySelectorAll("select").forEach(sel=>sel.onchange=()=>{
+const[m,k]=sel.dataset.rule.split(".");R[m]=R[m]||{};if(sel.value)R[m][k]={action:sel.value};else delete R[m][k];changed();});}
+function render(){rows();behavior();without();rulesBox();
+const ev=form.querySelector("select[data-events]");if(ev&&S.dr&&S.dr.events){const k=Object.keys(S.dr.events)[0]||"random";
+ev.value=k.replace("_yaml","");}form.querySelectorAll("[data-k]").forEach(el=>show(el,el.dataset.k==="_target"?
 S._target:get(el.dataset.k)));form.querySelectorAll("[data-enable]").forEach(cb=>{cb.checked=get(cb.dataset.enable)!=null;});
 form.querySelectorAll("[data-needs]").forEach(d=>d.hidden=get(d.dataset.needs)==null);
+form.querySelectorAll("[data-when]").forEach(d=>d.hidden=!holds(d.dataset.when));
 const allowed=KINDS[S.kind]||KINDS.home;document.querySelectorAll("[data-goto]").forEach(a=>{
 a.hidden=!allowed.includes(+a.dataset.goto);a.classList.toggle("on",+a.dataset.goto===step);});
-form.querySelectorAll("[data-kinds]").forEach(d=>d.hidden=!d.dataset.kinds.split(" ").includes(S.kind));
+form.querySelectorAll("[data-kinds]").forEach(d=>d.hidden=!d.dataset.kinds.split(" ").includes(S.kind)||
+(d.dataset.when!==undefined&&!holds(d.dataset.when)));
 form.querySelectorAll("section.step").forEach(s=>s.hidden=+s.dataset.step!==step);}
 function changed(){clearTimeout(timer);timer=setTimeout(preview,250);}
 async function preview(){const mine=++seq;const body=new URLSearchParams({answers:JSON.stringify(S),target:S._target||""});
@@ -489,9 +604,12 @@ i.message.replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]))+"</li>")
 document.querySelectorAll("[data-write]").forEach(b=>b.disabled=errors>0);}
 form.addEventListener("input",ev=>{const el=ev.target;if(!el.dataset.k)return;
 if(el.dataset.k==="_target")S._target=el.value;else set(el.dataset.k,value(el));if(el.hasAttribute("data-rerender"))render();changed();});
-form.addEventListener("change",ev=>{const el=ev.target;if(el.dataset.enable){const key=el.dataset.defaultKey||el.dataset.enable;
+form.addEventListener("change",ev=>{const el=ev.target;if(el.hasAttribute("data-events")){
+S.dr.events=JSON.parse(JSON.stringify(DEF.events[el.value]));render();changed();return;}
+if(el.dataset.t==="bool"&&el.dataset.k){set(el.dataset.k,el.checked);render();changed();return;}
+if(el.dataset.enable){const key=el.dataset.defaultKey||el.dataset.enable;
 set(el.dataset.enable,el.checked?JSON.parse(JSON.stringify(DEF[key])):null);render();changed();}
-else if(el.dataset.k&&el.hasAttribute("data-rerender")){render();}});
+else if(el.dataset.k&&(el.hasAttribute("data-rerender")||el.tagName==="SELECT")){render();}});
 document.querySelectorAll("[data-goto]").forEach(a=>a.onclick=ev=>{ev.preventDefault();step=+a.dataset.goto;render();});
 const move=d=>{const allowed=KINDS[S.kind]||KINDS.home;const i=allowed.indexOf(step);step=allowed[Math.max(0,Math.min(
 allowed.length-1,i+d))];render();window.scrollTo(0,0);};

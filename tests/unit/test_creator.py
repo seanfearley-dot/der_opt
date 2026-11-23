@@ -42,3 +42,28 @@ def test_each_preset_writes_what_its_template_wrote(tmp_path, name, library):
     assert _resolved(new) == _resolved(old)
     if library is not None and name != "feeder-from-files":
         assert written.extends, "a preset reuses the library's blocks where they fit"
+
+
+@pytest.mark.parametrize("name", sorted(PRESETS))
+def test_each_preset_survives_the_page(name):
+    # to the form the page holds (YAML boxes, sizes apart from other settings), as JSON, and back
+    from der_opt.ui.creator import from_form, to_form
+
+    answers = preset(name, OPTIONS)
+    again, problems = from_form(json.loads(json.dumps(to_form(answers))))
+    assert not problems
+    assert again.model_dump() == answers.model_dump()
+
+
+def test_rules_and_comparisons_from_selects():
+    from der_opt.ui.creator import from_form, to_form
+
+    form = to_form(preset("feeder-from-files", OPTIONS))
+    form["participation"].update(response="rules", baseline_behavior="rule_based", rules={
+        "dr_event": {"ev": {"action": "pause"}, "battery": {"action": None}}},
+        more_rules_yaml="dr_event: {ev: {catch_up: true}}")
+    answers, problems = from_form(form)
+    assert not problems and answers.participation.rules == {"dr_event": {"ev": {"action": "pause", "catch_up": True}}}
+    home = to_form(preset("dr-battery", OPTIONS))
+    home["value"]["cost_test"]["without"] = {"battery": "backup_only", "ev": ""}
+    assert from_form(home)[0].value.cost_test["without"] == {"battery": "backup_only"}
