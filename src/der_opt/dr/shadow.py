@@ -24,6 +24,7 @@ from der_opt.time_grid import TimeGrid
 
 SUPPORTED = (BatteryStorage, CurtailableLoad, SmartThermostat, SolarPV, V2XVehicle)
 PRE_EVENT_IMPORT_COST = 1e-4  # $/kWh: don't import before the event without a reason
+HELD_TIE_BREAK = 1e-3  # uniform delivery: the total cut, a distant second to the held kW
 
 
 def slice_premise(premise: Premise, start: int, steps: int, state: dict[str, dict]) -> Premise:
@@ -62,9 +63,13 @@ def slice_premise(premise: Premise, start: int, steps: int, state: dict[str, dic
 
 
 def shadow_event(premise: Premise, r2_dispatch, day_start: int, block_start: int, block_steps: int,
-                 solver_config: SolverConfig | None = None) -> np.ndarray:
+                 solver_config: SolverConfig | None = None, floor_on: tuple | None = None) -> np.ndarray:
     """Net load (kW) over the block when the measure cuts as far as it can, starting
-    the day from R2's state. Steps run from the day's first step to the block's end."""
+    the day from R2's state. Steps run from the day's first step to the block's end.
+
+    `floor_on` = (reference kW over the block, basis "net" or "import"), for uniform
+    delivery (spec v1.3): the cut held in every step of the block below the reference
+    comes first, and the total cut only breaks ties."""
     frame = r2_dispatch.device_dispatch
     state = {}
     for device in premise.devices:
@@ -84,9 +89,18 @@ def shadow_event(premise: Premise, r2_dispatch, day_start: int, block_start: int
     # minimizing net load alone is indifferent between covering the home's load and
     # exporting; counting imports a second time makes it cover load first, so the one
     # solve gives the most reduction on both bases (net, and import only)
+    total = sum((2 * day.grid_import[t] - day.grid_export[t]) * dt for t in block)
+    held = 0
+    if floor_on is not None:
+        reference, basis = floor_on
+        model.held = pyo.Var(domain=pyo.Reals)
+        load = (lambda t: day.grid_import[t]) if basis == "import" else (
+            lambda t: day.grid_import[t] - day.grid_export[t])
+        model.uniform = pyo.Constraint(block, rule=lambda _m, t: model.held <= reference[t - block.start] - load(t))
+        held = -len(block) * dt * model.held
+        total = HELD_TIE_BREAK * total
     model.obj = pyo.Objective(
-        expr=sum((2 * day.grid_import[t] - day.grid_export[t]) * dt for t in block)
-        + PRE_EVENT_IMPORT_COST * sum(day.grid_import[t] * dt for t in before),
+        expr=held + total + PRE_EVENT_IMPORT_COST * sum(day.grid_import[t] * dt for t in before),
         sense=pyo.minimize,
     )
     get_solver(solver_config or SolverConfig()).solve(model)

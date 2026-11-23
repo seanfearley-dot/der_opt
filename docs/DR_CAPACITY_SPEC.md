@@ -1,9 +1,9 @@
 # der-opt demand response events and capacity specification
 
-**Version 1.2 — approved 2026-11-20.** Implemented in `der_opt.dr`. Change it only by a
-new version, approved the same way. Open threads are listed at the end. (1.2 adds the
-program's `settlement_basis`; 1.1 the two reduction bases, section 5; 1.0 approved
-2026-11-19.)
+**Version 1.3 — approved 2026-11-22.** Implemented in `der_opt.dr`. Change it only by a
+new version, approved the same way. Open threads are listed at the end. (1.3 adds the
+program's `delivery` and the held kW, section 8; 1.2 the program's `settlement_basis`;
+1.1 the two reduction bases, section 5; 1.0 approved 2026-11-19.)
 
 ## Purpose
 
@@ -127,13 +127,14 @@ Defined in the scenario YAML:
 | `incentive_per_kwh`, `committed_kw`, `cap_kw` | the response's parameter | `2.00` |
 | `settlement` | baseline rule (section 4) | `by_class` |
 | `settlement_basis` | what incentive and commitment settle on: `net` (default; exports count) or `import` (grid import only) (v1.2) | `net` |
+| `delivery` | how an incentive pays: `per_kwh` (default) or `uniform`, the kW held in every event hour (v1.3, section 8) | `uniform` |
 | `capacity_reference` | which reference capacity is valued against (section 4): `R2`, `R3`, `S`, or `all` (default; each one output) | `all` |
 
 ## 3. How the measure responds
 
 | `response` | In the optimization |
 |---|---|
-| `incentive` | each event hour pays `incentive_per_kwh` for each kWh of reduction below the settlement baseline |
+| `incentive` | `delivery: per_kwh`: each event hour pays `incentive_per_kwh` for each kWh of reduction below the settlement baseline. `delivery: uniform` (v1.3): each event pays `incentive_per_kwh` x its hours x the held kW, the reduction kept in every one of its hours (section 8) |
 | `commitment` | event-hour net import must be at least `committed_kw` below the settlement baseline: a constraint, plus a penalty per kWh short so the run stays feasible |
 | `import_cap` | event-hour net import can't exceed `cap_kw` |
 
@@ -219,7 +220,7 @@ the split, for ACC files and internal curves alike.
 | File | Contents |
 |---|---|
 | `dr_events.csv` | the calendar: id, program, type, start, end, scope, constructor and seed |
-| `dr_event_performance.csv` | per event: load under the responding run, R1, R2, R3 and S; reduction against each; incentive earned; shortfall |
+| `dr_event_performance.csv` | per event: load under the responding run, R1, R2, R3 and S; reduction against each (the mean over its hours) and the held kW (its smallest hour's, v1.3); incentive earned; shortfall |
 | `dr_capacity.csv` | per month: counted kW (mean, min, max over shadow events), accounted kW, event count, event hours |
 | `dr_capacity_slice_of_day.csv` | month x hour reduction, marked accounted or counted |
 | `run_record.json` | also lists the constructor, its settings and seed, the program, and `weather_case` |
@@ -233,9 +234,57 @@ Checks added to every run:
   - delivered reduction larger than the devices' combined power;
   - same-day rebound after an event, in kWh;
   - settlement payment more than 25% away from the R2 load impact;
-  - an accounted month more than 25% away from that month's counted capacity.
+  - an accounted month more than 25% away from that month's counted capacity;
+  - an event with an hour delivering under a quarter of the event's mean reduction
+    against S (`dr skipped hours`, v1.3).
 
-## Decisions (1-6 approved with version 1.0, 7 with 1.1, 8 with 1.2)
+## 8. Uniform delivery (v1.3)
+
+**Why.** Paid per kWh, an event hour's kWh of reduction is worth the same wherever it
+lands, so the optimizer puts limited energy where the bill pays most. With NBT export
+credits rising through the evening ($0.14/kWh at 16:00 to $0.46 at 19:00 in July), a
+13.5 kWh battery skipped the first hour of every 4-hour event and delivered in three
+(the July run, 4-hour events, 16:00-20:00). The reported mean reduction hid it. A
+commitment program needs the same kW in every event hour, and sizing one needs the kW
+the home can hold that way.
+
+**A program setting, `delivery`:**
+
+| `delivery` | `incentive` pays | Shadow events maximize |
+|---|---|---|
+| `per_kwh` (default; today's behavior) | each kWh below the expected baseline, in every event step | the total reduction over the block |
+| `uniform` | the **held kW**: the reduction kept in *every* step of the event, times the event's hours | the held kW over the block |
+
+- **Held kW, in the optimization:** one variable per event, at most the reduction below
+  the expected baseline in each of the event's steps; the incentive pays
+  `incentive_per_kwh x hours x held kW`. It's linear, so the solve stays an LP and its
+  duals stay exact. Reduction above the held kW in any hour earns only what the bill
+  pays for it. (Prototyped on the July run: the reduction came out flat, 0.90 kW in each
+  of the four hours on 8 July against 0, 2.36, 0.92, 0.30 per kWh, for the same
+  incentive and $0.61 a month in bill value given up.)
+- **`commitment` and `import_cap`** already ask for the same kW in every hour; `delivery`
+  doesn't change them.
+- **Settlement, as reported:** under `uniform`, the incentive earned is the held kW
+  against the settlement baseline S (from the responding run's own history) times the
+  event's hours, floored at zero (decision 10).
+- **Under `uniform`, capacity is the held kW.** Shadow events maximize the kW held in
+  every step of the standard event below R2 (on the program's basis), the total cut only
+  breaking ties, and each counted value is the smallest step's reduction; accounted
+  capacity averages the events' held kW.
+- **Fitting a commitment:** with `delivery: uniform`, counted capacity's monthly minimum
+  over eligible days (`counted_..._min_kw`, already written) is the kW the home could
+  have committed to every day of that month, and accounted capacity is what it held in
+  the events called.
+
+**Reported for every program, whatever its `delivery`:**
+- `dr_event_performance.csv` gains `held_kw` against R1, R2, R3 and S on both bases: the
+  smallest step's reduction in the event, next to the mean already there.
+- **A new warning, `dr skipped hours`:** events with an hour whose reduction below S is
+  under a quarter of the event's mean (decision 11), with how many.
+- **The report** shows the held kW beside the mean on the event-day chart, and the
+  capacity chart says which delivery the program uses.
+
+## Decisions (1-6 approved with version 1.0, 7 with 1.1, 8 with 1.2, 9-11 with 1.3)
 
 1. **Capacity reference:** selectable per program (`capacity_reference`): R2, R3, S, or
    `all` (the default), each output side by side.
@@ -250,6 +299,12 @@ Checks added to every run:
 7. **Exports (v1.1):** reported on both bases; neither is dropped.
 8. **Settlement basis (v1.2):** a program setting, `net` (default) or `import`, for
    incentive and commitment.
+9. **Delivery (v1.3):** `per_kwh` by default, so existing results don't change;
+   `uniform` is set per program.
+10. **Settlement under `uniform` (v1.3):** on the held kW against S, matching what the
+    optimizer was paid.
+11. **Skipped hours (v1.3):** an event hour under a quarter of the event's mean
+    reduction against S.
 
 ## Threads to pull
 

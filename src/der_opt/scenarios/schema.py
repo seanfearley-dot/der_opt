@@ -79,6 +79,9 @@ class DRProgramConfig(BaseModel):
     shortfall_penalty_per_kwh: float = 5.0  # commitment / import_cap: keeps the run feasible
     # what incentive and commitment settle on: net load (exports count) or grid import only
     settlement_basis: Literal["net", "import"] = "net"
+    # how an incentive pays (DR spec v1.3): per_kwh, each kWh below the baseline; or
+    # uniform, the held kW (the reduction kept in every step of the event) x its hours
+    delivery: Literal["per_kwh", "uniform"] = "per_kwh"
     settlement: Literal["by_class"] = "by_class"
     capacity_reference: Literal["R2", "R3", "S", "all"] = "all"
 

@@ -249,7 +249,9 @@ def _dr(page: Page, folder: Path, summary: dict) -> None:
     section = page.section("dr", "Demand response")
     names = _dr_names(summary)
     basis = dr.get("settlement_basis", "net")
-    page.text(section, f"Program {dr.get('program')}: {dr.get('response')} response, settled on "
+    page.text(section, f"Program {dr.get('program')}: {dr.get('response')} response"
+                       + (", paid on the kW held every hour (uniform delivery)" if dr.get("delivery") == "uniform"
+                          else "") + ", settled on "
                        f"{'net load' if basis == 'net' else 'grid import'} ({dr.get('customer_class')}); events from "
                        f"{dr.get('constructor')}. The DR run ({names['responding']}) is compared with the same home "
                        f"with no events ({names['R2']}) and with the settlement baseline, the load the program pays "
@@ -292,7 +294,10 @@ def _event_day(page: Page, section, folder: Path, dr: dict, names: dict) -> None
         shape = [{"type": "rect", "xref": "x", "yref": "paper", "x0": start, "x1": end, "y0": 0, "y1": 1,
                   "fillcolor": "rgba(245,158,11,0.13)", "line": {"width": 0}, "layer": "below"}]
         incentive = event.get("incentive_earned")
-        text = (f"During the event: {number(event[f'{pre}reduction_vs_S_kw'])} kW below the settlement baseline, "
+        held = event.get(f"{pre}held_vs_S_kw")
+        text = (f"During the event: {number(event[f'{pre}reduction_vs_S_kw'])} kW below the settlement baseline"
+                + (f" on average, {number(held)} kW held every hour" if held is not None and pd.notna(held) else "")
+                + ", "
                 f"{number(event[f'{pre}reduction_vs_R2_kw'])} kW below {names['R2']}"
                 + (f"; incentive {money(incentive)}" if incentive is not None and pd.notna(incentive) else "")
                 + (f"; {number(event['rebound_kwh'], 1)} kWh more than {names['R2']} later that day"
@@ -354,6 +359,8 @@ def _capacity(page: Page, section, dr: dict, summary: dict, names: dict) -> None
                        f"{names['R2']} and against the settlement baseline. Counted (solid) is a "
                        f"{number(dr.get('max_hours') or 3, 0)}-hour test event on every eligible day, what the home "
                        "could deliver; accounted (hatched) is the events actually called. "
+                       + ("Delivery is uniform, so each is the kW held in every hour of the event, not the mean. "
+                          if dr.get("delivery") == "uniform" else "")
                        + ("Grey months are outside the program's season. " if shading else "")
                        + (f"The cost tests value {valued}." if valued else ""))
     page.chart(section, traces, {"barmode": "group", "xaxis": {"type": "category"}, "yaxis": {"title": "kW"},

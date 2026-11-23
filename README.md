@@ -732,6 +732,7 @@ dr:
     max_consecutive_days: 2
     response: incentive                # default; or commitment (committed_kw), import_cap (cap_kw)
     settlement_basis: net              # or import: pay only for avoided grid import
+    delivery: per_kwh                  # default; or uniform: pay on the kW held in every event hour
     incentive_per_kwh: 1.00
     capacity_reference: all            # R2, R3, S, or all
   events:                              # one constructor:
@@ -754,6 +755,17 @@ import basis, and the printout shows each figure as net / import. What the incen
 pays for (and a commitment must deliver) follows the program's `settlement_basis`:
 `net` (default) or `import`, where the measure stops at zero import and exporting earns
 nothing.
+
+**Delivery:** paid `per_kwh` (the default), every kWh below the baseline is worth the
+same in every event hour, so limited energy goes where the bill pays most: a battery
+can skip an event's first hour when export credits rise through the evening. With
+`delivery: uniform` an incentive pays on the **held kW**, the reduction kept in every
+hour of the event, times its hours, so the dispatch holds a level reduction: the shape a
+commitment program needs. Every event reports its held kW (`held_vs_..._kw`) beside the
+mean, and the `dr skipped hours` warning flags events with an hour under a quarter of
+the event's mean. Under `uniform`, counted and accounted capacity are held kW too, so a
+month's lowest counted value (`counted_..._min_kw`) is the kW the home could have
+committed to on every eligible day.
 
 **Reported:**
 - **Per event (accounted):** reduction against R1, R2, R3 and the settlement baseline

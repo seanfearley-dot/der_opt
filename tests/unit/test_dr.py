@@ -327,3 +327,39 @@ def test_net_basis_settles_on_net_load():
     # paid on net: the full 4 kW reduction below the 2.5 kW net baseline, 3 h, $1
     assert row["incentive_earned"] == pytest.approx(row["reduction_vs_S_kw"] * 3 * 1.0)
     assert row["incentive_earned"] > row["import_reduction_vs_S_kw"] * 3 * 1.0
+
+
+def _rising_export_config(delivery):
+    """A 6 kWh battery, a 3 h event, and an export credit that rises through the event
+    (none at 17:00, $0.50 from 18:00): paid per kWh, energy goes to the later hours."""
+    export = [0.0] * 24
+    export[18] = export[19] = 0.5
+    devices = [{"type": "battery", "name": "battery", "params": {
+        "capacity_kwh": 6, "p_max_charge_kw": 5, "p_max_discharge_kw": 5, "eta_charge": 1.0, "eta_discharge": 1.0,
+        "soc_init_frac": 0.5, "soc_final_min_frac": 0.5, "degradation_cost_per_kwh": 0.001}}]
+    dr = {"program": {"program_id": "p", "season": [7], "max_hours": 3, "incentive_per_kwh": 1.0,
+                      "delivery": delivery},
+          "events": {"schedule": [{"start": "17:00", "hours": 3, "dates": ["2026-07-21", "2026-07-28"]}]}}
+    config = _config(devices=devices, dr=dr)
+    config.value_streams[0].params["export_price"] = {"type": "daily_tou", "hourly_pattern": export}
+    return config
+
+
+def test_uniform_delivery_holds_the_reduction_level():
+    per_kwh = run_dr_study(_rising_export_config("per_kwh"))
+    uniform = run_dr_study(_rising_export_config("uniform"))
+    a, b = per_kwh.performance, uniform.performance
+    # per kWh: an hour carries far less than the event's mean, and the warning says so
+    assert (a["held_vs_S_kw"] < 0.25 * a["reduction_vs_S_kw"]).all()
+    assert any(f.check == "dr skipped hours" for f in per_kwh.checks.findings)
+    # uniform: every hour the same reduction below S (the held kW is the mean), no warning
+    assert b["held_vs_S_kw"].tolist() == pytest.approx(b["reduction_vs_S_kw"].tolist(), abs=1e-3)
+    assert (b["held_vs_S_kw"] > 0.25).all()  # the no-events run already exports at $0.50, so 0.5 kW is what's left
+    assert not any(f.check == "dr skipped hours" for f in uniform.checks.findings)
+    # settled on the held kW x the event's hours
+    assert b["incentive_earned"].tolist() == pytest.approx((b["held_vs_S_kw"] * 3 * 1.0).tolist(), abs=1e-6)
+    assert uniform.summary["delivery"] == "uniform"
+    # capacity under uniform is held kW: counted is a shadow event's weakest hour, accounted the events' held kW
+    cap = uniform.capacity.set_index("month")
+    assert cap.loc[7, "accounted_S_kw"] == pytest.approx(b["held_vs_S_kw"].mean(), abs=1e-6)
+    assert cap.loc[7, "counted_R2_kw"] > 0

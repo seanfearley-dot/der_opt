@@ -35,6 +35,7 @@ from der_opt.scenarios.schema import ScenarioConfig
 
 REFERENCES = ("R1", "R2", "R3", "S")
 GAP_TOLERANCE = 0.25
+SKIPPED_SHARE = 0.25  # v1.3: an event hour under this share of the event's mean reduction is "skipped"
 
 
 @dataclass
@@ -159,14 +160,21 @@ def run_dr_study(config: ScenarioConfig, r2: DispatchResult | None = None, r2_pr
                     theirs = float(loads[each_basis][name][rows].mean())
                     row[f"{name}_{pre}kw"] = theirs
                     row[f"{pre}reduction_vs_{name}_kw"] = theirs - ours
+                    # held kW (v1.3): the smallest step's reduction in the event
+                    row[f"{pre}held_vs_{name}_kw"] = float((loads[each_basis][name][rows]
+                                                             - mine[each_basis][rows]).min())
                 row[f"S_{pre}kw"] = float(s_series[each_basis][rows].mean())
                 row[f"{pre}reduction_vs_S_kw"] = row[f"S_{pre}kw"] - ours
+                row[f"{pre}held_vs_S_kw"] = float((s_series[each_basis][rows] - mine[each_basis][rows]).min())
             row["settlement_basis"] = basis
             row["S_expected_kw"] = float(expected[rows].mean())
             row["S_adjustment"] = settled[basis][e.event_id].adjustment
             row["S_days"] = len(settled[basis][e.event_id].days_used)
             s_settle, settle_load = s_series[basis], mine[basis]
-            if program.response == "incentive":
+            if program.response == "incentive" and program.delivery == "uniform":  # the held kW x the hours
+                held = float((s_settle[rows] - settle_load[rows]).min())
+                row["incentive_earned"] = program.incentive_per_kwh * max(0.0, held) * int(rows.sum()) * dt
+            elif program.response == "incentive":
                 kwh = float(((s_settle[rows] - settle_load[rows]) * dt).sum())
                 row["incentive_earned"] = program.incentive_per_kwh * max(0.0, kwh)
             elif program.response == "commitment":
@@ -181,6 +189,10 @@ def run_dr_study(config: ScenarioConfig, r2: DispatchResult | None = None, r2_pr
         event_rows.append(cal.calendar_frame(events).assign(replicate=replicate))
     performance = pd.DataFrame(perf_rows)
     events_frame = pd.concat(event_rows, ignore_index=True) if event_rows else pd.DataFrame()
+
+    # under uniform delivery (v1.3) capacity is the held kW: an event's smallest step
+    uniform = program.response == "incentive" and program.delivery == "uniform"
+    measured = "held" if uniform else "reduction"
 
     # --- counted capacity: shadow events on every eligible day in season
     chosen = ["R2", "R3", "S"] if program.capacity_reference == "all" else [program.capacity_reference]
@@ -197,17 +209,23 @@ def run_dr_study(config: ScenarioConfig, r2: DispatchResult | None = None, r2_pr
             block = _block(value, day, program, time_grid, steps)
             day_start = int(index.get_loc(pd.Timestamp(day)))
             block_start = int(index.get_loc(block[0]))
-            shadow = shadow_event(r2_premise, r2, day_start, block_start, steps)
+            floor_on = None  # uniform delivery: hold the most kW in every step, below R2 on the program's basis
+            if uniform:
+                floor_on = (loads[program.settlement_basis]["R2"].loc[block].to_numpy(), program.settlement_basis)
+            shadow = shadow_event(r2_premise, r2, day_start, block_start, steps, floor_on=floor_on)
             shadow_load = {"net": shadow, "import": np.clip(shadow, 0, None)}
             hypothetical = cal.Event(f"shadow-{day}", program.program_id, "shadow", block[0],
                                      block[-1] + pd.Timedelta(minutes=time_grid.resolution_minutes))
             row = {"day": day, "month": day.month, "start": block[0]}
             for basis, pre in prefix.items():
-                ours = float(shadow_load[basis].mean())
+                ours = shadow_load[basis]
                 for name in ("R2", "R3"):
-                    row[f"{pre}{name}"] = float(loads[basis][name].loc[block].mean()) - ours
+                    gap = loads[basis][name].loc[block].to_numpy() - ours
+                    row[f"{pre}{name}"] = float(gap.min() if uniform else gap.mean())
                 s_hyp = settlement_baselines(loads[basis]["R2"], [hypothetical], dr.customer_class)[hypothetical.event_id].values
-                row[f"{pre}S"] = float(np.nanmean(s_hyp)) - ours if np.isfinite(s_hyp).any() else np.nan
+                gap = s_hyp - ours
+                row[f"{pre}S"] = (float(np.nanmin(gap) if uniform else np.nanmean(gap)) if np.isfinite(s_hyp).any()
+                                  else np.nan)
             counted_rows.append(row)
     counted = pd.DataFrame(counted_rows)
 
@@ -231,7 +249,7 @@ def run_dr_study(config: ScenarioConfig, r2: DispatchResult | None = None, r2_pr
                 if len(month_perf):
                     # hour-weighted, per replicate, then across replicates
                     per_rep = month_perf.groupby("replicate").apply(
-                        lambda g, c=f"{pre}reduction_vs_{name}_kw": np.average(g[c], weights=g["hours"]),
+                        lambda g, c=f"{pre}{measured}_vs_{name}_kw": np.average(g[c], weights=g["hours"]),
                         include_groups=False)
                     row[f"accounted_{pre}{name}_kw"] = float(per_rep.mean())
                     if len(calendars) > 1:
@@ -312,6 +330,17 @@ def run_dr_study(config: ScenarioConfig, r2: DispatchResult | None = None, r2_pr
                                  f"{program.response} obligation ({short.sum():.1f} kWh in all)"))
     checks.ran("dr settlement vs load impact", found)
     found = []
+    if len(performance):  # v1.3: an hour carrying under a quarter of the event's mean reduction against S
+        pre = prefix[program.settlement_basis]
+        mean, held = performance[f"{pre}reduction_vs_S_kw"], performance[f"{pre}held_vs_S_kw"]
+        skipped = performance[(mean > 1e-3) & (held < SKIPPED_SHARE * mean)]
+        if len(skipped):
+            found.append(Finding("warning", "dr skipped hours", f"{len(skipped)} of {len(performance)} events have an "
+                                 "hour delivering under a quarter of the event's mean reduction against S"
+                                 + (" (paid per kWh, energy goes to the hours the bill pays most; delivery: uniform "
+                                    "holds it level)" if not uniform else "")))
+    checks.ran("dr skipped hours", found)
+    found = []
     if "counted_R2_kw" in capacity and "accounted_R2_kw" in capacity:
         both = capacity.dropna(subset=["counted_R2_kw", "accounted_R2_kw"])
         off = both[(both["counted_R2_kw"].abs() > 1e-6)
@@ -330,6 +359,7 @@ def run_dr_study(config: ScenarioConfig, r2: DispatchResult | None = None, r2_pr
         "capacity_reference": program.capacity_reference, "calendars": len(calendars),
         "constructor": next(n for n in ("file", "price", "random", "schedule") if getattr(dr.events, n) is not None),
         "events_per_calendar": [len(c) for c in calendars], "weather_case": config.weather_case,
+        "delivery": program.delivery,
         "incentive_earned": float(performance["incentive_earned"].sum() / len(calendars))
         if "incentive_earned" in performance else None,
     }
