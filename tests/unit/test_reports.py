@@ -83,6 +83,18 @@ def test_a_study_links_its_feeder_and_shares_one_plotly(tmp_path):
         assert f'<section id="{section}">' in feeder, section
     charts = _data(out / "feeder" / "report.html")["charts"]
     assert any(t.get("name") == "envelopes" for c in charts for t in c["traces"])
+    # a page per premise: linked from the feeder's, with every run, its envelope and its path's prices
+    assert 'class="premise-pick"' in feeder and 'href="premises/home_01.html"' in feeder
+    page = out / "feeder" / "premises" / "home_01.html"
+    text = page.read_text(encoding="utf-8")
+    assert f'<script src="../../{ASSETS}/{PLOTLY}">' in text and 'href="../report.html"' in text
+    for section in ("summary", "costs", "meter", "devices", "prices"):
+        assert f'<section id="{section}">' in text, section
+    names = {t.get("name") for c in _data(page)["charts"] for t in c["traces"]}
+    assert {"coordinated", "independent", "envelopes: import envelope",
+            "congestion price on its path (coordinated)"} <= names
+    devices = next(c for c in _data(page)["charts"] if c["layout"].get("updatemenus"))
+    assert [b["label"] for b in devices["layout"]["updatemenus"][0]["buttons"]][:2] == ["coordinated", "independent"]
 
 
 def test_time_charts_zoom_together_and_hover_with_units(tmp_path):

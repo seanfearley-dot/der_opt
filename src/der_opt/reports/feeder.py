@@ -48,6 +48,11 @@ def build(folder: Path, summary: dict, page: Page | None = None) -> Page:
                           f"{money(versus['total_paid_more'])} in all" + (
                               f", most {money(versus['most'])} ({versus['most_by']})" if versus["most_by"] else "")))
     page.cards(top, cards)
+    table = _read(folder, "premises.csv")
+    if table is not None and len(table):
+        from der_opt.reports.feeder_premise import picker
+
+        page.html(top, picker(table["premise_id"].tolist()))
     mix = summary.get("mix") or {}
     if mix:
         page.table(top, pd.DataFrame([{"element": e, **m} for e, m in mix.items()]), caption="Premises by element")
@@ -152,7 +157,11 @@ def _bills(page: Page, folder: Path, labels: list[str]) -> None:
                    {"yaxis": {"title": "$ over the run"}, "hovermode": "closest", "showlegend": False}, height=300)
     keep = [c for c in ("premise_id", "element_id", "data", "participation", "baseline_behavior", "response",
                         "n_solar", "solar_kw", "n_battery", "battery_kwh", "n_ev", "ev_kwh") if c in table] + bills
-    page.table(section, table[keep], filter=True, formats={c: money for c in bills})
+    from der_opt.reports.feeder_premise import href
+
+    page.text(section, "Each premise's name opens its own page: what it did in every run.")
+    page.table(section, table[keep], filter=True, formats={c: money for c in bills},
+               links={"premise_id": {p: href(p) for p in table["premise_id"]}})
 
 
 def _coordination(page: Page, summary: dict) -> None:

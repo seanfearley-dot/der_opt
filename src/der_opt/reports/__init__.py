@@ -25,6 +25,10 @@ def write_report(folder: str | Path, crumbs: list[tuple[str, str]] | None = None
     page.links = crumbs or []
     path = folder / REPORT
     path.write_text(page.render(assets_for(folder)), encoding="utf-8")
+    if summary["kind"] == "feeder":  # a page for each premise, beside the feeder's
+        from der_opt.reports.feeder_premise import write_pages
+
+        write_pages(folder, summary, page.links)
     return path
 
 

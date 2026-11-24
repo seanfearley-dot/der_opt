@@ -238,6 +238,9 @@ CSS = """
 @media (prefers-color-scheme:dark){:root{--bg:#141518;--panel:#1c1e22;--ink:#e8e9ec;--muted:#9aa0aa;
 --line:#2d3036;--accent:#7aa2ff;--good:#4ade80;--bad:#f87171;--chip:#262a31;--grid:#2a2d33}}
 *{box-sizing:border-box}
+.premise-pick{display:inline-flex;gap:8px;align-items:center;margin:10px 0 4px;color:var(--muted);font-size:13px}
+.premise-pick select{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);
+border-radius:6px;padding:3px 6px}
 body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",
 Roboto,Helvetica,Arial,sans-serif}
 header{padding:20px 24px 12px;border-bottom:1px solid var(--line);background:var(--panel)}

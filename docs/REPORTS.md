@@ -100,7 +100,19 @@ What each page shows:
 - **Feeder:** cards (costs by run, network saving, who pays more); premises by element;
   costs by run; peak flow by element and run, and each element's flow over time with
   its rating; congestion prices; each premise's bill change under coordination and its
-  bills by run; the coordination runs against the ideal; checks; settings.
+  bills by run; the coordination runs against the ideal; checks; settings. A menu at the
+  top, and each premise's name in the bills table, open that premise's page.
+- **Feeder premise** (`feeder/premises/<id>.html`, one per premise): what it did in
+  every feeder run. Cards (its element and the path above it, its devices, its
+  coordinated bill and the change from independent and from rule-based); costs by run
+  (bill, change from independent, degradation, signal charges, DR incentive and
+  shortfall, kWh over its envelopes, an EV left short of its departure target and its
+  intangible cost, import and export kWh, peak import); net import at
+  the meter by run, with its envelopes; its load and devices for a run picked from a
+  menu, with that run's DR events shaded, and stored energy by run with each departure's
+  target (and an x where a run left the car short); and the prices it
+  faced: its tariff's import rate, the coordinated run's congestion price summed along
+  its path, and each price-signal run's adder.
 - **Study:** cards (premises, device types, analyses); the feeder analysis's headline
   figures, linked to its page; the portfolio (a bar per premise for a chosen measure;
   one A/B case choice for the whole study, with each premise's bill difference, largest
