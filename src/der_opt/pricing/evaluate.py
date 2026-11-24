@@ -28,5 +28,8 @@ def value_breakdown(premise: Premise, dispatch: DispatchResult) -> dict[str, flo
         cost_column = f"{device.name}.cost"
         if cost_column in dispatch.device_dispatch.columns:
             breakdown[f"{device.name} degradation"] = float(dispatch.device_dispatch[cost_column].sum())
+        short_column = f"{device.name}.shortfall_cost"  # an EV left short: intangible, never a bill
+        if short_column in dispatch.device_dispatch.columns and dispatch.device_dispatch[short_column].sum() > 0:
+            breakdown[f"{device.name} shortfall"] = float(dispatch.device_dispatch[short_column].sum())
 
     return breakdown

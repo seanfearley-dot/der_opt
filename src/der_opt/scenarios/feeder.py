@@ -204,7 +204,8 @@ class FeederStudy:
         mech = self.coordination.runs if self.coordination is not None else {}
         frames = []
         for label, run in self.runs.items():
-            frame = run.house_costs.copy()
+            frame = run.house_costs.copy().rename(columns={"ev_shortfall": "ev_shortfall_cost"})
+            frame["ev_shortfall_kwh"] = shortfall_kwh(self.scenario.premises, run.dispatches)
             frame.insert(0, "group", self.scenario.houses["group"])
             if label in mech and not mech[label].payments.empty:
                 frame = frame.join(mech[label].payments)
@@ -218,8 +219,25 @@ def _house_costs(premises: list[Premise], dispatches: dict[str, DispatchResult])
     for premise in premises:
         breakdown = value_breakdown(premise, dispatches[premise.name])
         degradation = sum(v for k, v in breakdown.items() if k.endswith(" degradation"))
-        rows[premise.name] = {"bill": sum(breakdown.values()) - degradation, "degradation": degradation}
+        shortfall = sum(v for k, v in breakdown.items() if k.endswith(" shortfall"))
+        rows[premise.name] = {"bill": sum(breakdown.values()) - degradation - shortfall, "degradation": degradation,
+                              "ev_shortfall": shortfall}
     return pd.DataFrame.from_dict(rows, orient="index")
+
+
+def customer_cost(house_costs: pd.DataFrame) -> pd.Series:
+    """What a customer pays: bill and degradation, never the intangible EV shortfall
+    (docs/EV_SHORTFALL_SPEC.md decision 5)."""
+    return house_costs["bill"] + house_costs["degradation"]
+
+
+def shortfall_kwh(premises: list[Premise], dispatches: dict[str, DispatchResult]) -> pd.Series:
+    """kWh each premise's EVs left short of their departure targets in a run."""
+    out = {}
+    for premise in premises:
+        frame = dispatches[premise.name].device_dispatch
+        out[premise.name] = float(sum(frame[c].sum() for c in frame.columns if c.endswith(".shortfall_kwh")))
+    return pd.Series(out)
 
 
 def _summarize(label, scenario: FeederScenario, network: NetworkDispatchModel, dispatches) -> RunSummary:

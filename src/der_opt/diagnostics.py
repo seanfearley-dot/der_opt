@@ -155,6 +155,31 @@ def check_dispatch(premise, dispatch: DispatchResult, run: str | None = None, na
     report.ran("storage limits", bounds)
     report.ran("charge and discharge at once", both_ways)
 
+    # EVs left short of their departure targets (docs/EV_SHORTFALL_SPEC.md section 4),
+    # and driving a simulated battery couldn't cover
+    short, uncovered = [], []
+    simulated = dispatch.solver_status == "simulated"
+    for device in premise.devices:
+        column = f"{device.name}.shortfall_kwh"
+        if column in columns:
+            kwh = dispatch.device_dispatch[column].to_numpy(dtype=float)
+            if kwh.sum() > 0.01:
+                cost = dispatch.device_dispatch[f"{device.name}.shortfall_cost"].sum()
+                count = int((kwh > 0.01).sum())
+                short.append(finding("warning", "ev departures", (
+                    f"{device.name} missed its departure target {count} time(s), {kwh.sum():.1f} kWh in all "
+                    "(rule-based: not priced)") if simulated else (
+                    f"{device.name} left short of its departure target {count} time(s), {kwh.sum():.1f} kWh, "
+                    f"at an intangible ${cost:,.2f}")))
+        column = f"{device.name}.driving_uncovered_kwh"
+        if column in columns and dispatch.device_dispatch[column].sum() > 0.01:
+            kwh = dispatch.device_dispatch[column].to_numpy(dtype=float)
+            uncovered.append(finding("warning", "driving not covered", (
+                f"{device.name}: {kwh.sum():.1f} kWh of driving its battery couldn't cover, in {int((kwh > 0.01).sum())} "
+                "step(s); the simulation stops the battery at its minimum, so that energy came from nowhere")))
+    report.ran("ev departures", short)
+    report.ran("driving not covered", uncovered)
+
     # importing and exporting in the same step
     mask = (imp > TOLERANCE_KW) & (exp > TOLERANCE_KW)
     report.ran("import and export at once", [finding(
@@ -240,6 +265,23 @@ def check_load(premise, name: str | None = None) -> CheckReport:
                              "difference", None, name))
     report = CheckReport()
     report.ran("load vs meter limit", found)
+    # a priced EV can leave as low as its floor; driving stays hard, so the floor must
+    # cover the longest trip (docs/EV_SHORTFALL_SPEC.md section 2)
+    trips = []
+    for device in premise.devices:
+        if getattr(device, "shortfall_per_kwh", None) is None:
+            continue
+        floor = device.soc_departure_floor if device.soc_departure_floor is not None else device.soc_min
+        longest, trip = 0.0, 0.0
+        for t, connected in enumerate(device.connected):
+            trip = 0.0 if connected > 0.5 else trip + float(device.driving_kwh[t])
+            longest = max(longest, trip)
+        if floor - device.soc_min < longest - 1e-6:
+            trips.append(Finding("warning", "ev floor", (
+                f"{device.name} may leave as low as {floor:.1f} kWh (its floor), which can't cover its longest trip "
+                f"({longest:.1f} kWh above its {device.soc_min:g} kWh minimum): if the optimizer leaves it that short, "
+                "the run fails. Raise soc_departure_floor_frac"), None, name))
+    report.ran("ev floor", trips)
     return report
 
 

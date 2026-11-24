@@ -142,8 +142,12 @@ def feeder_summary(built, study, loading: dict, report=None) -> dict:
         mix[element] = {"premises": len(group), **{k: sum(k in d for d in devices) for k in ("solar", "battery", "ev")}}
     out["mix"] = mix
     out["background"] = list(built.background)
+    from der_opt.scenarios.feeder import shortfall_kwh
+
     out["runs"] = {label: {"total": run.total, "customer_bills": float(run.house_costs["bill"].sum()),
                            "degradation": float(run.house_costs["degradation"].sum()),
+                           "ev_shortfall": float(run.house_costs["ev_shortfall"].sum()),
+                           "ev_shortfall_kwh": float(shortfall_kwh(built.premises, run.dispatches).sum()),
                            "network_costs": run.network_costs} for label, run in runs.items()}
     out["loading"] = {label: frame.drop(columns=["element"], errors="ignore").to_dict(orient="index")
                       for label, frame in loading.items()}
@@ -157,7 +161,9 @@ def feeder_summary(built, study, loading: dict, report=None) -> dict:
             "per_kw_over_run": float(binding.sum() * time_grid.dt_hours)}
     out["congestion"] = {"exact": bool(study.prices_exact), "elements": congestion}
     if "independent" in runs:
-        change = runs["coordinated"].house_costs.sum(axis=1) - runs["independent"].house_costs.sum(axis=1)
+        from der_opt.scenarios.feeder import customer_cost
+
+        change = customer_cost(runs["coordinated"].house_costs) - customer_cost(runs["independent"].house_costs)
         worse = change[change > 0.005]
         out["coordinated_vs_independent"] = {
             "premises_paying_more": len(worse), "of": len(change), "total_paid_more": float(worse.sum()),

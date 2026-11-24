@@ -6,6 +6,7 @@ import numpy as np
 import pyomo.environ as pyo
 
 from der_opt.devices.base import Device
+from der_opt.pricing.duals import model_duals
 from der_opt.time_grid import TimeGrid
 
 if TYPE_CHECKING:
@@ -42,7 +43,12 @@ class V2XVehicle(Device):
 
     `driving_kwh`: optional kWh drawn from the battery by driving in each period (an
     array, normally nonzero only while disconnected). Without it, SOC is frozen while
-    the car is away, so over several days it never comes home needing a charge."""
+    the car is away, so over several days it never comes home needing a charge.
+
+    `departure_shortfall_per_kwh` (docs/EV_SHORTFALL_SPEC.md): left out, each departure
+    target is hard; a number, the car may leave short of it at this $ per kWh, an
+    intangible cost reported apart from bills. `soc_departure_floor_frac`: a hard
+    minimum at every departure, priced or not (default: the battery's own minimum)."""
 
     def __init__(
         self,
@@ -64,6 +70,8 @@ class V2XVehicle(Device):
         charge_sources: list[SolarPV] | None = None,
         driving_kwh=None,
         smoothing_cost_per_kw: float = 0.0,
+        departure_shortfall_per_kwh: float | None = None,
+        soc_departure_floor_frac: float | None = None,
     ):
         super().__init__(name, time_grid)
         conn = np.asarray(connected, dtype=float)
@@ -107,6 +115,23 @@ class V2XVehicle(Device):
             departure_mins = [soc_departure_min_frac * capacity_kwh] * len(departure_periods)
         self.departure_periods = departure_periods
         self.soc_departure_mins = departure_mins
+        targets = [m for m in departure_mins if m is not None]
+        if departure_shortfall_per_kwh is not None:
+            if departure_shortfall_per_kwh < 0:
+                raise ValueError(f"{name}: departure_shortfall_per_kwh can't be negative")
+            if not targets:
+                raise ValueError(f"{name}: departure_shortfall_per_kwh needs a departure target "
+                                 "(soc_departure_min_frac) to fall short of")
+        self.shortfall_per_kwh = departure_shortfall_per_kwh
+        self.soc_departure_floor = (soc_departure_floor_frac * capacity_kwh
+                                    if soc_departure_floor_frac is not None else None)
+        if self.soc_departure_floor is not None and targets and self.soc_departure_floor > min(targets) + 1e-9:
+            raise ValueError(f"{name}: soc_departure_floor_frac ({soc_departure_floor_frac:g}) is above the "
+                             "departure target")
+        # each departure that has a target, and the row (period) it's reported on
+        self.targeted = [(i, d, m) for i, (d, m) in enumerate(zip(departure_periods, departure_mins)) if m is not None]
+        self._row_of = {i: min(int(d), time_grid.horizon_steps - 1) for i, d, _ in self.targeted}
+        self._departure_constraints: dict[int, object] = {}
 
         self.soc_final_min = (
             soc_final_min_frac * capacity_kwh if soc_final_min_frac is not None else None
@@ -131,6 +156,9 @@ class V2XVehicle(Device):
         model.add_component(self._component_name("p_ch"), self.p_ch)
         model.add_component(self._component_name("p_dis"), self.p_dis)
         model.add_component(self._component_name("soc"), self.soc)
+        if self.shortfall_per_kwh is not None:  # kWh short at each targeted departure
+            self.short = pyo.Var([i for i, _, _ in self.targeted], domain=pyo.NonNegativeReals)
+            model.add_component(self._component_name("departure_short"), self.short)
 
     def build_constraints(self, model: pyo.ConcreteModel) -> None:
         dt = self.time_grid.dt_hours
@@ -150,7 +178,7 @@ class V2XVehicle(Device):
             pyo.Constraint(self.time_grid.periods, rule=soc_dynamics_rule),
         )
 
-        def _make_departure_rule(departure_t, soc_min):
+        def _make_departure_rule(departure_t, soc_min, idx=None):
             # A factory, not an inline closure in the loop below: each call gets its
             # own departure_t/soc_min cell, avoiding the classic Python late-binding
             # bug where every rule would otherwise end up reading the *last*
@@ -160,17 +188,26 @@ class V2XVehicle(Device):
             # arg, which collided with an earlier attempt to capture via a default
             # keyword argument instead of this factory.
             def rule(_m):
+                if idx is not None:  # priced: whatever is short is paid for
+                    return self.soc[departure_t] + self.short[idx] >= soc_min
                 return self.soc[departure_t] >= soc_min
 
             return rule
 
+        floor = self.soc_departure_floor
         for idx, (departure_t, soc_min) in enumerate(zip(self.departure_periods, self.soc_departure_mins)):
             if soc_min is None:
                 continue
-            model.add_component(
-                self._component_name(f"departure_soc_{idx}"),
-                pyo.Constraint(rule=_make_departure_rule(departure_t, soc_min)),
-            )
+            priced = self.shortfall_per_kwh is not None
+            target = soc_min if priced or floor is None else max(soc_min, floor)
+            constraint = pyo.Constraint(rule=_make_departure_rule(departure_t, target, idx if priced else None))
+            model.add_component(self._component_name(f"departure_soc_{idx}"), constraint)
+            self._departure_constraints[idx] = constraint
+            if priced and floor is not None and floor > self.soc_min:
+                model.add_component(
+                    self._component_name(f"departure_floor_{idx}"),
+                    pyo.Constraint(rule=_make_departure_rule(departure_t, floor)),
+                )
 
         if self.soc_final_min is not None:
             final_t = self.time_grid.horizon_steps
@@ -205,7 +242,10 @@ class V2XVehicle(Device):
 
     def cost_expr(self, model: pyo.ConcreteModel, t: int):
         dt = self.time_grid.dt_hours
-        return self.degradation_cost_per_kwh * (self.p_ch[t] + self.p_dis[t]) * dt
+        cost = self.degradation_cost_per_kwh * (self.p_ch[t] + self.p_dis[t]) * dt
+        if self.shortfall_per_kwh is not None:  # the shortfall, on its departure's row
+            cost = cost + sum(self.shortfall_per_kwh * self.short[i] for i, row in self._row_of.items() if row == t)
+        return cost
 
     def step(self, state: dict, action: dict) -> dict:
         t = state["t"]
@@ -221,25 +261,63 @@ class V2XVehicle(Device):
         p_dis = min(p_dis, max(max_dis_room, 0.0))
 
         next_soc = soc + dt * (self.eta_charge * p_ch - p_dis / self.eta_discharge) - self.driving_kwh[t]
+        uncovered = max(self.soc_min - next_soc, 0.0)  # driving the battery couldn't cover
         next_soc = min(max(next_soc, self.soc_min), self.soc_max)
 
-        return {
+        out = {
             "soc": next_soc,
             "p_ch": p_ch,
             "p_dis": p_dis,
             "net_power": p_dis - p_ch,
             "cost": self.degradation_cost_per_kwh * (p_ch + p_dis) * dt,
         }
+        if self.targeted:  # measured, not priced: nothing shaped a simulated run's charging
+            short = sum(max(m - soc, 0.0) for i, d, m in self.targeted if self._row_of[i] == t)
+            out |= {"shortfall_kwh": short, "shortfall_cost": 0.0, "driving_uncovered_kwh": uncovered}
+        return out
 
     def dispatch_series(self, model: pyo.ConcreteModel) -> dict[str, np.ndarray]:
         periods = self.time_grid.periods
         p_ch = np.array([pyo.value(self.p_ch[t]) for t in periods])
         p_dis = np.array([pyo.value(self.p_dis[t]) for t in periods])
         dt = self.time_grid.dt_hours
-        return {
+        out = {
             "p_ch": p_ch,
             "p_dis": p_dis,
             "soc": np.array([pyo.value(self.soc[t]) for t in periods]),
             "net_power": p_dis - p_ch,
             "cost": self.degradation_cost_per_kwh * (p_ch + p_dis) * dt,
         }
+        if self.targeted:
+            short, price = np.zeros(len(periods)), np.full(len(periods), np.nan)
+            duals = model_duals(model)
+            for i, departure_t, target in self.targeted:
+                row = self._row_of[i]
+                if self.shortfall_per_kwh is not None:
+                    short[row] += float(pyo.value(self.short[i]))
+                else:
+                    short[row] += max(target - float(pyo.value(self.soc[departure_t])), 0.0)
+                constraint = self._departure_constraints.get(i)
+                if duals is not None and constraint is not None and constraint in duals:
+                    price[row] = abs(float(duals[constraint]))
+            out |= {"shortfall_kwh": short,
+                    "shortfall_cost": short * (self.shortfall_per_kwh or 0.0),
+                    "departure_price": price,
+                    "driving_uncovered_kwh": np.zeros(len(periods))}
+        return out
+
+    def departures(self, dispatch) -> list[dict]:
+        """Each targeted departure in a run: target, floor, stored, short, its cost and
+        (optimized LP runs) its shadow price, $ per kWh more at departure."""
+        frame = dispatch.device_dispatch
+        rows = []
+        for i, departure_t, target in self.targeted:
+            row = self._row_of[i]
+            get = lambda key: frame[f"{self.name}.{key}"].iloc[row] if f"{self.name}.{key}" in frame else np.nan  # noqa: E731
+            stored = get("soc") if departure_t < self.time_grid.horizon_steps else dispatch.final_state.get(
+                self.name, {}).get("soc", np.nan)
+            rows.append({"departure": frame.index[row], "target_kwh": target,
+                         "floor_kwh": self.soc_departure_floor, "stored_kwh": stored,
+                         "short_kwh": get("shortfall_kwh"), "shortfall_cost": get("shortfall_cost"),
+                         "shadow_price_per_kwh": get("departure_price")})
+        return rows

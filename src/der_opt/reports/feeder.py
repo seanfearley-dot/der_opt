@@ -64,10 +64,13 @@ def build(folder: Path, summary: dict, page: Page | None = None) -> Page:
         for label, run in runs.items():
             row = {"run": label, "total": run["total"], "customer bills": run["customer_bills"],
                    "degradation": run["degradation"]}
+            if any((r.get("ev_shortfall") or 0) > 0 for r in runs.values()):
+                row |= {"EV shortfall (intangible)": run.get("ev_shortfall") or 0.0,
+                        "EV kWh short": run.get("ev_shortfall_kwh") or 0.0}
             row |= {f"network: {k}": v for k, v in (run.get("network_costs") or {}).items()}
             rows.append(row)
         frame = pd.DataFrame(rows)
-        page.table(section, frame, formats={c: money for c in frame.columns if c != "run"})
+        page.table(section, frame, formats={c: money for c in frame.columns if c not in ("run", "EV kWh short")})
 
     _loading(page, folder, summary, labels)
     _congestion(page, folder, summary)

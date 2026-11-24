@@ -163,6 +163,8 @@ def _run_feeder(scenario: Path, output_dir: Path | None, no_counterfactual: bool
     rows = {
         "Customer bills": {k: r.house_costs["bill"].sum() for k, r in runs.items()},
         "Battery/EV degradation": {k: r.house_costs["degradation"].sum() for k, r in runs.items()},
+        **({"EV shortfall (intangible)": {k: r.house_costs["ev_shortfall"].sum() for k, r in runs.items()}}
+           if any(r.house_costs["ev_shortfall"].sum() > 0 for r in runs.values()) else {}),
     }
     for cost_name in next(iter(runs.values())).network_costs:
         rows[{"overload": "Transformer overload", "violation": "Beyond emergency ratings"}.get(cost_name, cost_name)] = {
@@ -209,7 +211,9 @@ def _run_feeder(scenario: Path, output_dir: Path | None, no_counterfactual: bool
             )
 
     if "independent" in runs:
-        change = runs["coordinated"].house_costs.sum(axis=1) - runs["independent"].house_costs.sum(axis=1)
+        from der_opt.scenarios.feeder import customer_cost
+
+        change = customer_cost(runs["coordinated"].house_costs) - customer_cost(runs["independent"].house_costs)
         worse = change[change > 0.005]
         typer.echo("\nCoordination vs each premise optimizing alone:")
         if worse.empty:
@@ -268,6 +272,11 @@ def _run_feeder(scenario: Path, output_dir: Path | None, no_counterfactual: bool
             for label, run in runs.items()
         }
         _write_checks(output_dir, scenario, config, report, results, composed)
+        from der_opt.results.extract import ev_departures_table
+
+        departures = ev_departures_table(built.premises, {label: run.dispatches for label, run in runs.items()})
+        if not departures.empty:
+            departures.to_csv(output_dir / "ev_departures.csv", index=False, float_format="%.4f")
         from der_opt.results.summary import feeder_summary, write_summary
 
         write_summary(output_dir, feeder_summary(built, study, summaries, report))
@@ -784,6 +793,12 @@ def _run_scenario(scenario: Path, output_dir: Path | None = None, duals: bool = 
         dispatch_plot(dispatch, title=premise.name).savefig(output_dir / "dispatch.png")
         value_stack(breakdown, title=premise.name).savefig(output_dir / "value_stack.png")
 
+        from der_opt.results.extract import ev_departures_table
+
+        departures = ev_departures_table([premise], {"optimal": {premise.name: dispatch}, **(
+            {"counterfactual": {premise.name: counterfactual}} if counterfactual is not None else {})})
+        if not departures.empty:
+            departures.to_csv(output_dir / "ev_departures.csv", index=False, float_format="%.4f")
         breakdown_table = pd.DataFrame({"optimal": pd.Series(breakdown)})
         if counterfactual is not None:
             breakdown_table["counterfactual"] = pd.Series(cf_breakdown)

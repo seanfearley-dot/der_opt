@@ -18,7 +18,10 @@ class LegacySolverBackend(SolverBackend):
         options = dict(self.config.options)
         if self.config.time_limit_s is not None:
             options.setdefault("time_limit", self.config.time_limit_s)
-        return opt.solve(model, tee=False, options=options)
+        result = opt.solve(model, tee=False, options=options)
+        model._der_backend = self  # for der_opt.pricing.duals.model_duals
+        model.__dict__.pop("_der_duals", None)
+        return result
 
     def get_duals(self, model: pyo.ConcreteModel) -> dict:
         duals = {}
@@ -50,7 +53,10 @@ class AppsiHighsBackend(SolverBackend):
         if self.config.time_limit_s is not None:
             opt.config.time_limit = self.config.time_limit_s
         self._opt = opt
-        return opt.solve(model)
+        result = opt.solve(model)
+        model._der_backend = self  # for der_opt.pricing.duals.model_duals
+        model.__dict__.pop("_der_duals", None)
+        return result
 
     def get_duals(self, model: pyo.ConcreteModel) -> dict:
         if self._opt is None:

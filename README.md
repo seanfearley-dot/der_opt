@@ -317,7 +317,7 @@ A template's counterfactual policy gives the scenario a counterfactual run.
 |---|---|---|
 | `solar` | `available_kw` *array* | — |
 | `battery` | `capacity_kwh`, `p_max_charge_kw`, `p_max_discharge_kw` | `eta_charge` (0.95), `eta_discharge` (0.95), `soc_min_frac` (0), `soc_max_frac` (1), `soc_init_frac` (0.5), `soc_final_min_frac`, `degradation_cost_per_kwh` (0), `charge_sources`, `smoothing_cost_per_kw` (0) |
-| `ev_v2x` | `capacity_kwh`, `p_max_charge_kw`, `p_max_discharge_kw`, and either `pattern` (a daily pattern, below) or `connected` *array* (0/1 plug-in schedule) | same SOC/efficiency/degradation params as battery, plus `departure_period` (int or list; default: every step where `connected` goes from 1 to 0), `soc_departure_min_frac` (float or list), `charge_sources`, `smoothing_cost_per_kw`, `driving_kwh` *array* (kWh used driving each period; without it SOC is frozen while away) |
+| `ev_v2x` | `capacity_kwh`, `p_max_charge_kw`, `p_max_discharge_kw`, and either `pattern` (a daily pattern, below) or `connected` *array* (0/1 plug-in schedule) | same SOC/efficiency/degradation params as battery, plus `departure_period` (int or list; default: every step where `connected` goes from 1 to 0), `soc_departure_min_frac` (float or list), `charge_sources`, `smoothing_cost_per_kw`, `driving_kwh` *array* (kWh used driving each period; without it SOC is frozen while away), `departure_shortfall_per_kwh` and `soc_departure_floor_frac` (below) |
 | `thermostat` | `thermal_resistance_r`, `thermal_capacitance_c`, `ambient_temp_c` *array*, `comfort_min_c`, `comfort_max_c`, `cop`, `p_max_kw`, `initial_temp_c` | `mode` (`cooling` / `heating`) |
 | `curtailable_load` | `baseline_load_kw` *array*, `block_size_kw`, `max_blocks` | — |
 
@@ -374,6 +374,28 @@ away for any part of counts as away, so on an hourly run 07:30 counts as 07:00 a
 18:30 as 19:00. `validate` and `run` note it when that happens, and warn when the car
 isn't home long enough to charge back a trip. `run` prints the departures, miles,
 driving kWh and hours plugged in.
+
+**Hard or priced departure targets** ([docs/EV_SHORTFALL_SPEC.md](docs/EV_SHORTFALL_SPEC.md)).
+`soc_departure_min_frac` is hard by default: the car always leaves at or above it, and
+a run that can't manage that fails. Give it a price instead, and the optimizer may leave
+the car short when that's cheaper than the alternatives (charging at a higher price,
+overloading a transformer):
+
+```yaml
+    soc_departure_min_frac: 0.9
+    departure_shortfall_per_kwh: 0.80   # $ per kWh short of the target: an intangible cost
+    soc_departure_floor_frac: 0.5       # hard at every departure, priced or not
+```
+
+The shortfall is an intangible cost: the optimizer weighs it and each run's total
+includes it, on its own line, but it's never part of a bill, and a feeder's "who pays
+more" compares bills only. `ev_departures.csv` lists every departure in every run: the
+target, what was stored, kWh short and its cost, and in optimized runs the departure's
+shadow price, what one more kWh at that departure would cost. A rule-based run is
+measured against the same target but not priced (nothing shaped its charging). Pick a
+price above what the home pays to charge: below it, a home optimizing its own bill
+skips charging and pays the shortfall instead, which `run` warns about. Driving stays
+hard, so `validate` warns when a floor can't cover the car's longest trip.
 
 ### Value streams
 

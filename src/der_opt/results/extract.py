@@ -51,3 +51,22 @@ def build_dispatch_result(premise, model: pyo.ConcreteModel, solver_result, obje
         solver_status=_solver_status(solver_result),
         final_state=final_state,
     )
+
+
+def ev_departures_table(premises, runs: dict[str, dict]) -> pd.DataFrame:
+    """Every targeted EV departure in every run (docs/EV_SHORTFALL_SPEC.md section 4):
+    `runs` maps a run's label to {premise name: DispatchResult}."""
+    rows = []
+    for premise in premises:
+        for device in premise.devices:
+            if not getattr(device, "targeted", None):
+                continue
+            for label, dispatches in runs.items():
+                dispatch = dispatches.get(premise.name)
+                if dispatch is None:
+                    continue
+                for row in device.departures(dispatch):
+                    rows.append({"premise_id": premise.name, "device": device.name, "run": label, **row})
+    columns = ["premise_id", "device", "run", "departure", "target_kwh", "floor_kwh", "stored_kwh", "short_kwh",
+               "shortfall_cost", "shadow_price_per_kwh"]
+    return pd.DataFrame(rows, columns=columns)

@@ -44,6 +44,23 @@ def _fix_and_resolve(model: pyo.ConcreteModel, backend: SolverBackend):
     return duals, _FIX_AND_RESOLVE_NOTE
 
 
+def model_duals(model: pyo.ConcreteModel) -> dict | None:
+    """Every constraint's dual from the backend that last solved `model`, read once and
+    kept on the model; None when there's no LP answer to read (no backend recorded, or
+    on/off variables, whose duals would need fix-and-resolve)."""
+    if hasattr(model, "_der_duals"):
+        return model._der_duals
+    backend = getattr(model, "_der_backend", None)
+    duals = None
+    if backend is not None and not _has_active_integer_vars(model):
+        try:
+            duals = backend.get_duals(model)
+        except Exception:  # noqa: BLE001 (a solver without duals: report none)
+            duals = None
+    model._der_duals = duals
+    return duals
+
+
 def extract_duals(
     model: pyo.ConcreteModel,
     backend: SolverBackend,

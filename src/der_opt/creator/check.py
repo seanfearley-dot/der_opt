@@ -20,7 +20,8 @@ KEY_STEPS = (("baseline_behavior", 9), ("response: rules", 9), ("participation",
              ("counterfactual", 8), ("dr", 10), ("cost_test", 12), ("avoided_costs", 12), ("defaults", 5))
 CHECK_STEPS = {"dr calendar": 10, "cost test": 12, "cases": 12, "billing": 6, "tariff dates": 6, "price units": 6,
                "device names": 5, "ev pattern": 5, "load": 3, "population": 3, "coordination": 11, "files": 3,
-               "time grid": 2, "data": 3, "avoided costs": 12}
+               "time grid": 2, "data": 3, "avoided costs": 12, "ev floor": 5,
+               "ev departures": 5, "driving not covered": 5}
 
 
 @dataclass
