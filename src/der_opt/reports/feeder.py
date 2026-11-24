@@ -92,7 +92,7 @@ def _loading(page: Page, folder: Path, summary: dict, labels: list[str]) -> None
                 rows.append({"run": label, "element": element, "rating kW": row.get("rating_kw"),
                              "peak kW": row.get("peak_kw"), "peak at": (row.get("peak_time") or "")[:16].replace("T", " "),
                              "% of rating": row.get("peak_pct_of_rating"), "hours over": row.get("hours_over"),
-                             "kWh over": row.get("kwh_over"), "max backfeed kW": row.get("max_backfeed_kw")})
+                             "hours at rating": row.get("hours_at_rating"), "kWh over": row.get("kwh_over"), "max backfeed kW": row.get("max_backfeed_kw")})
         frame = pd.DataFrame(rows)
         grid = frame.assign(cell=[f"{r['peak kW']:.1f} kW" + (f" ({r['% of rating']:.0f}%" if pd.notna(r["% of rating"])
                                    else "") + (f", {r['hours over']:g} h over)" if r["hours over"] else

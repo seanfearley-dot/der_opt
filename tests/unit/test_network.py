@@ -191,3 +191,18 @@ def test_a_daily_emergency_budget_sends_the_rest_to_the_violation_band():
     result, _, _ = network.solve()
     costs = network.network_costs(result.flows)
     assert costs["overload"] == pytest.approx(3.0) and costs["violation"] == pytest.approx(100.0 * 1)
+
+
+def test_loading_summary_counts_hours_at_rating():
+    import pandas as pd
+
+    feeder = Feeder("f", [NetworkElement("tx", rating_kw=4, emergency_rating_kw=6, overload_cost_per_kwh=1.0), NetworkElement("line")],
+                    attachments={"h1": "tx"})
+    flows = pd.DataFrame({"tx": [4.0, 3.0, 4.0, 7.0], "line": [4.0, 3.0, 4.0, 7.0]}, index=pd.RangeIndex(4))
+    summary = loading_summary(flows, feeder, TG)
+    assert summary.loc["tx", "hours_at_rating"] == 3  # at it twice, over it once
+    assert summary.loc["tx", "hours_over"] == 1
+    assert summary.loc["tx", "hours_over_emergency"] == 1
+    # no rating: nothing to be at, and no emergency figure (NaN in the table, not a number)
+    assert pd.isna(summary.loc["line", "hours_at_rating"])
+    assert pd.isna(summary.loc["line", "hours_over_emergency"])

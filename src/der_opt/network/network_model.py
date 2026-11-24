@@ -169,6 +169,10 @@ def loading_summary(flows: pd.DataFrame, feeder: Feeder, time_grid: TimeGrid) ->
             over = np.clip(np.abs(flow) - element.rating_kw, 0, None)
             row["peak_pct_of_rating"] = 100 * float(np.abs(flow).max()) / element.rating_kw
             row["hours_over"] = float((over > 1e-6).sum() * time_grid.dt_hours)
+            # at the rating or over it: where the limit can bind (a $0 price there means holding
+            # it cost nothing, not that it never bound)
+            at = np.abs(flow) >= element.rating_kw * (1 - 1e-4) - 1e-3
+            row["hours_at_rating"] = float(at.sum() * time_grid.dt_hours)
             row["kwh_over"] = float(over.sum() * time_grid.dt_hours)
         if element.emergency_rating_kw:
             beyond = np.clip(np.abs(flow) - element.emergency_rating_kw, 0, None)

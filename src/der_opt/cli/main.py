@@ -187,8 +187,8 @@ def _run_feeder(scenario: Path, output_dir: Path | None, no_counterfactual: bool
             if element.rating_kw:
                 text += f" ({row['peak_pct_of_rating']:.0f}%"
                 text += f", {row['hours_over']:.0f} h over" if row["hours_over"] else ""
-                text += (f", {row['hours_over_emergency']:.0f} h over emergency"
-                         if row.get("hours_over_emergency") else "") + ")"
+                beyond = row.get("hours_over_emergency")
+                text += (f", {beyond:.0f} h over emergency" if pd.notna(beyond) and beyond > 0 else "") + ")"
             parts.append(text)
         rating = (f" [{element.rating_kw:g} kW" + (f", emergency {element.emergency_rating_kw:g} kW"
                                                    if element.emergency_rating_kw else "") + "]"
@@ -202,12 +202,22 @@ def _run_feeder(scenario: Path, output_dir: Path | None, no_counterfactual: bool
     for element in built.feeder.elements:
         series = prices[element.name]
         binding = series[series.abs() > 1e-3]
-        if binding.empty:
-            typer.echo(f"  {element.name}: none -- the limit never binds")
+        at = summaries["coordinated"].loc[element.name].get("hours_at_rating") if "coordinated" in summaries else None
+        at = float(at) if at is not None and pd.notna(at) else 0.0
+        priced = len(binding) * time_grid.dt_hours
+        if not element.rating_kw:
+            typer.echo(f"  {element.name}: none -- no rating")
+        elif binding.empty and not at:
+            typer.echo(f"  {element.name}: none -- below its rating throughout")
+        elif binding.empty:
+            typer.echo(f"  {element.name}: $0 -- at its rating for {at:g} h, but holding it there cost nothing "
+                       "(the load it moved had somewhere free to go)")
         else:
+            free = at - priced
             typer.echo(
                 f"  {element.name}: up to ${binding.max():.2f} in {len(binding)} hours "
                 f"(highest {binding.idxmax()}); ${binding.sum() * time_grid.dt_hours:.2f} per kW over the run"
+                + (f"; at its rating another {free:g} h at $0" if free > 1e-9 else "")
             )
 
     if "independent" in runs:
@@ -262,6 +272,11 @@ def _run_feeder(scenario: Path, output_dir: Path | None, no_counterfactual: bool
                 frames[name] = frame
             slug = label.replace(" ", "_").replace("(", "").replace(")", "")
             pd.concat(frames, axis=1).to_csv(output_dir / f"dispatch_{slug}.csv")
+        from der_opt.results.extract import ev_departures_table
+
+        departures = ev_departures_table(built.premises, {label: run.dispatches for label, run in runs.items()})
+        if not departures.empty:
+            departures.to_csv(output_dir / "ev_departures.csv", index=False, float_format="%.4f")
         feeder_loading_plot({label: run.flows for label, run in runs.items()}, built.feeder, title=built.config.name).savefig(
             output_dir / "feeder_loading.png", dpi=120
         )
@@ -272,11 +287,6 @@ def _run_feeder(scenario: Path, output_dir: Path | None, no_counterfactual: bool
             for label, run in runs.items()
         }
         _write_checks(output_dir, scenario, config, report, results, composed)
-        from der_opt.results.extract import ev_departures_table
-
-        departures = ev_departures_table(built.premises, {label: run.dispatches for label, run in runs.items()})
-        if not departures.empty:
-            departures.to_csv(output_dir / "ev_departures.csv", index=False, float_format="%.4f")
         from der_opt.results.summary import feeder_summary, write_summary
 
         write_summary(output_dir, feeder_summary(built, study, summaries, report))
@@ -783,6 +793,12 @@ def _run_scenario(scenario: Path, output_dir: Path | None = None, duals: bool = 
 
         output_dir.mkdir(parents=True, exist_ok=True)
         dispatch.device_dispatch.to_csv(output_dir / "device_dispatch.csv")
+        from der_opt.results.extract import ev_departures_table
+
+        departures = ev_departures_table([premise], {"optimal": {premise.name: dispatch}, **(
+            {"counterfactual": {premise.name: counterfactual}} if counterfactual is not None else {})})
+        if not departures.empty:
+            departures.to_csv(output_dir / "ev_departures.csv", index=False, float_format="%.4f")
         from der_opt.population.compile import resolve_scenario
         from der_opt.population.report import parameters_table
 
@@ -793,12 +809,6 @@ def _run_scenario(scenario: Path, output_dir: Path | None = None, duals: bool = 
         dispatch_plot(dispatch, title=premise.name).savefig(output_dir / "dispatch.png")
         value_stack(breakdown, title=premise.name).savefig(output_dir / "value_stack.png")
 
-        from der_opt.results.extract import ev_departures_table
-
-        departures = ev_departures_table([premise], {"optimal": {premise.name: dispatch}, **(
-            {"counterfactual": {premise.name: counterfactual}} if counterfactual is not None else {})})
-        if not departures.empty:
-            departures.to_csv(output_dir / "ev_departures.csv", index=False, float_format="%.4f")
         breakdown_table = pd.DataFrame({"optimal": pd.Series(breakdown)})
         if counterfactual is not None:
             breakdown_table["counterfactual"] = pd.Series(cf_breakdown)
