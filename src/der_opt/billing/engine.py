@@ -39,7 +39,7 @@ class NBTProgram:
     """Net Billing Tariff settings for one customer.
 
     export_rates_csv: the export compensation rate table for the customer's
-        interconnection-application vintage (e.g. examples/data/pge_nbt_eec_2026.csv).
+        interconnection-application vintage (e.g. examples/data/export_rates/pge_nbt_eec_2026.csv).
     acc_plus_per_kwh: ACC Plus adder for that vintage (2026 residential: 0.0088).
     nsc_rate_per_kwh / nsc_debit_rate_per_kwh: Net Surplus Compensation rate and the
         average NBT export rate surplus kWh are debited at. Only used at a true-up with

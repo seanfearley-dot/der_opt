@@ -14,7 +14,7 @@ from der_opt.scenarios.compose import compose_scenario
 from der_opt.scenarios.library import STARTER_LIBRARY, read_library
 
 REPO = Path(__file__).parent.parent.parent
-HOME = REPO / "examples" / "data" / "spec_sample" / "annual_home.csv"
+HOME = REPO / "examples" / "data" / "homes" / "annual_home.csv"
 runner = CliRunner()
 DR_BLOCKS = ["year_2026", "battery_13kwh", "pge_e_elec_2026-06_import", "panel_20kw", "battery_self_consumption",
              "summer_peak_incentive", "cost_tests/synthetic_2026"]

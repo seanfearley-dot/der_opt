@@ -9,18 +9,32 @@ from der_opt.ui.project import Project
 from der_opt.ui.views import esc, q
 
 
+SCOPES = {"time series": "timeseries", "premises": "premises", "devices": "devices", "network": "network",
+          "prices": "prices", "export rates": "export_rates", "events": "events", "price signal": "price_signal"}
+
+
 def data_files(project: Project) -> dict[str, list[str]]:
-    """Files a form can suggest: CSVs, tariff YAMLs and avoided cost sets."""
+    """Files a form can suggest: CSVs, tariff YAMLs and avoided cost sets. Each CSV is
+    also filed under its kind (its header says: time series, premises, devices,
+    network, prices, export rates, events, price signal), so a field offers only its
+    own; an avoided cost set's parts aren't offered on their own."""
+    from der_opt.inputs.spec import detect_kind
+
     files, tariffs, sets = [], [], []
+    scoped: dict[str, list[str]] = {scope: [] for scope in SCOPES.values()}
     for path in project._walk("*", 6):
         relative = str(project.relative(path))
         if path.suffix == ".csv":
             files.append(relative)
+            scope = SCOPES.get(detect_kind(path))
+            if scope:
+                scoped[scope].append(relative)
         elif path.suffix == ".yaml" and path.parent.name == "tariffs":
             tariffs.append(relative)
         elif path.name == "manifest.yaml":
             sets.append(str(project.relative(path.parent)))
-    return {"files": sorted(files), "tariffs": sorted(tariffs), "sets": sorted(sets)}
+    return {"files": sorted(files), "tariffs": sorted(tariffs), "sets": sorted(sets),
+            **{scope: sorted(values) for scope, values in scoped.items()}}
 
 
 def _datalists(lists: dict[str, list[str]]) -> str:

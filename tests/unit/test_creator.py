@@ -17,10 +17,10 @@ REPO = Path(__file__).parent.parent.parent
 DATA = REPO / "examples" / "data"
 LIBRARY = REPO / "examples" / "library"
 
-OPTIONS = Options(timeseries=DATA / "spec_sample" / "annual_home.csv", premise="home_a",
-                  tariff=DATA / "tariffs" / "pge_e_elec_2026-06.yaml", export_rates=DATA / "pge_nbt_eec_2026.csv",
+OPTIONS = Options(timeseries=DATA / "homes" / "annual_home.csv", premise="home_a",
+                  tariff=DATA / "tariffs" / "pge_e_elec_2026-06.yaml", export_rates=DATA / "export_rates/pge_nbt_eec_2026.csv",
                   avoided_costs=DATA / "avoided_costs" / "synthetic_2026",
-                  price=DATA / "caiso_lmp_np15_dam_2026-07-13.csv", premises=DATA / "spec_sample" / "premises.csv",
+                  price=DATA / "prices/caiso_lmp_np15_dam_2026-07-13.csv", premises=DATA / "spec_sample" / "premises.csv",
                   devices=DATA / "spec_sample" / "devices.csv", network=DATA / "spec_sample" / "network.csv")
 
 
@@ -84,3 +84,29 @@ def test_a_window_from_a_date_a_time_and_days():
     form["when"] = {"mode": "year", "year": 2026, "date": "2026-07-13", "days": 3}
     answers, _ = from_form(form)
     assert (answers.when.year, answers.when.start) == (2026, None)
+
+
+def test_a_study_can_put_every_home_on_one_tariff(tmp_path):
+    """A tariff YAML in a study is every home's default; a premises.csv row that names
+    a tariff keeps its own. No export program writes no NBT settings to fill in."""
+    import pandas as pd
+
+    from der_opt.creator.answers import Answers, Data, Prices, When
+    from der_opt.creator.writer import compose_answers
+    from der_opt.population.compile import resolve_study
+    from der_opt.scenarios.schema import StudyConfig
+
+    table = pd.read_csv(DATA / "spec_sample" / "premises.csv")
+    table["tariff"] = ["pge_e_elec_2026-06"] + [""] * (len(table) - 1)
+    table.to_csv(tmp_path / "premises.csv", index=False)
+    answers = Answers(kind="portfolio", name="one_tariff", when=When(year=2026),
+                      data=Data(premises=str(tmp_path / "premises.csv"), devices=str(DATA / "spec_sample/devices.csv"),
+                                timeseries_files=[str(DATA / "spec_sample/timeseries.csv")]),
+                      prices=Prices(objective="bill", tariff=str(DATA / "tariffs/pge_e_tou_c_2026-06.yaml"),
+                                    program="none", baseline_territory="X"))
+    text, _ = compose_answers(answers, tmp_path / "study.yaml", tmp_path, None)
+    assert "TODO" not in text and "nbt" not in text
+    (tmp_path / "study.yaml").write_text(text, encoding="utf-8")
+    resolved, _, _ = resolve_study(StudyConfig.model_validate(compose_scenario(tmp_path / "study.yaml").data), {})
+    tariffs = [Path(r.settings["billing"]["tariff"]).stem for r in resolved if "billing" in r.settings]
+    assert tariffs[0] == "pge_e_elec_2026-06" and set(tariffs[1:]) == {"pge_e_tou_c_2026-06"}

@@ -29,7 +29,7 @@ population:
 tariffs:
   dir: ../data/tariffs # premises.csv `tariff` names a file here
   programs: # settings for each export_program named in premises.csv
-    nbt: {export_rates_csv: ../data/pge_nbt_eec_2026.csv, acc_plus_per_kwh: 0.0088}
+    nbt: {export_rates_csv: ../data/export_rates/pge_nbt_eec_2026.csv, acc_plus_per_kwh: 0.0088}
     nem2: {nsc_rate_per_kwh: 0.02781}
 
 defaults:

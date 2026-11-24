@@ -27,7 +27,20 @@ downstream changes.
 
 One page, steps down the left, each a short form. A step is done when its required
 fields are; any step can be revisited. The YAML preview and the check (section 3) sit
-on the right and update as you go. **Step 1 decides which steps appear:**
+on the right and update as you go.
+
+- **Each file field offers only files of its kind,** read from the file's header:
+  time series, premises, devices, network, prices (`timestamp, *_per_kwh`), export
+  rates (`day_type, month, hour, …_usd_per_kwh`), events (`event_id, start, end`),
+  price signals (`timestamp, element_id, price_per_kwh`); tariffs are YAMLs in a
+  `tariffs` folder and avoided cost sets are folders with a `manifest.yaml`, whose
+  parts aren't offered alone. "Another path…" takes anything.
+- **The side panel follows the step:** it lists the step's files (Network: the network
+  file; Devices: the devices file, or each device's library block; Who takes part: the
+  premises and devices files) and opens the first. A step with none shows the file it
+  writes.
+
+**Step 1 decides which steps appear:**
 
 | Kind | Steps |
 |---|---|

@@ -10,8 +10,8 @@ from der_opt.integrations.pge_nbt_export import (
 )
 from der_opt.time_grid import TimeGrid
 
-CSV_PATH = Path(__file__).parent.parent.parent / "examples" / "data" / "pge_nbt_eec_2026.csv"
-PDF_PATH = Path(__file__).parent.parent.parent / "examples" / "data" / "pge_eec_price_sheet_2026.pdf"
+CSV_PATH = Path(__file__).parent.parent.parent / "examples" / "data" / "export_rates/pge_nbt_eec_2026.csv"
+PDF_PATH = Path(__file__).parent.parent.parent / "examples" / "data" / "references/pge_eec_price_sheet_2026.pdf"
 
 
 def test_load_eec_table_has_expected_shape():

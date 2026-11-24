@@ -620,10 +620,33 @@ def read_network(path: str | Path, strict: bool = True) -> NetworkFile:
 # --- any file -----------------------------------------------------------------------
 
 
+KINDS = ("time series", "premises", "devices", "network", "prices", "export rates", "events", "price signal",
+         "avoided costs")
+EXPORT_RATE_COLUMNS = ("day_type", "month", "hour", "produced_usd_per_kwh", "delivered_usd_per_kwh")
+EVENT_COLUMNS = ("event_id", "start", "end", "program_id", "event_type")
+PRICE_SIGNAL_COLUMNS = ("timestamp", "element_id", "price_per_kwh")
+
+
 def detect_kind(path: str | Path) -> str:
-    header = Path(path).read_text(encoding="utf-8").removeprefix("﻿").splitlines()[0]
-    names = {c.strip().lower() for c in header.split(",")}
+    """What a CSV is, from its header (and an avoided cost set's folder)."""
+    path = Path(path)
+    if (path.parent / "manifest.yaml").is_file():
+        return "avoided costs"  # one part of a set: the set is checked as a whole
+    try:
+        with path.open(encoding="utf-8") as handle:
+            first = handle.readline().removeprefix("\ufeff")
+    except (OSError, UnicodeDecodeError):
+        return "unknown"
+    names = {c.strip().lower() for c in first.strip().split(",")} if first.strip() else set()
+    if {"day_type", "month", "hour"} <= names and any(n.endswith("_usd_per_kwh") for n in names):
+        return "export rates"
+    if {"event_id", "start", "end"} <= names:
+        return "events"
+    if {"timestamp", "element_id", "price_per_kwh"} <= names:
+        return "price signal"
     if "timestamp" in names:
+        if not names & set(VALUE_COLUMNS) and any(n.endswith("_per_kwh") for n in names):
+            return "prices"
         return "time series"
     if {"premise_id", "device_id", "type"} <= names:
         return "devices"
@@ -632,6 +655,73 @@ def detect_kind(path: str | Path) -> str:
     if "element_id" in names:
         return "network"
     return "unknown"
+
+
+def _check_prices(path: Path) -> tuple[CheckReport, dict]:
+    """A price series (`der-opt fetch-lmp`'s, or any timestamp, *_per_kwh): times that
+    parse and step evenly, prices that are numbers."""
+    report = CheckReport()
+    frame = _read_csv(path, report)
+    if frame is None:
+        return report, {}
+    columns = [c for c in frame.columns if c.endswith("_per_kwh")]
+    found = []
+    times = pd.to_datetime(frame["timestamp"], errors="coerce")
+    if times.isna().any():
+        found.append(_err("timestamps", f"{int(times.isna().sum())} timestamp(s) don't parse"))
+    elif len(times) > 1:
+        steps = times.diff().dropna().dt.total_seconds().div(60).round().astype(int)
+        if steps.nunique() > 1:
+            found.append(_warn("timestamps", f"steps vary ({sorted(steps.unique())[:4]} minutes); a scenario "
+                                             "takes the price before each step"))
+    for column in columns:
+        values = pd.to_numeric(frame[column], errors="coerce")
+        if values.isna().any():
+            found.append(_err("numbers", f"{column}: {int(values.isna().sum())} value(s) aren't numbers"))
+    report.ran("prices", found)
+    summary = {"kind": "prices", "columns": columns, "rows": len(frame)}
+    if not times.isna().any() and len(times):
+        summary["from"], summary["to"] = str(times.iloc[0]), str(times.iloc[-1])
+    return report, summary
+
+
+def _check_table(path: Path, kind: str, required: tuple[str, ...]) -> tuple[CheckReport, dict]:
+    """Export rates, events and price signals: the columns their readers need."""
+    report = CheckReport()
+    frame = _read_csv(path, report)
+    if frame is None:
+        return report, {}
+    found = []
+    missing = [c for c in required if c not in frame.columns]
+    if missing:
+        found.append(_err("columns", f"missing {missing}; a {kind} file has {list(required)}"))
+    elif kind == "export rates":
+        hours = pd.to_numeric(frame["hour"], errors="coerce")
+        if hours.isna().any() or not hours.between(0, 23).all():
+            found.append(_err("hours", "hour must be 0-23"))
+        days = set(frame["day_type"]) - {"weekday", "weekend_holiday"}
+        if days:
+            found.append(_err("day types", f"day_type must be weekday or weekend_holiday, not {sorted(days)}"))
+        expected = len(set(frame["day_type"])) * len(set(frame["month"])) * 24
+        if len(frame.drop_duplicates(["day_type", "month", "hour"])) < expected:
+            found.append(_warn("coverage", "some day type, month and hour combinations have no rate"))
+    elif kind == "events":
+        for column in ("start", "end"):
+            bad = [v for v in frame[column].astype(str) if not ISO_WITH_OFFSET.match(v.strip())]
+            if bad:
+                found.append(_err("times", f"{column}: {len(bad)} time(s) without a UTC offset, e.g. {bad[0]!r}"))
+    elif kind == "price signal":
+        if pd.to_datetime(frame["timestamp"], errors="coerce").isna().any():
+            found.append(_err("timestamps", "some timestamps don't parse"))
+        if pd.to_numeric(frame["price_per_kwh"], errors="coerce").isna().any():
+            found.append(_err("numbers", "price_per_kwh has values that aren't numbers"))
+    report.ran(kind, found)
+    summary = {"kind": kind, "rows": len(frame)}
+    if kind == "events":
+        summary["events"] = int(frame["event_id"].nunique()) if "event_id" in frame else 0
+    if kind == "price signal" and "element_id" in frame:
+        summary["elements"] = sorted(map(str, frame["element_id"].unique()))[:10]
+    return report, summary
 
 
 def check_file(path: str | Path, premises: str | Path | None = None, network: str | Path | None = None) -> tuple[str, CheckReport, dict]:
@@ -679,9 +769,20 @@ def check_file(path: str | Path, premises: str | Path | None = None, network: st
         result = read_network(path, strict=False)
         report = result.report
         summary = {"spec_version": SPEC_VERSION, "kind": "network", "elements": len(result.table)}
+    elif kind == "prices":
+        report, summary = _check_prices(Path(path))
+    elif kind in ("export rates", "events", "price signal"):
+        required = {"export rates": EXPORT_RATE_COLUMNS, "events": EVENT_COLUMNS,
+                    "price signal": PRICE_SIGNAL_COLUMNS}[kind]
+        report, summary = _check_table(Path(path), kind, required)
+    elif kind == "avoided costs":
+        from der_opt.avoided_costs import read_set
+
+        report = read_set(Path(path).parent, strict=False).report
+        summary = {"kind": "avoided costs", "set": str(Path(path).parent)}
     else:
         report = CheckReport()
-        report.ran("kind", [_err("kind", "first row names none of timestamp, premise_id or element_id; is the "
-                                 "header the first row?")])
+        report.ran("kind", [_err("kind", "first row names none of timestamp, premise_id, element_id, event_id or "
+                                 "day_type; is the header the first row?")])
         summary = {"spec_version": SPEC_VERSION, "kind": "unknown"}
     return kind, report, summary

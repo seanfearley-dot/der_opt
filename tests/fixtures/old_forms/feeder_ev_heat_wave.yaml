@@ -47,7 +47,7 @@ premise_data:
   timeseries: [../../../examples/data/heat_wave/timeseries.csv]
   tariff_dir: ../../../examples/data/tariffs
   programs:
-    nbt: {export_rates_csv: ../../../examples/data/pge_nbt_eec_2026.csv, acc_plus_per_kwh: 0.0088}
+    nbt: {export_rates_csv: ../../../examples/data/export_rates/pge_nbt_eec_2026.csv, acc_plus_per_kwh: 0.0088}
 
 house_defaults:
   poi_limit_kw: 30

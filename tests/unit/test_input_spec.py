@@ -229,3 +229,21 @@ def test_quality_checks_flag_bad_data():
     for series, check in ((outage, "zero runs"), (flat, "flat runs"), (spike, "spikes"), (good * 1000 + 500, "units")):
         assert check in {f.check for f in check_series(series).findings}, check
     assert "units" in {f.check for f in check_series(good + 150, home_peak_kw=100).findings}
+
+
+def test_check_data_knows_prices_export_rates_events_and_price_signals(tmp_path):
+    data = REPO / "examples" / "data"
+    assert check_file(data / "prices" / "caiso_lmp_np15_dam_2026-07-13.csv")[0] == "prices"
+    assert check_file(data / "export_rates" / "pge_nbt_eec_2026.csv")[0] == "export rates"
+    kind, report, _ = check_file(data / "avoided_costs" / "synthetic_2026" / "hourly.csv")
+    assert kind == "avoided costs" and not report.errors  # a set's part: the set is checked
+    for kind, text, ok in (
+        ("events", "event_id,start,end,program_id,event_type\ne1,2026-07-13T16:00:00-07:00,2026-07-13T19:00:00-07:00,p,dr",
+         True),
+        ("events", "event_id,start,end,program_id,event_type\ne1,2026-07-13T16:00,2026-07-13T19:00,p,dr", False),
+        ("price signal", "timestamp,element_id,price_per_kwh\n2026-07-13T16:00:00,tx_1,0.2", True),
+        ("price signal", "timestamp,element_id,price_per_kwh\n2026-07-13T16:00:00,tx_1,high", False),
+        ("prices", "timestamp,lmp_per_kwh\n2026-07-13T00:00:00,0.04\n2026-07-13T01:00:00,x", False),
+    ):
+        got, report, _ = check_file(_write(tmp_path, text))
+        assert got == kind and (not report.errors) == ok, (kind, text)

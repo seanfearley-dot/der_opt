@@ -10,7 +10,7 @@ from der_opt.validation import crosscheck_annual_bill
 
 pytest.importorskip("PySAM", reason="NREL-PySAM is an optional dependency (der-opt[validation])")
 
-URDB_PATH = Path(__file__).parent.parent.parent / "examples" / "data" / "sample_tariff_urdb.json"
+URDB_PATH = Path(__file__).parent.parent.parent / "examples" / "data" / "references/sample_tariff_urdb.json"
 
 
 def _year_dispatch(import_kw: float, export_kw: float) -> DispatchResult:

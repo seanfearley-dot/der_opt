@@ -306,7 +306,7 @@ population:
   templates: [../library/devices]
 tariffs:
   dir: ../data/tariffs
-  programs: {nbt: {export_rates_csv: ../data/pge_nbt_eec_2026.csv, acc_plus_per_kwh: 0.0088}}
+  programs: {nbt: {export_rates_csv: ../data/export_rates/pge_nbt_eec_2026.csv, acc_plus_per_kwh: 0.0088}}
 objective: bill # each premise's own optimization: bill, or a value_streams list
 defaults: [...]
 overrides: {...}

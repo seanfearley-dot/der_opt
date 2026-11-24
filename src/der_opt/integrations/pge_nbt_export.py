@@ -5,7 +5,7 @@ varying by interconnection-application vintage year, month, weekday/weekend, and
 A customer's rate is locked to their application-year vintage for 9 years.
 
 Source: PG&E's official EEC price sheets (https://www.pge.com/solarbilling ->
-"PGE-EEC-Price-Sheets.zip", one PDF per vintage year). examples/data/pge_nbt_eec_2026.csv
+"PGE-EEC-Price-Sheets.zip", one PDF per vintage year). examples/data/export_rates/pge_nbt_eec_2026.csv
 in this repo is the 2026 vintage, parsed from that PDF via parse_eec_price_sheet_pdf
 below -- coordinate-based word extraction (pdfplumber's table-line heuristic merges
 adjacent hour rows on this PDF's tight ~6pt row spacing, so extract_tables() is NOT
@@ -98,7 +98,7 @@ class NBTExportPriceSeries(PriceSeries):
 def parse_eec_price_sheet_pdf(pdf_path: str | Path) -> dict[str, list[dict]]:
     """Parses one of PG&E's official EEC price sheet PDFs (e.g. from
     PGE-EEC-Price-Sheets.zip at https://www.pge.com/solarbilling) directly, for
-    updating/regenerating a CSV like examples/data/pge_nbt_eec_2026.csv for a
+    updating/regenerating a CSV like examples/data/export_rates/pge_nbt_eec_2026.csv for a
     different vintage year. Requires the optional 'pdfplumber' dependency.
 
     Returns {"weekday": [...], "weekend_holiday": [...]}, each a list of

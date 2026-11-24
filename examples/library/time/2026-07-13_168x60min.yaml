@@ -1,6 +1,6 @@
 # der-opt starter library block (examples/library/README.md). Values marked illustrative are placeholders: copy the library and set your own.
 # 13-19 Jul 2026, hourly: the CAISO LMP file's week
-# one week, matching ../../data/caiso_lmp_np15_dam_2026-07-13.csv
+# one week, matching ../../data/prices/caiso_lmp_np15_dam_2026-07-13.csv
 time_grid:
   resolution_minutes: 60
   horizon_steps: 168

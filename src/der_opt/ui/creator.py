@@ -292,7 +292,7 @@ def steps_html(device_blocks: list[str], files: dict[str, list[str]]) -> str:
                + _f("Which homes", ".where", "yaml", "a where, e.g. {element_id: tx_1}; blank = all") + "</div>")
     deferral_row = ('<div class="row-grid">' + _f("Element", ".element") + _f("$/kW (a year)", ".value_per_kw", "num")
                     + _f("Above kW", ".threshold_kw", "num") + "</div>")
-    files_hint = "in the project; " + (f"e.g. {files['csv'][0]}" if files.get("csv") else "a CSV")
+    files_hint = "timestamp, load_kw (pv_kw, outdoor_temp_c as needed)"
     s = []
     kinds = (("home", "Single home", "One home and its devices: dispatch, bill, DR and cost tests."),
              ("portfolio", "Portfolio", "Many homes, each optimized on its own, with no network between them: "
@@ -316,13 +316,13 @@ def steps_html(device_blocks: list[str], files: dict[str, list[str]]) -> str:
         + _f("Step", "when.resolution_minutes", "select", attrs='data-default="60"',
              options=[("60", "1 hour"), ("30", "30 minutes"), ("15", "15 minutes")]) + "</div>"))
     s.append(_step(3, '<div data-kinds="home">' + _f("Time series file", "data.timeseries", hint=files_hint,
-                                                       attrs='list="dl-csv"')
+                                                       attrs='list="dl-timeseries"')
              + _f("Premise", "data.premise", hint="its premise_id in that file") + "</div>"
-             + '<div data-kinds="portfolio feeder both">' + _f("Premises file", "data.premises", attrs='list="dl-csv"')
-             + _f("Devices file", "data.devices", attrs='list="dl-csv"')
-             + _f("Time series files", "data.timeseries_files", "list", "comma-separated", attrs='list="dl-csv"')
+             + '<div data-kinds="portfolio feeder both">' + _f("Premises file", "data.premises", attrs='list="dl-premises"')
+             + _f("Devices file", "data.devices", attrs='list="dl-devices"')
+             + _f("Time series files", "data.timeseries_files", "list", "comma-separated", attrs='list="dl-timeseries"')
              + '<div data-kinds="feeder both">' + _f("Network file", "data.network", hint="or enter elements in step 4",
-                                                     attrs='list="dl-csv"') + "</div>"
+                                                     attrs='list="dl-network"') + "</div>"
              + _f("Time zone", "data.tz") + "</div>"))
     s.append(_step(4, '<p class="note">Rows here replace the network file. The congestion price on an element is the '
                       'cost of one more kW through it: a hard limit gives exact prices but stops the run if load nobody '
@@ -342,19 +342,20 @@ def steps_html(device_blocks: list[str], files: dict[str, list[str]]) -> str:
         ("bill", "the bill (tariff and export program)"), ("arbitrage", "an import price (the tariff) and a flat export"),
         ("lmp", "a wholesale price file, both ways")], attrs="data-rerender")
         + '<div data-when="prices.objective=bill|arbitrage">'
-        + _f("Tariff", "prices.tariff", hint="a tariff YAML (a study: the tariffs folder)", attrs='list="dl-tariffs"')
+        + _f("Tariff", "prices.tariff", hint="a tariff YAML; a study can instead take each home's from premises.csv's "
+             "tariff column (a folder), and a home whose row names one keeps it", attrs='list="dl-tariffs"')
         + '<div data-kinds="home" data-when="prices.objective=arbitrage">'
         + _f("Flat export $/kWh", "prices.export_price", "num", "what the optimizer is paid for exports")
         + _f("Bill it too", "prices.billed", "bool", "a billing section, so the report shows the bill") + "</div>"
         + '<div data-when="prices.objective=bill||prices.billed=true">'
         + _f("Export program", "prices.program", "select", attrs="data-rerender",
              options=[("nbt", "NBT export credits"), ("nem2", "NEM 2.0"), ("none", "none: exports earn nothing")])
-        + '<div data-when="prices.program=nbt">' + _f("NBT export rates", "prices.export_rates", hint="CSV",
-                                                         attrs='list="dl-csv"') + "</div>"
+        + '<div data-when="prices.program=nbt">' + _f("NBT export rates", "prices.export_rates", hint="day_type, month, hour, produced and delivered $/kWh",
+                                                         attrs='list="dl-export_rates"') + "</div>"
         + _f("Baseline territory", "prices.baseline_territory", hint="PG&E, for a tariff with a baseline (e.g. X)")
         + "</div></div>"
         + '<div data-when="prices.objective=lmp">' + _f("Price file", "prices.price", hint="timestamp, lmp_per_kwh",
-                                                       attrs='list="dl-csv"') + "</div>"))
+                                                       attrs='list="dl-prices"') + "</div>"))
     s.append(_step(7, _f("Meter limit, kW", "meter.poi_limit_kw", "num", "both directions")
              + _f("Import limit, kW", "meter.import_limit_kw", "num") + _f("Export limit, kW", "meter.export_limit_kw",
                                                                             "num", "0 = non-export")
@@ -409,7 +410,7 @@ def steps_html(device_blocks: list[str], files: dict[str, list[str]]) -> str:
                    + '<div data-when="?dr.events.price_yaml">' + _f("Price-based", "dr.events.price", "yaml",
                      "series, events_per_year, duration") + "</div>"
                    + '<div data-when="?dr.events.file">' + _f("Events file", "dr.events.file",
-                     hint="event_id, start, end, program_id, event_type", attrs='list="dl-csv"') + "</div>"
+                     hint="event_id, start, end, program_id, event_type", attrs='list="dl-events"') + "</div>"
                    + '<div data-kinds="home">' + _f("Customer class", "dr.customer_class", "select", options=[
                        ("residential", "residential (5-in-10)"), ("commercial", "commercial (10-in-10)")]) + "</div>"
                    + "</div>"))
@@ -424,7 +425,7 @@ def steps_html(device_blocks: list[str], files: dict[str, list[str]]) -> str:
              + _f("Schedule", "coordination.price_signal.schedule", "yaml", "[{element, per_kwh, hours}]") + "</div>"
              + '<div data-when="coordination.price_signal.source=file">'
              + _f("Price file", "coordination.price_signal.path", hint="timestamp, element_id, price_per_kwh",
-                  attrs='list="dl-csv"') + "</div>"),
+                  attrs='list="dl-price_signal"') + "</div>"),
             ("envelopes", "Operating envelopes", _f("Import shared by", "coordination.envelopes.import.method", "select",
                                                     options=[(m, m) for m in ("pro_rata_need", "equal", "service_size",
                                                                               "weights", "max_min", "fixed", "file")])
@@ -519,14 +520,15 @@ def page(project, token: str, library: Path, files: dict[str, list[str]]) -> str
     start_json, defaults_json = embedded(start), embedded(DEFAULTS)
     tariff_dirs = sorted({str(Path(t).parent) for t in files.get("tariffs", [])})
     extra_json = embedded({"blocks": block_params, "modes": MODES, "rules": RULES,
-                           "files": {**files, "tariff_dirs": tariff_dirs}})
+                           "files": {**files, "tariff_dirs": tariff_dirs},
+                           "labels": {d: f"{d}/ (each home's premises.csv tariff)" for d in tariff_dirs}})
     body = f"""<div class="crumbs"><a href="/">Scenarios and runs</a> / new</div><h1>New scenario or study</h1>
 <p class="note">Start from a preset, or step by step. The file on the right is what will be written; each step lists
 its checks as you go. Nothing is written until Review.</p><div class="presets">Presets: {presets}<span class="summary"></span></div>{lists}
 <div class="creator"><nav class="steps">{nav}</nav><form class="flow" onsubmit="return false">
 {steps_html(device_blocks, files)}<div class="row"><button type="button" class="small" data-prev>Back</button>
 <button type="button" class="small" data-next>Next</button></div></form>
-<aside class="preview"><div class="pane-tabs"><button type="button" data-pane-tab="file">Selected file</button>
+<aside class="preview"><div class="step-files"></div><div class="pane-tabs"><button type="button" data-pane-tab="file">Selected file</button>
 <button type="button" data-pane-tab="yaml" class="on">The file it writes</button></div>
 <div class="pane" data-pane-box="file" hidden><p class="note">Select a file field, or pick a file in one, and it
 opens here to read or edit.</p></div><div class="pane" data-pane-box="yaml"><pre class="yaml"></pre></div></aside></div>
@@ -678,6 +680,9 @@ CSS = """
 .pane-tabs{display:flex;gap:4px;margin-bottom:6px}.pane-tabs button{padding:3px 10px;font-size:12px;border-radius:6px;
 border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer}
 .pane-tabs button.on{color:var(--ink);border-color:var(--accent)}
+.step-files{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-bottom:8px}.step-files:empty{display:none}
+.step-files .note{margin:0 4px 0 0}.step-files button{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.step-files button.on{border-color:var(--accent);color:var(--ink)}
 .pane .file-name{margin:4px 0 6px;font-size:13px;word-break:break-all}
 .pane textarea.file-text{width:100%;min-height:calc(100vh - 230px);font:11.5px/1.4 ui-monospace,Menlo,monospace;
 white-space:pre;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--bg);color:var(--ink)}
@@ -778,14 +783,15 @@ const[m,k]=sel.dataset.rule.split(".");R[m]=R[m]||{};if(sel.value)R[m][k]={actio
 const opt=(v,label,on)=>`<option value="${v.replace(/"/g,"&quot;")}" ${on?"selected":""}>`+
 label.replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]))+"</option>";
 function picks(){form.querySelectorAll("select[data-pick]").forEach(sel=>{const key=sel.dataset.pick;
-let list=sel.dataset.files;if(list==="tariffs"&&S.kind!=="home")list="tariff_dirs";
-const files=(X.files||{})[list]||[],input=sel.parentElement.querySelector("input"),raw=get(key),
+const list=sel.dataset.files,F=X.files||{},name=f=>(X.labels||{})[f]||f;
+const files=list==="tariffs"&&S.kind!=="home"?[...(F.tariff_dirs||[]),...(F.tariffs||[])]:F[list]||[];
+const input=sel.parentElement.querySelector("input"),raw=get(key),
 cur=raw==="TODO"?null:raw;
 if(sel.dataset.add){sel.innerHTML=opt("","add a file…",true)+files.map(f=>opt(f,f,false)).join("");input.hidden=false;
 sel.onchange=()=>{if(sel.value){const l=get(key)||[];if(!l.includes(sel.value))l.push(sel.value);set(key,l);
 show(input,l);changed();openFile(sel.value);}sel.value="";};return;}
 const known=cur!=null&&files.includes(cur),other=cur!=null&&cur!==""&&!known;
-sel.innerHTML=opt("","choose…",cur==null)+files.map(f=>opt(f,f,f===cur)).join("")+opt("__other","another path…",other);
+sel.innerHTML=opt("","choose…",cur==null)+files.map(f=>opt(f,name(f),f===cur)).join("")+opt("__other","another path…",other);
 input.hidden=!other;input.onchange=()=>openFile(input.value);
 sel.onchange=()=>{if(sel.value==="__other"){input.hidden=false;input.value="";input.focus();}
 else{input.hidden=true;set(key,sel.value||null);show(input,get(key));changed();openFile(sel.value);}};});}
@@ -793,8 +799,10 @@ function paneTab(t){document.querySelectorAll("[data-pane-tab]").forEach(b=>b.cl
 document.querySelectorAll("[data-pane-box]").forEach(p=>p.hidden=p.dataset.paneBox!==t);}
 document.querySelectorAll("[data-pane-tab]").forEach(b=>b.onclick=()=>paneTab(b.dataset.paneTab));
 let openPath=null;
-async function openFile(path){openPath=path||null;const box=document.querySelector('[data-pane-box="file"]');
-const r=await fetch("/create/file?path="+encodeURIComponent(path||""));box.innerHTML=await r.text();paneTab("file");
+let fileSeq=0;  // only the latest file asked for is shown
+async function openFile(path){openPath=path||null;markStepFiles();const box=document.querySelector('[data-pane-box="file"]');
+const mine=++fileSeq;const r=await fetch("/create/file?path="+encodeURIComponent(path||""));const html=await r.text();
+if(mine!==fileSeq)return;box.innerHTML=html;paneTab("file");
 box.querySelectorAll("[data-open]").forEach(b=>b.onclick=()=>openFile(b.dataset.open));
 box.querySelectorAll("[data-open-app],[data-reveal]").forEach(b=>b.onclick=async()=>{const body=new URLSearchParams({
 path:b.dataset.openApp||b.dataset.reveal,how:b.dataset.reveal?"reveal":"open"});const r=await fetch("/create/open-file",
@@ -805,8 +813,9 @@ const ta=box.querySelector("textarea.file-text");const body=new URLSearchParams(
 const r2=await fetch("/create/save-file",{method:"POST",headers:{"X-Token":TOKEN},body});
 box.querySelector(".file-status").innerHTML=r2.ok?await r2.text():'<span class="status bad">'+await r2.text()+"</span>";
 changed();};}
-async function openBlock(name){if(!name)return;openPath="block:"+name;const box=document.querySelector('[data-pane-box="file"]');
-const r=await fetch("/create/file?block="+encodeURIComponent(name));box.innerHTML=await r.text();paneTab("file");
+async function openBlock(name){if(!name)return;openPath="block:"+name;markStepFiles();const box=document.querySelector('[data-pane-box="file"]');
+const mine=++fileSeq;const r=await fetch("/create/file?block="+encodeURIComponent(name));const html=await r.text();
+if(mine!==fileSeq)return;box.innerHTML=html;paneTab("file");
 const save=box.querySelector("[data-save-file]");if(save)save.onclick=async()=>{const ta=box.querySelector("textarea.file-text");
 const body=new URLSearchParams({path:ta.dataset.path,content:ta.value});const r2=await fetch("/create/save-file",
 {method:"POST",headers:{"X-Token":TOKEN},body});box.querySelector(".file-status").innerHTML=r2.ok?await r2.text():
@@ -829,8 +838,28 @@ const allowed=KINDS[S.kind]||KINDS.home;document.querySelectorAll("[data-goto]")
 a.hidden=!allowed.includes(+a.dataset.goto);a.classList.toggle("on",+a.dataset.goto===step);});
 form.querySelectorAll("[data-kinds]").forEach(d=>d.hidden=!d.dataset.kinds.split(" ").includes(S.kind)||
 (d.dataset.when!==undefined&&!holds(d.dataset.when)));
-form.querySelectorAll("section.step").forEach(s=>s.hidden=+s.dataset.step!==step);}
-function changed(){clearTimeout(timer);timer=setTimeout(preview,250);}
+form.querySelectorAll("section.step").forEach(s=>s.hidden=+s.dataset.step!==step);stepFilesBar();}
+const ALSO={4:["data.network"],5:["data.devices"],9:["data.premises","data.devices"]};  // files set elsewhere, read here
+function stepFiles(){const sec=form.querySelector(`section.step[data-step="${step}"]`),keys=[],out=[];
+if(sec)sec.querySelectorAll("select[data-pick]").forEach(s=>{if(!s.closest("[hidden]"))keys.push(s.dataset.pick);});
+(ALSO[step]||[]).forEach(k=>{if(!keys.includes(k))keys.push(k);});
+const add=(p,label)=>{if(p&&p!=="TODO"&&!out.some(o=>o.p===p))out.push({p,label});};
+keys.forEach(k=>{const v=get(k);(Array.isArray(v)?v:[v]).forEach(f=>add(f,f));});
+if(step===5){(S.devices||[]).forEach(d=>d.template&&add("block:devices/"+d.template,"block: "+d.template));
+(S.add_devices||[]).forEach(a=>a.device&&a.device.template&&add("block:devices/"+a.device.template,"block: "+a.device.template));}
+return out;}
+const openAny=p=>p.startsWith("block:")?openBlock(p.slice(6)):openFile(p);
+let shownStep=null;
+function stepFilesBar(){const bar=document.querySelector(".step-files"),list=stepFiles();
+const at=s=>s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+bar.innerHTML=list.length?'<span class="note">This step\'s files:</span>'+list.map(f=>`<button type="button" class="small" `+
+`data-step-file="${at(f.p)}" title="${at(f.p)}">${at(f.label.split("/").pop())}</button>`).join(""):"";
+bar.querySelectorAll("[data-step-file]").forEach(b=>b.onclick=()=>openAny(b.dataset.stepFile));markStepFiles();
+if(shownStep!==step){shownStep=step;if(!list.length){fileSeq++;paneTab("yaml");}  // nothing of its own: the file it writes
+else if(!list.some(f=>f.p===openPath))openAny(list[0].p);}}
+function markStepFiles(){document.querySelectorAll(".step-files [data-step-file]").forEach(b=>
+b.classList.toggle("on",b.dataset.stepFile===openPath));}
+function changed(){clearTimeout(timer);timer=setTimeout(preview,250);stepFilesBar();}
 async function preview(){const mine=++seq;const body=new URLSearchParams({answers:JSON.stringify(S),target:S._target||""});
 const r=await fetch("/create/preview",{method:"POST",headers:{"X-Token":TOKEN},body});if(mine!==seq)return;
 const d=await r.json();document.querySelector("pre.yaml").textContent=d.text||"";const by={};

@@ -36,7 +36,7 @@ feeder:
   background_load:
     - name: strip_mall
       element: tx_2
-      load: {source: timeseries, path: ../../../examples/data/spec_sample/background.csv, premise_id: strip_mall, column: load_kw}
+      load: {source: timeseries, path: ../../../examples/data/spec_sample/background/strip_mall.csv, premise_id: strip_mall, column: load_kw}
 
 house_defaults:
   value_streams: # replaces homes_bill's bill objective: these homes aren't billed on a tariff here

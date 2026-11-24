@@ -40,7 +40,7 @@ def _study(tmp_path: Path, **changes) -> Path:
         "population": {"premises": str(SAMPLE / "premises.csv"), "devices": str(SAMPLE / "devices.csv"),
                        "timeseries": [str(SAMPLE / "timeseries.csv")], "network": str(SAMPLE / "network.csv")},
         "tariffs": {"dir": str(DATA / "tariffs"),
-                    "programs": {"nbt": {"export_rates_csv": str(DATA / "pge_nbt_eec_2026.csv"),
+                    "programs": {"nbt": {"export_rates_csv": str(DATA / "export_rates/pge_nbt_eec_2026.csv"),
                                          "acc_plus_per_kwh": 0.0088}, "nem2": {"nsc_rate_per_kwh": 0.02781}}},
         "objective": "bill",
         "analyses": {"feeder": {}},

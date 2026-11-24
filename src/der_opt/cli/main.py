@@ -1158,7 +1158,8 @@ def _print_data_report(summary: dict, report) -> None:
 
 @app.command("check-data")
 def check_data(
-    path: Path = typer.Argument(..., help="A time series, premises or network CSV, or an avoided cost set folder"),
+    path: Path = typer.Argument(..., help="A time series, premises, devices, network, prices, export rates, events "
+                                "or price signal CSV, or an avoided cost set folder"),
     premises: Path | None = typer.Option(None, "--premises", help="premises.csv, to cross-check premise IDs"),
     network: Path | None = typer.Option(None, "--network", help="network.csv, to cross-check element IDs"),
 ) -> None:
@@ -1174,7 +1175,9 @@ def check_data(
         typer.echo(f"{path}: avoided cost set, avoided cost spec v1.0")
     else:
         kind, report, summary = check_file(path, premises=premises, network=network)
-        typer.echo(f"{path}: {kind} file, input data spec v{SPEC_VERSION}")
+        spec = f"input data spec v{SPEC_VERSION}" if kind in ("time series", "premises", "devices", "network") else \
+            "the format its reader takes"
+        typer.echo(f"{path}: {kind} file, {spec}")
     _print_data_report({k: v for k, v in summary.items() if k not in ("kind", "spec_version")}, report)
     if report.errors:
         typer.echo("\nRejected: fix the errors above; the file won't load until then.")

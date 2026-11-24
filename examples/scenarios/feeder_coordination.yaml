@@ -104,7 +104,7 @@ premises:
   - name: strip_mall # background: fixed, not billed, never flexible
     element: tx_2
     kind: background
-    external_load: {source: timeseries, path: ../data/spec_sample/background.csv, premise_id: strip_mall, column: load_kw}
+    external_load: {source: timeseries, path: ../data/spec_sample/background/strip_mall.csv, premise_id: strip_mall, column: load_kw}
 
 analyses:
   feeder:

@@ -25,7 +25,7 @@ from der_opt.simulation import CounterfactualSimulator
 
 REPO = Path(__file__).parent.parent.parent
 LIBRARY = REPO / "examples" / "library"
-HOME = REPO / "examples" / "data" / "spec_sample" / "annual_home.csv"
+HOME = REPO / "examples" / "data" / "homes" / "annual_home.csv"
 
 
 def _home(tmp_path: Path, devices: list[str], without: dict | None = None, **changes) -> ScenarioConfig:

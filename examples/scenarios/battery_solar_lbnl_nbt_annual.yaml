@@ -19,7 +19,7 @@
 #     - type: energy_arbitrage
 #       params:
 #         import_price: {type: retail_tariff, path: ../data/tariffs/pge_e_elec_2026-06.yaml}
-#         export_price: {type: nbt_export, csv_path: ../data/pge_nbt_eec_2026.csv, adder_per_kwh: 0.0088}
+#         export_price: {type: nbt_export, csv_path: ../data/export_rates/pge_nbt_eec_2026.csv, adder_per_kwh: 0.0088}
 
 extends:
   - ../library/time/year_2026.yaml

@@ -19,7 +19,7 @@ REPO = Path(__file__).parent.parent.parent
 LIBRARY = REPO / "examples" / "library"
 EXAMPLES = REPO / "examples" / "scenarios"
 DATA = REPO / "examples" / "data"
-HOME = DATA / "spec_sample" / "annual_home.csv"
+HOME = DATA / "homes" / "annual_home.csv"
 runner = CliRunner()
 
 # scenarios built here, for the blocks no example uses
@@ -145,13 +145,13 @@ def test_program_blocks_combine(built):
 
 
 @pytest.mark.parametrize("template, args", [
-    ("dr-battery", ["--timeseries", "spec_sample/annual_home.csv", "--tariff", "tariffs/pge_e_elec_2026-06.yaml",
+    ("dr-battery", ["--timeseries", "homes/annual_home.csv", "--tariff", "tariffs/pge_e_elec_2026-06.yaml",
                     "--avoided-costs", "avoided_costs/synthetic_2026"]),
-    ("home-bill", ["--timeseries", "spec_sample/annual_home.csv", "--tariff", "tariffs/pge_e_tou_c_2026-06.yaml",
+    ("home-bill", ["--timeseries", "homes/annual_home.csv", "--tariff", "tariffs/pge_e_tou_c_2026-06.yaml",
                    "--program", "nem2", "--baseline-territory", "X"]),
-    ("home-bill", ["--timeseries", "spec_sample/annual_home.csv", "--tariff", "tariffs/pge_e_elec_2026-06.yaml",
-                   "--export-rates", "pge_nbt_eec_2026.csv"]),
-    ("lmp-battery", ["--price", "caiso_lmp_np15_dam_2026-07-13.csv"]),
+    ("home-bill", ["--timeseries", "homes/annual_home.csv", "--tariff", "tariffs/pge_e_elec_2026-06.yaml",
+                   "--export-rates", "export_rates/pge_nbt_eec_2026.csv"]),
+    ("lmp-battery", ["--price", "prices/caiso_lmp_np15_dam_2026-07-13.csv"]),
 ])
 def test_new_reuses_the_library_and_writes_nothing_into_it(tmp_path, template, args):
     args = [str(DATA / a) if not a.startswith("--") and a not in ("nem2", "X") else a for a in args]

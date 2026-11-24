@@ -113,7 +113,7 @@ def test_extends_errors(tmp_path):
 def _home_with_files(root: Path) -> Path:
     """A scenario in root/scen that reads root/data/prices.csv and a fragment in root/lib
     that names a tariff in root/tariffs."""
-    shutil.copy(DATA / "caiso_lmp_np15_dam_2026-07-13.csv", _write(root / "data" / "prices.csv", ""))
+    shutil.copy(DATA / "prices/caiso_lmp_np15_dam_2026-07-13.csv", _write(root / "data" / "prices.csv", ""))
     shutil.copy(DATA / "tariffs" / "pge_e_elec_2026-06.yaml", _write(root / "tariffs" / "e_elec.yaml", ""))
     _write(root / "lib" / "billing.yaml", "billing: {tariff: ../tariffs/e_elec.yaml}\n")
     return _write(root / "scen" / "lmp.yaml", """
@@ -246,11 +246,11 @@ def test_new_lists_templates():
 
 def test_new_dr_battery_with_a_library_validates_once_filled_in(tmp_path):
     project = tmp_path / "project"
-    for name in ("spec_sample/annual_home.csv", "tariffs/pge_e_elec_2026-06.yaml"):
+    for name in ("homes/annual_home.csv", "tariffs/pge_e_elec_2026-06.yaml"):
         _write(project / "data" / name, "")
         shutil.copy(DATA / name, project / "data" / name)
     shutil.copytree(DATA / "avoided_costs" / "synthetic_2026", project / "data" / "synthetic_2026")
-    args = ["--timeseries", str(project / "data/spec_sample/annual_home.csv"),
+    args = ["--timeseries", str(project / "data/homes/annual_home.csv"),
             "--tariff", str(project / "data/tariffs/pge_e_elec_2026-06.yaml"),
             "--avoided-costs", str(project / "data/synthetic_2026"), "--library", str(project / "library")]
     first = runner.invoke(app, ["new", "dr-battery", str(project / "scen" / "home_a.yaml"), *args])
@@ -258,7 +258,7 @@ def test_new_dr_battery_with_a_library_validates_once_filled_in(tmp_path):
     assert "5 TODOs to fill in" in first.output and first.output.count("new fragment") == 7
     scenario = project / "scen" / "home_a.yaml"
     text = scenario.read_text(encoding="utf-8")
-    assert "path: ../data/spec_sample/annual_home.csv, premise_id: home_a" in text  # relative, premise found
+    assert "path: ../data/homes/annual_home.csv, premise_id: home_a" in text  # relative, premise found
     assert "- ../library/programs/summer_peak_incentive.yaml" in text
 
     todo = runner.invoke(app, ["validate", str(scenario)])
@@ -282,9 +282,9 @@ def test_new_dr_battery_with_a_library_validates_once_filled_in(tmp_path):
 
 
 @pytest.mark.parametrize("template, args", [
-    ("home-bill", ["--timeseries", "spec_sample/annual_home.csv", "--tariff", "tariffs/pge_e_elec_2026-06.yaml",
-                   "--export-rates", "pge_nbt_eec_2026.csv"]),
-    ("lmp-battery", ["--price", "caiso_lmp_np15_dam_2026-07-13.csv"]),
+    ("home-bill", ["--timeseries", "homes/annual_home.csv", "--tariff", "tariffs/pge_e_elec_2026-06.yaml",
+                   "--export-rates", "export_rates/pge_nbt_eec_2026.csv"]),
+    ("lmp-battery", ["--price", "prices/caiso_lmp_np15_dam_2026-07-13.csv"]),
 ])
 def test_new_templates_that_need_nothing_else_validate(tmp_path, template, args):
     args = [str(DATA / a) if not a.startswith("--") else a for a in args]
@@ -302,7 +302,7 @@ def test_new_feeder_and_nem2_leave_todos_for_what_they_cant_know(tmp_path):
                                  "--devices", str(DATA / "spec_sample/devices.csv"),
                                  "--network", str(DATA / "spec_sample/network.csv"),
                                  "--timeseries", str(DATA / "spec_sample/timeseries.csv"),
-                                 "--export-rates", str(DATA / "pge_nbt_eec_2026.csv")])
+                                 "--export-rates", str(DATA / "export_rates/pge_nbt_eec_2026.csv")])
     assert result.exit_code == 0 and "1 TODO" in result.output
     config = yaml.safe_load(feeder.read_text(encoding="utf-8"))
     assert config["time_grid"]["horizon_steps"] == 8760  # the time series file's span: all of 2026
@@ -315,7 +315,7 @@ def test_new_feeder_and_nem2_leave_todos_for_what_they_cant_know(tmp_path):
 
     nem2 = tmp_path / "nem2.yaml"
     runner.invoke(app, ["new", "home-bill", str(nem2), "--program", "nem2",
-                        "--timeseries", str(DATA / "spec_sample/annual_home.csv"),
+                        "--timeseries", str(DATA / "homes/annual_home.csv"),
                         "--tariff", str(DATA / "tariffs/pge_e_tou_c_2026-06.yaml")])
     assert "baseline_territory: TODO" in nem2.read_text(encoding="utf-8")
     nem2.write_text(nem2.read_text(encoding="utf-8").replace("baseline_territory: TODO", "baseline_territory: X"),

@@ -6,5 +6,5 @@ billing:
   income_tier: 3
   program:
     type: nbt
-    export_rates_csv: ../../data/pge_nbt_eec_2026.csv
+    export_rates_csv: ../../data/export_rates/pge_nbt_eec_2026.csv
     acc_plus_per_kwh: 0.0088

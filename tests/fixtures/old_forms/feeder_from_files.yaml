@@ -26,7 +26,7 @@ premise_data:
   tz: America/Los_Angeles
   tariff_dir: ../../../examples/data/tariffs # premises.csv `tariff` names a file here
   programs: # settings for each export_program named in premises.csv
-    nbt: {export_rates_csv: ../../../examples/data/pge_nbt_eec_2026.csv, acc_plus_per_kwh: 0.0088}
+    nbt: {export_rates_csv: ../../../examples/data/export_rates/pge_nbt_eec_2026.csv, acc_plus_per_kwh: 0.0088}
     nem2: {nsc_rate_per_kwh: 0.02781}
 
 feeder:

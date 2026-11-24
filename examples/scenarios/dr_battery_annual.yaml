@@ -2,7 +2,7 @@
 # for DR studies (docs/DR_CAPACITY_SPEC.md). Run with:
 #   der-opt run examples/scenarios/dr_battery_annual.yaml -o out/dr
 #
-# The home is synthetic (../data/spec_sample/annual_home.csv, input data spec):
+# The home is synthetic (../data/homes/annual_home.csv, input data spec):
 # gross load with an AC that follows an inland California climate, and rooftop solar.
 # Prices: E-ELEC import; a flat $0.05/kWh for export keeps this a fast LP (a real NBT
 # export rate can exceed import, which needs exclusive_import_export, a MILP).
@@ -26,6 +26,6 @@ devices:
   - type: solar
     name: solar
     params:
-      available_kw: {source: timeseries, path: ../data/spec_sample/annual_home.csv, premise_id: home_a, column: pv_kw}
+      available_kw: {source: timeseries, path: ../data/homes/annual_home.csv, premise_id: home_a, column: pv_kw}
 
-external_load: {source: timeseries, path: ../data/spec_sample/annual_home.csv, premise_id: home_a, column: load_kw}
+external_load: {source: timeseries, path: ../data/homes/annual_home.csv, premise_id: home_a, column: load_kw}

@@ -42,9 +42,9 @@ pytest -q
   `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 * Environment variables: `$env:NREL_API_KEY = "..."` instead of `export`, and
   `$env:MPLBACKEND = "Agg"` before running the example scripts.
-* The repo has no remote. To move it with its history, run
-  `git bundle create der-opt.bundle --all` here, then `git clone der-opt.bundle der-opt` there. Don't copy `.venv`:
-  it holds this machine's builds.
+* Get the code with `git clone https://github.com/seanfearley-dot/der_opt.git "optimization tools"`
+  (it carries only what's been pushed). Don't copy `.venv` from another machine: it
+  holds that machine's builds.
 * The examples that use the LBNL Phase 4 dataset or the EV charging model point at
   `/Users/seanearley/...`. Copy those datasets over and edit the paths; forward
   slashes work in YAML on Windows (`C:/Users/you/Documents/LBNL_Phase_4`) and avoid
@@ -286,7 +286,7 @@ counterfactual:                     # optional; see Counterfactuals below
 
 billing:                            # optional; see Billing below
   tariff: ../data/tariffs/pge_e_elec_2026-06.yaml
-  program: {type: nbt, export_rates_csv: ../data/pge_nbt_eec_2026.csv, acc_plus_per_kwh: 0.0088}
+  program: {type: nbt, export_rates_csv: ../data/export_rates/pge_nbt_eec_2026.csv, acc_plus_per_kwh: 0.0088}
 ```
 
 ### Devices
@@ -393,7 +393,7 @@ Price series (`import_price` / `export_price`):
 {type: daily_tou, hourly_pattern: [24 values, $/kWh by hour of day]}
 {type: csv, path: prices.csv, column: price}          # first column = timestamps (see below)
 {type: retail_tariff, path: ../data/tariffs/pge_e_elec_2026-06.yaml}  # total $/kWh of a billing tariff
-{type: nbt_export, csv_path: ../data/pge_nbt_eec_2026.csv, adder_per_kwh: 0.0088}
+{type: nbt_export, csv_path: ../data/export_rates/pge_nbt_eec_2026.csv, adder_per_kwh: 0.0088}
     # real PG&E NBT export rate; adder_per_kwh = ACC Plus for the customer's application
     # year (residential: 2023 0.022, 2024 0.0176, 2025 0.0132, 2026 0.0088, 2027 0.0044);
     # include_produced: false drops the generation half, for CCA/DA customers
@@ -528,7 +528,7 @@ tariff sheets, not from memory.
 billing:
   tariff: ../data/tariffs/pge_e_elec_2026-06.yaml
   income_tier: 3                  # base services charge tier (3 = not CARE/FERA)
-  program: {type: nbt, export_rates_csv: ../data/pge_nbt_eec_2026.csv, acc_plus_per_kwh: 0.0088}
+  program: {type: nbt, export_rates_csv: ../data/export_rates/pge_nbt_eec_2026.csv, acc_plus_per_kwh: 0.0088}
   # or, for NEM 2.0 on E-TOU-C:
   # tariff: ../data/tariffs/pge_e_tou_c_2026-06.yaml
   # baseline_territory: R         # the customer's baseline territory letter
@@ -694,7 +694,16 @@ writes them too:
 
 `check-data` names every rule a file breaks (exit code 1) and warns about suspect
 data: empty cells, a day or more without consumption, 12 h unchanged, spikes, a home
-over 100 kW. It also reports the period covered and each premise's kWh.
+over 100 kW. It also reports the period covered and each premise's kWh. It knows the
+other CSVs a scenario reads, by their header: a price series (`timestamp,
+lmp_per_kwh`), NBT export rates, a DR events file and a price signal file; a file in an
+avoided cost set is checked with its set.
+
+`examples/data/` keeps each kind of file apart: `homes/` (single homes' time series),
+`spec_sample/`, `heat_wave/` and `new_subdivision/` (populations: premises, devices,
+time series and, for the sample, a network and its background load), `prices/`,
+`export_rates/`, `tariffs/`, `avoided_costs/`, `loadcast/`, and `references/` (source
+documents, not read by a run).
 
 **Using the files.** For a single premise, any array or price can come from a file:
 

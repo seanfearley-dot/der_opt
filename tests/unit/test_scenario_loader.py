@@ -61,7 +61,7 @@ def test_csv_external_load_is_resampled(tmp_path):
 
 
 def test_lbnl_source_external_load_and_daily_tou_and_nbt_export(tmp_path):
-    nbt_csv = Path(__file__).parent.parent.parent / "examples" / "data" / "pge_nbt_eec_2026.csv"
+    nbt_csv = Path(__file__).parent.parent.parent / "examples" / "data" / "export_rates/pge_nbt_eec_2026.csv"
     scenario_yaml = f"""
 name: lbnl_test_house
 time_grid:
@@ -274,7 +274,7 @@ value_streams:
         path: {repo / "examples/data/tariffs/pge_e_elec_2026-06.yaml"}
       export_price:
         type: nbt_export
-        csv_path: {repo / "examples/data/pge_nbt_eec_2026.csv"}
+        csv_path: {repo / "examples/data/export_rates/pge_nbt_eec_2026.csv"}
         adder_per_kwh: 0.0088
 external_load: [{", ".join(["1.0"] * 24)}]
 """
@@ -285,5 +285,5 @@ external_load: [{", ".join(["1.0"] * 24)}]
     assert stream._import_rates[18] == pytest.approx(0.55214)  # E-ELEC summer peak
     from der_opt.integrations.pge_nbt_export import NBTExportPriceSeries
 
-    without_adder = NBTExportPriceSeries(repo / "examples/data/pge_nbt_eec_2026.csv").values(premise.time_grid)
+    without_adder = NBTExportPriceSeries(repo / "examples/data/export_rates/pge_nbt_eec_2026.csv").values(premise.time_grid)
     assert stream._export_rates == pytest.approx(without_adder + 0.0088)

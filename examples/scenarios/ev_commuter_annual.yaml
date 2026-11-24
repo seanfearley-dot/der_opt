@@ -2,7 +2,7 @@
 # of a per-hour plug-in schedule (docs/EV_PATTERN_SPEC.md). Run with:
 #   der-opt run examples/scenarios/ev_commuter_annual.yaml -o out/ev
 #
-# The home is the synthetic one in ../data/spec_sample/annual_home.csv (its solar
+# The home is the synthetic one in ../data/homes/annual_home.csv (its solar
 # isn't used here). Prices: E-ELEC import; a flat $0.05/kWh for export, as in
 # dr_battery_annual.yaml, keeps this a fast LP. The baseline plugs in and charges at
 # full power until full, never discharging. For a car without V2X, extend
@@ -17,4 +17,4 @@ extends:
 
 name: ev_commuter_annual
 
-external_load: {source: timeseries, path: ../data/spec_sample/annual_home.csv, premise_id: home_a, column: load_kw}
+external_load: {source: timeseries, path: ../data/homes/annual_home.csv, premise_id: home_a, column: load_kw}

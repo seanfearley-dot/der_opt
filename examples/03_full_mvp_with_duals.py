@@ -44,7 +44,7 @@ from der_opt.viz import (
 
 HORIZON_HOURS = 24
 OUTPUT_DIR = Path(__file__).parent / "outputs"
-TARIFF_PATH = Path(__file__).parent / "data" / "sample_tariff_urdb.json"
+TARIFF_PATH = Path(__file__).parent / "data" / "references/sample_tariff_urdb.json"
 
 
 def build_premise(time_grid: TimeGrid) -> tuple[Premise, TariffSchedule]:

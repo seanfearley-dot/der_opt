@@ -231,7 +231,10 @@ def _check_cases(v: Validation) -> None:
     v.report.ran("cases", found)
 
 
-def _check_cost_test(v: Validation, cost_tests: bool, check_openbca: bool, openbca=None) -> None:
+def _check_cost_test(v: Validation, cost_tests: bool, check_openbca: bool, openbca=None,
+                     in_study: bool = False) -> None:
+    """in_study: a study's premise, where a study-wide `without` naming a device type
+    another home has is expected (the study checks the names once, across homes)."""
     from der_opt.settings import openbca_dir
 
     if v.config.cost_test is None:
@@ -253,7 +256,7 @@ def _check_cost_test(v: Validation, cost_tests: bool, check_openbca: bool, openb
     try:  # what each device is compared against (v1.3)
         modes, unmatched = device_modes([(d.name, kind_of(d.type)) for d in v.config.devices],
                                         v.config.cost_test.without)
-        if unmatched:
+        if unmatched and not in_study:
             found.append(Finding("warning", "cost test", f"cost_test.without names {unmatched}, which match no device "
                                  "here by name or type"))
         gone = [name for name, m in modes.items() if m["mode"] == "removed"]
@@ -318,6 +321,7 @@ def _validate_study(v: Validation, cost_tests: bool, before_run: bool, openbca=N
     premises, problems = portfolio_premises(study, v.resolved)
     v.portfolio = premises
     found = [Finding("error", "portfolio", p.split(": ", 1)[-1], premise=p.split(": ", 1)[0]) for p in problems]
+    unmatched: set | None = None  # cost_test.without names no home has
     for item in premises:
         if item.config is None:
             found.append(Finding("info", "portfolio", item.note, premise=item.premise_id))
@@ -331,13 +335,24 @@ def _validate_study(v: Validation, cost_tests: bool, before_run: bool, openbca=N
             continue
         _check_billing(sub)
         _check_dr(sub)
-        _check_cost_test(sub, cost_tests, check_openbca=False)
+        _check_cost_test(sub, cost_tests, check_openbca=False, in_study=True)
         cost = item.config.cost_test
+        if cost is not None and cost.without:
+            from der_opt.cost_test.without import device_modes, kind_of
+
+            try:
+                _, missed = device_modes([(d.name, kind_of(d.type)) for d in item.config.devices], cost.without)
+            except Exception:  # noqa: BLE001 (reported by the premise's own check)
+                missed = []
+            unmatched = set(missed) if unmatched is None else unmatched & set(missed)
         if cost is not None and cost.participant_costs.upfront == 0 and cost.participant_costs.annual_om == 0:
             found.append(Finding("warning", "portfolio", "the measure has no participant costs (no installed_cost "
                                  "or participant_upfront): it's priced at $0", premise=item.premise_id))
         found += [Finding(f.level, f.check, f.message, premise=item.premise_id) for f in sub.report.findings
                   if f.level != "info"]
+    if unmatched:
+        found.append(Finding("warning", "cost test", f"cost_test.without names {sorted(unmatched)}, which match no "
+                             "device in any premise by name or type"))
     v.report.ran("portfolio", found)
     first = next((item.config for item in premises if item.config is not None), None)
     if first is not None:

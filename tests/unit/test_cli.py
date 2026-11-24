@@ -109,7 +109,7 @@ billing:
   tariff: {REPO / "examples/data/tariffs/pge_e_elec_2026-06.yaml"}
   program:
     type: nbt
-    export_rates_csv: {REPO / "examples/data/pge_nbt_eec_2026.csv"}
+    export_rates_csv: {REPO / "examples/data/export_rates/pge_nbt_eec_2026.csv"}
     acc_plus_per_kwh: 0.0088
 """
 

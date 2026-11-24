@@ -186,6 +186,7 @@ def test_the_creator_previews_checks_and_writes(server, project):
 
     app, port = server
     shutil.copytree(REPO / "examples/data/spec_sample", project / "data")
+    shutil.copy(REPO / "examples/data/homes/annual_home.csv", project / "data/annual_home.csv")
     shutil.copytree(REPO / "examples/data/tariffs", project / "tariffs")
     page = _get(port, "/new")[1]
     assert "New scenario or study" in page and "13. Review" in page and 'data-preset="home-bill"' in page
@@ -215,7 +216,7 @@ def test_the_creator_previews_checks_and_writes(server, project):
 def test_the_creator_opens_and_saves_a_selected_file(server, project):
     app, port = server
     shutil.copytree(REPO / "examples/data/tariffs", project / "tariffs")
-    shutil.copy(REPO / "examples/data/spec_sample/annual_home.csv", project / "annual_home.csv")
+    shutil.copy(REPO / "examples/data/homes/annual_home.csv", project / "annual_home.csv")
     tariff = "tariffs/pge_e_elec_2026-06.yaml"
     panel = _get(port, f"/create/file?path={tariff}")[1]
     assert 'class="file-text"' in panel and "E-ELEC" in panel and "data-save-file" in panel
@@ -241,7 +242,7 @@ def test_a_file_opens_in_its_app_or_its_folder(server, project, monkeypatch):
     import subprocess
 
     app, port = server
-    shutil.copy(REPO / "examples/data/spec_sample/annual_home.csv", project / "annual_home.csv")
+    shutil.copy(REPO / "examples/data/homes/annual_home.csv", project / "annual_home.csv")
     ran = []
     monkeypatch.setattr(subprocess, "Popen", lambda command, **_: ran.append(command))  # nothing really opens
     panel = _get(port, "/create/file?path=annual_home.csv")[1]
@@ -254,3 +255,18 @@ def test_a_file_opens_in_its_app_or_its_folder(server, project, monkeypatch):
     assert status == 200 and "Shown" in body and len(ran) == 2
     assert _post(port, "/create/open-file", {"path": "../outside.csv"}, app.token)[0] == 403
     assert _post(port, "/create/open-file", {"path": "missing.csv"}, app.token)[0] == 400
+
+
+def test_each_file_field_offers_only_its_own_kind(project):
+    from der_opt.ui.forms import data_files
+
+    shutil.copytree(REPO / "examples/data", project / "data")
+    files = data_files(Project(project))
+    assert files["premises"] == ["data/heat_wave/premises.csv", "data/new_subdivision/premises.csv",
+                                 "data/spec_sample/premises.csv"]
+    assert files["network"] == ["data/spec_sample/network.csv"]
+    assert files["prices"] == ["data/prices/caiso_lmp_np15_dam_2026-07-13.csv"]
+    assert files["export_rates"] == ["data/export_rates/pge_nbt_eec_2026.csv"]
+    assert "data/homes/annual_home.csv" in files["timeseries"]
+    assert not any("avoided_costs" in f for f in files["timeseries"])  # a set's parts aren't offered alone
+    assert files["sets"] == ["data/avoided_costs/synthetic_2026"]

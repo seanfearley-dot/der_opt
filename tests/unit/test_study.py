@@ -25,7 +25,7 @@ from der_opt.scenarios.validate import validate_scenario
 REPO = Path(__file__).parent.parent.parent
 DATA = REPO / "examples" / "data"
 LIBRARY = REPO / "examples" / "library"
-HOME = DATA / "spec_sample" / "annual_home.csv"
+HOME = DATA / "homes" / "annual_home.csv"
 runner = CliRunner()
 
 
@@ -65,7 +65,7 @@ def _study(tmp_path: Path, **changes) -> Path:
         "population": {"premises": "premises.csv", "devices": "devices.csv", "timeseries": ["timeseries.csv"],
                        "templates": [str(LIBRARY / "devices")]},
         "tariffs": {"dir": str(DATA / "tariffs"),
-                    "programs": {"nbt": {"export_rates_csv": str(DATA / "pge_nbt_eec_2026.csv"), "acc_plus_per_kwh": 0.0088}}},
+                    "programs": {"nbt": {"export_rates_csv": str(DATA / "export_rates/pge_nbt_eec_2026.csv"), "acc_plus_per_kwh": 0.0088}}},
         "objective": [{"type": "energy_arbitrage", "params": {
             "import_price": {"type": "retail_tariff", "path": str(DATA / "tariffs" / "pge_e_elec_2026-06.yaml")},
             "export_price": {"type": "constant", "price": 0.05}}}],
@@ -247,3 +247,17 @@ def test_cli_runs_both_analyses(tmp_path):
     record = json.loads((out / "run_record.json").read_text(encoding="utf-8"))
     assert record["results"]["analyses"] == ["feeder", "portfolio"]
     assert any(i["path"].endswith("devices.csv") for i in record["inputs"])
+
+
+def test_a_study_names_unmatched_without_entries_once_not_per_home(tmp_path):
+    """A study-wide `without` may name a type only some homes have; it's flagged only
+    when no home has it, once for the study."""
+    path = _study(tmp_path)
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    data["analyses"]["portfolio"]["cost_test"] = {
+        "start_year": 2027, "measure_life_years": 10, "avoided_costs": {"set": str(DATA / "avoided_costs" / "synthetic_2026")},
+        "discount_rates": {"utility": 0.075, "participant": 0.1, "societal": 0.03},
+        "without": {"battery": "rule_based", "ev": "tou_timer"}}
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    found = [f for f in validate_scenario(path).report.findings if "match no device" in f.message]
+    assert len(found) == 1 and found[0].premise is None and "['ev']" in found[0].message

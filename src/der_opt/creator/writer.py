@@ -174,9 +174,15 @@ def study_parts(a: Answers, base: Path) -> list[dict]:
         parts.append({"premises": [{"name": b.name, "element": b.element, "kind": "background",
                                     "external_load": _absolute_paths(b.load, base)} for b in a.network.background]})
     p = a.prices
-    programs = {"nbt": {"export_rates_csv": _abs(p.export_rates, base), "acc_plus_per_kwh": p.acc_plus_per_kwh},
-                "nem2": {"nsc_rate_per_kwh": p.nsc_rate_per_kwh}}
-    parts.append({"tariffs": {"dir": _abs(p.tariff, base), "programs": programs}})
+    programs = {"nem2": {"nsc_rate_per_kwh": p.nsc_rate_per_kwh}}
+    if p.program == "nbt" or p.export_rates:  # NBT needs its rates; without NBT, nothing to fill in
+        programs = {"nbt": {"export_rates_csv": _abs(p.export_rates, base), "acc_plus_per_kwh": p.acc_plus_per_kwh},
+                    **programs}
+    one = bool(p.tariff) and Path(p.tariff).suffix in (".yaml", ".yml")  # one tariff for every home
+    parts.append({"tariffs": {"dir": _abs(str(Path(p.tariff).parent), base) if one else _abs(p.tariff, base),
+                              "programs": programs}})
+    if one:  # a default: a home whose premises.csv row names a tariff keeps its own
+        parts.append({"defaults": [{"set": {"premise": {"billing": _billing(a, base)}}}]})
     # behavior by type and the objective, as one part (the library's study/homes_bill shape)
     behavior = [{"where": {"type": kind}, "set": {"device": {"counterfactual": {"type": policy}}}}
                 for kind, policy in a.behavior.items()]

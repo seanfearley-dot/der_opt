@@ -116,7 +116,7 @@ def make_handler(app: App, port: int):
 
                     folder, _ = app.blocks()
                     found = forms.data_files(project)
-                    files = {"csv": found["files"], "tariffs": found["tariffs"], "sets": found["sets"]}
+                    files = {k: v for k, v in found.items() if k != "files"}  # each field's own kind
                     return self._send(200, creator.page(project, token, folder, files))
                 if route == "/create/file":
                     from der_opt.ui import creator

@@ -27,7 +27,7 @@ from der_opt.scenarios.validate import validate_scenario
 REPO = Path(__file__).parent.parent.parent
 LIBRARY = REPO / "examples" / "library"
 DATA = REPO / "examples" / "data"
-HOME = DATA / "spec_sample" / "annual_home.csv"
+HOME = DATA / "homes" / "annual_home.csv"
 runner = CliRunner()
 
 

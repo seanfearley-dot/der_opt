@@ -20,7 +20,7 @@ from der_opt.time_grid import TimeGrid
 
 REPO = Path(__file__).parent.parent.parent
 E_ELEC = REPO / "examples" / "data" / "tariffs" / "pge_e_elec_2026-06.yaml"
-EEC_2026 = REPO / "examples" / "data" / "pge_nbt_eec_2026.csv"
+EEC_2026 = REPO / "examples" / "data" / "export_rates/pge_nbt_eec_2026.csv"
 
 
 def _fixed_dispatch_cost(tariff, program, load, **bill_kwargs):
